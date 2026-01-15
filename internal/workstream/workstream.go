@@ -3,8 +3,12 @@ package workstream
 import (
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 )
+
+// idCounter ensures unique IDs even when created in quick succession
+var idCounter atomic.Uint64
 
 // State represents the lifecycle state of a workstream.
 type State string
@@ -46,8 +50,9 @@ type Workstream struct {
 // New creates a new workstream from a prompt.
 func New(prompt string) *Workstream {
 	now := time.Now()
+	id := idCounter.Add(1)
 	return &Workstream{
-		ID:           fmt.Sprintf("%d", now.UnixNano()),
+		ID:           fmt.Sprintf("%d-%d", now.UnixNano(), id),
 		Prompt:       prompt,
 		BranchName:   GenerateBranchName(prompt),
 		State:        StateStopped,
