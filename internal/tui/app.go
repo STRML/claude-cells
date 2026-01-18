@@ -64,6 +64,16 @@ type StateSavedMsg struct {
 	Error error
 }
 
+// spinnerTickMsg is sent to animate the spinner
+type spinnerTickMsg struct{}
+
+// spinnerTickCmd returns a command that sends a spinner tick after a delay
+func spinnerTickCmd() tea.Cmd {
+	return tea.Tick(250*time.Millisecond, func(t time.Time) tea.Msg {
+		return spinnerTickMsg{}
+	})
+}
+
 // LoadStateCmd loads saved state from disk
 func LoadStateCmd(dir string) tea.Cmd {
 	return func() tea.Msg {
@@ -446,7 +456,8 @@ Input Mode:
 				return m, nil
 			}
 			pane := NewPaneModel(ws)
-			pane.AppendOutput("Starting container...\n")
+			pane.SetInitializing(true)
+			pane.SetInitStatus("Starting container...")
 			m.panes = append(m.panes, pane)
 			m.updateLayout()
 			// Focus the new pane
@@ -455,8 +466,8 @@ Input Mode:
 			}
 			m.focusedPane = len(m.panes) - 1
 			m.panes[m.focusedPane].SetFocused(true)
-			// Start container asynchronously
-			return m, StartContainerCmd(ws)
+			// Start container asynchronously and spinner animation
+			return m, tea.Batch(StartContainerCmd(ws), spinnerTickCmd())
 
 		case DialogDestroy:
 			// Destroy workstream
@@ -485,9 +496,7 @@ Input Mode:
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
 				ws := m.panes[i].Workstream()
 				ws.SetContainerID(msg.ContainerID)
-				m.panes[i].AppendOutput("Container started.\n")
-				m.panes[i].AppendOutput(fmt.Sprintf("Container ID: %s\n\n", msg.ContainerID[:12]))
-				m.panes[i].AppendOutput("Starting Claude Code...\n")
+				m.panes[i].SetInitStatus("Starting Claude Code...")
 				// Calculate PTY dimensions from pane size (account for borders/padding)
 				ptyWidth := m.panes[i].Width() - 4
 				ptyHeight := m.panes[i].Height() - 6
@@ -557,17 +566,27 @@ Input Mode:
 				ws := m.panes[i].Workstream()
 				ws.SetState(workstream.StateRunning)
 				m.panes[i].SetPTY(msg.Session)
-				m.panes[i].AppendOutput("Claude Code connected.\n\n")
+				m.panes[i].SetInitStatus("Starting Claude Code...")
 				// Start the read loop in a goroutine
 				// The session needs the program reference to send messages
 				go msg.Session.StartReadLoop()
-				// Auto-enter input mode if this is the focused pane
-				if i == m.focusedPane {
-					m.inputMode = true
-					return m, tea.ShowCursor
-				}
 				break
 			}
+		}
+		return m, nil
+
+	case spinnerTickMsg:
+		// Animate spinner for any initializing panes
+		anyInitializing := false
+		for i := range m.panes {
+			if m.panes[i].IsInitializing() {
+				m.panes[i].TickSpinner()
+				anyInitializing = true
+			}
+		}
+		// Continue ticking if any pane is still initializing
+		if anyInitializing {
+			return m, spinnerTickCmd()
 		}
 		return m, nil
 
@@ -575,7 +594,24 @@ Input Mode:
 		// Output from PTY - write to virtual terminal
 		for i := range m.panes {
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
-				m.panes[i].WritePTYOutput(msg.Output)
+				// Check if Claude Code is ready (bypass permissions accepted)
+				if m.panes[i].IsInitializing() {
+					outputStr := string(msg.Output)
+					if strings.Contains(outputStr, "bypass permissions on") ||
+						strings.Contains(outputStr, "What would you like to do?") {
+						m.panes[i].SetInitializing(false)
+						// Discard this chunk - it may contain permissions dialog remnants
+						// Start fresh from next output
+						// Auto-enter input mode if this is the focused pane
+						if i == m.focusedPane {
+							m.inputMode = true
+							return m, tea.ShowCursor
+						}
+					}
+					// Don't write output while initializing - discard it
+				} else {
+					m.panes[i].WritePTYOutput(msg.Output)
+				}
 				break
 			}
 		}
@@ -829,13 +865,15 @@ Input Mode:
 			}
 
 			pane := NewPaneModel(ws)
-			pane.AppendOutput("Resuming session...\n")
+			pane.SetInitializing(true)
+			pane.SetInitStatus("Resuming session...")
 			m.panes = append(m.panes, pane)
 
 			// Resume container
 			if ws.ContainerID != "" {
 				cmds = append(cmds, ResumeContainerCmd(ws, 80, 24))
 			}
+			cmds = append(cmds, spinnerTickCmd())
 		}
 
 		// Restore focus
@@ -964,7 +1002,7 @@ func (m AppModel) renderTitleBar() string {
 	if m.inputMode {
 		hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [Esc Esc] nav  [Ctrl+B ←→] switch pane")
 	} else {
-		hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [←→]panes  [n]ew  [m]erge  [d]estroy  [i]nput  [?]help  [Esc Esc]quit")
+		hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [←→]panes  [n]ew  [m]erge  [d]estroy  [l]ogs  [i]nput  [?]help  [Esc Esc]quit")
 	}
 
 	left := mode + title

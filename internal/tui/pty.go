@@ -96,13 +96,18 @@ func NewPTYSession(ctx context.Context, dockerClient *client.Client, containerID
 	}
 
 	// Build the command to run Claude Code
-	// First, check if credentials file exists and copy it to the expected location for Claude Code
-	// The credentials file is mounted at ~/.claude-credentials
-	// Claude Code on Linux stores credentials at ~/.claude/.credentials.json (with leading dot!)
-	// Use --dangerously-skip-permissions since we're in an isolated container
-	setupCmd := `test -f /home/claude/.claude-credentials && cp /home/claude/.claude-credentials /home/claude/.claude/.credentials.json 2>/dev/null; exec claude --dangerously-skip-permissions`
+	// Setup steps:
+	// 1. Copy credentials file to expected location
+	// 2. Create ~/.local/bin and symlink claude if needed (suppresses "native install" warning)
+	// 3. Run claude with --dangerously-skip-permissions since we're in an isolated container
+	setupScript := `
+test -f /home/claude/.claude-credentials && cp /home/claude/.claude-credentials /home/claude/.claude/.credentials.json 2>/dev/null
+mkdir -p /home/claude/.local/bin 2>/dev/null
+test ! -f /home/claude/.local/bin/claude && which claude >/dev/null 2>&1 && ln -sf "$(which claude)" /home/claude/.local/bin/claude 2>/dev/null
+`
+	setupCmd := setupScript + `exec claude --dangerously-skip-permissions`
 	if initialPrompt != "" {
-		setupCmd = `test -f /home/claude/.claude-credentials && cp /home/claude/.claude-credentials /home/claude/.claude/.credentials.json 2>/dev/null; exec claude --dangerously-skip-permissions "` + escapeShellArg(initialPrompt) + `"`
+		setupCmd = setupScript + `exec claude --dangerously-skip-permissions "` + escapeShellArg(initialPrompt) + `"`
 	}
 	cmd := []string{"/bin/bash", "-c", setupCmd}
 
@@ -110,6 +115,8 @@ func NewPTYSession(ctx context.Context, dockerClient *client.Client, containerID
 	env := []string{
 		"TERM=xterm-256color",
 		"COLORTERM=truecolor",
+		"PATH=/home/claude/.local/bin:/usr/local/bin:/usr/bin:/bin",
+		"HOME=/home/claude",
 	}
 	if opts != nil && len(opts.EnvVars) > 0 {
 		env = append(env, opts.EnvVars...)
@@ -153,7 +160,78 @@ func NewPTYSession(ctx context.Context, dockerClient *client.Client, containerID
 		height:       height,
 	}
 
+	// Auto-accept the bypass permissions prompt
+	// Read output until we see the prompt, then send down+enter to accept
+	if err := session.autoAcceptBypassPermissions(); err != nil {
+		// Log but don't fail - the prompt may not appear
+		// (e.g., if already accepted or different Claude version)
+	}
+
 	return session, nil
+}
+
+// autoAcceptBypassPermissions reads PTY output looking for the bypass permissions
+// prompt and automatically accepts it by sending down arrow + enter.
+func (p *PTYSession) autoAcceptBypassPermissions() error {
+	// Buffer to accumulate output
+	var accumulated strings.Builder
+	buf := make([]byte, 1024)
+	timeout := time.After(10 * time.Second)
+
+	for {
+		select {
+		case <-timeout:
+			// Timeout - prompt may not have appeared, continue anyway
+			return nil
+		default:
+		}
+
+		// Set a short read deadline to avoid blocking forever
+		// Note: Docker hijacked connections don't support SetReadDeadline,
+		// so we use a goroutine with channel instead
+		readDone := make(chan struct {
+			n   int
+			err error
+		}, 1)
+
+		go func() {
+			n, err := p.conn.Reader.Read(buf)
+			readDone <- struct {
+				n   int
+				err error
+			}{n, err}
+		}()
+
+		select {
+		case <-timeout:
+			return nil
+		case result := <-readDone:
+			if result.err != nil {
+				return result.err
+			}
+			if result.n > 0 {
+				accumulated.Write(buf[:result.n])
+				content := accumulated.String()
+
+				// Check if we see the bypass permissions prompt
+				if strings.Contains(content, "Bypass Permissions mode") {
+					// Wait a moment for the full prompt to render
+					time.Sleep(100 * time.Millisecond)
+
+					// Send down arrow to select "Yes, I accept"
+					p.Write([]byte{27, '[', 'B'}) // Down arrow
+					time.Sleep(50 * time.Millisecond)
+
+					// Send enter to confirm
+					p.Write([]byte{'\r'})
+
+					// Don't forward the permissions dialog to the pane - discard it
+					// The pane will start fresh after permissions are accepted
+					return nil
+				}
+			}
+		}
+	}
 }
 
 // Resize changes the terminal size of the PTY session.

@@ -35,6 +35,11 @@ type PaneModel struct {
 	vterm           vt10x.Terminal // Virtual terminal for ANSI code handling
 	lastVtermRender string         // Cached last successful vterm render
 	index           int            // Pane index (1-based for display)
+	initializing    bool           // True while waiting for Claude Code to be ready
+	spinnerFrame    int            // Current spinner animation frame
+	initStatus      string         // Status message during initialization
+	initStep        int            // Current initialization step (1-3)
+	initSteps       int            // Total initialization steps
 }
 
 // Width returns the pane width
@@ -70,6 +75,46 @@ func NewPaneModel(ws *workstream.Workstream) PaneModel {
 // Init initializes the pane
 func (p PaneModel) Init() tea.Cmd {
 	return nil
+}
+
+// SetInitializing sets the initializing state with a status message
+func (p *PaneModel) SetInitializing(initializing bool) {
+	p.initializing = initializing
+	if initializing {
+		p.initSteps = 3
+		if p.initStatus == "" {
+			p.initStatus = "Starting..."
+			p.initStep = 1
+		}
+	}
+}
+
+// SetInitStatus sets the initialization status message and step
+func (p *PaneModel) SetInitStatus(status string) {
+	p.initStatus = status
+	// Auto-advance step based on status
+	switch {
+	case strings.Contains(status, "container"):
+		p.initStep = 1
+	case strings.Contains(status, "Claude Code"):
+		p.initStep = 2
+	case strings.Contains(status, "Resuming"):
+		p.initStep = 2
+	default:
+		if p.initStep == 0 {
+			p.initStep = 1
+		}
+	}
+}
+
+// IsInitializing returns true if the pane is still initializing
+func (p *PaneModel) IsInitializing() bool {
+	return p.initializing
+}
+
+// TickSpinner advances the spinner animation
+func (p *PaneModel) TickSpinner() {
+	p.spinnerFrame = (p.spinnerFrame + 1) % 4
 }
 
 // Update handles messages
@@ -246,8 +291,46 @@ func (p PaneModel) View() string {
 	p.viewport.SetContent(outputContent)
 	outputView := p.viewport.View()
 
-	// Greyscale panes when not in input mode
-	if p.focused && !p.inputMode {
+	// Show spinner overlay while initializing
+	if p.initializing {
+		// Grey out the output
+		outputView = stripANSI(outputView)
+		greyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
+		outputView = greyStyle.Render(outputView)
+
+		// Create spinner overlay
+		spinnerChars := []string{"⠋", "⠙", "⠹", "⠸"}
+		spinner := spinnerChars[p.spinnerFrame%len(spinnerChars)]
+		spinnerStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#0891B2")).
+			Bold(true)
+		messageStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#AAAAAA"))
+
+		statusMsg := p.initStatus
+		if statusMsg == "" {
+			statusMsg = "Starting..."
+		}
+
+		spinnerText := spinnerStyle.Render(spinner) + " " + messageStyle.Render(statusMsg)
+
+		// Center the spinner in the viewport
+		viewportHeight := p.height - 4 // Account for header and borders
+		viewportWidth := p.width - 4
+		if viewportHeight > 0 && viewportWidth > 0 {
+			lines := strings.Split(outputView, "\n")
+			centerY := viewportHeight / 2
+			centerX := (viewportWidth - lipgloss.Width(spinnerText)) / 2
+			if centerX < 0 {
+				centerX = 0
+			}
+			if centerY >= 0 && centerY < len(lines) {
+				padding := strings.Repeat(" ", centerX)
+				lines[centerY] = padding + spinnerText
+			}
+			outputView = strings.Join(lines, "\n")
+		}
+	} else if p.focused && !p.inputMode {
 		// Focused but nav mode: lighter grey
 		outputView = stripANSI(outputView)
 		greyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))

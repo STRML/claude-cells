@@ -86,6 +86,21 @@ func DeleteAndRestartContainerCmd(ws *workstream.Workstream) tea.Cmd {
 
 		gitRepo := git.New(repoPath)
 
+		// First checkout main/master so we can delete the branch
+		// (can't delete a branch that's currently checked out)
+		currentBranch, _ := gitRepo.CurrentBranch(ctx)
+		if currentBranch == ws.BranchName {
+			// Try main first, then master
+			if err := gitRepo.Checkout(ctx, "main"); err != nil {
+				if err := gitRepo.Checkout(ctx, "master"); err != nil {
+					return ContainerErrorMsg{
+						WorkstreamID: ws.ID,
+						Error:        fmt.Errorf("failed to checkout main/master before deleting branch: %w", err),
+					}
+				}
+			}
+		}
+
 		// Delete the existing branch
 		if err := gitRepo.DeleteBranch(ctx, ws.BranchName); err != nil {
 			return ContainerErrorMsg{
