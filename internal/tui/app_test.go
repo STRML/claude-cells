@@ -7,7 +7,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
-	"github.com/samuelreed/docker-tui/internal/workstream"
+	"github.com/STRML/claude-cells/internal/workstream"
 )
 
 func TestNewAppModel(t *testing.T) {

@@ -16,11 +16,11 @@ import (
 )
 
 // ContainerPrefix is used to identify docker-tui containers
-const ContainerPrefix = "docker-tui-"
+const ContainerPrefix = "ccells-"
 
 // ContainerConfig holds configuration for creating a workstream container.
 type ContainerConfig struct {
-	Name          string // Container name (docker-tui-<project>-<timestamp>)
+	Name          string // Container name (ccells-<project>-<timestamp>)
 	Image         string // Docker image to use
 	RepoPath      string // Path to repo on host
 	ClaudeCfg     string // Path to ~/.claude directory on host

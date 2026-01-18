@@ -20,14 +20,14 @@ func TestContainerConfig(t *testing.T) {
 			name:         "creates config with branch name and project",
 			branchName:   "add-auth",
 			repoPath:     "/path/to/repo",
-			wantPrefix:   "docker-tui-",
+			wantPrefix:   "ccells-",
 			wantContains: []string{"repo", "add-auth"},
 		},
 		{
 			name:            "sanitizes slashes in branch name",
 			branchName:      "feature/add-auth",
 			repoPath:        "/path/to/repo",
-			wantPrefix:      "docker-tui-",
+			wantPrefix:      "ccells-",
 			wantContains:    []string{"repo", "feature-add-auth"},
 			wantNotContains: []string{"/"},
 		},
@@ -35,14 +35,14 @@ func TestContainerConfig(t *testing.T) {
 			name:         "sanitizes spaces in branch name",
 			branchName:   "my feature",
 			repoPath:     "/path/to/project",
-			wantPrefix:   "docker-tui-",
+			wantPrefix:   "ccells-",
 			wantContains: []string{"project", "my-feature"},
 		},
 		{
 			name:         "handles empty repo path",
 			branchName:   "test",
 			repoPath:     "",
-			wantPrefix:   "docker-tui-",
+			wantPrefix:   "ccells-",
 			wantContains: []string{"workspace", "test"},
 		},
 	}
@@ -68,7 +68,7 @@ func TestContainerConfig(t *testing.T) {
 			}
 
 			// Name should contain a timestamp (8 digits for date, 6 for time)
-			// Format: docker-tui-project-branch-YYYYMMDD-HHMMSS
+			// Format: ccells-project-branch-YYYYMMDD-HHMMSS
 			if !strings.Contains(cfg.Name, "-202") { // 202X year check
 				t.Errorf("Name = %q, should contain timestamp", cfg.Name)
 			}
@@ -94,7 +94,7 @@ func TestContainer_Lifecycle(t *testing.T) {
 
 	// Use alpine for fast testing
 	cfg := &ContainerConfig{
-		Name:      "docker-tui-test-" + time.Now().Format("150405"),
+		Name:      "ccells-test-" + time.Now().Format("150405"),
 		Image:     "alpine:latest",
 		RepoPath:  "/tmp",
 		ClaudeCfg: "/tmp",
@@ -169,7 +169,7 @@ func TestContainer_SignalProcess(t *testing.T) {
 
 	// Use alpine for testing
 	cfg := &ContainerConfig{
-		Name:  "docker-tui-signal-test-" + time.Now().Format("150405"),
+		Name:  "ccells-signal-test-" + time.Now().Format("150405"),
 		Image: "alpine:latest",
 	}
 
@@ -222,7 +222,7 @@ func TestContainer_PauseUnpause(t *testing.T) {
 	defer cancel()
 
 	cfg := &ContainerConfig{
-		Name:  "docker-tui-pause-test-" + time.Now().Format("150405"),
+		Name:  "ccells-pause-test-" + time.Now().Format("150405"),
 		Image: "alpine:latest",
 	}
 

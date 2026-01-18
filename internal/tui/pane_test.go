@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/samuelreed/docker-tui/internal/workstream"
+	"github.com/STRML/claude-cells/internal/workstream"
 )
 
 func TestNewPaneModel(t *testing.T) {

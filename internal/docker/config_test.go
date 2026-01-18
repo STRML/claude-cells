@@ -6,26 +6,26 @@ import (
 	"testing"
 )
 
-func TestGetDockerTUIDir(t *testing.T) {
-	dir, err := GetDockerTUIDir()
+func TestGetCellsDir(t *testing.T) {
+	dir, err := GetCellsDir()
 	if err != nil {
-		t.Fatalf("GetDockerTUIDir() error = %v", err)
+		t.Fatalf("GetCellsDir() error = %v", err)
 	}
 
 	home, _ := os.UserHomeDir()
-	expected := filepath.Join(home, DockerTUIDir)
+	expected := filepath.Join(home, CellsDir)
 	if dir != expected {
-		t.Errorf("GetDockerTUIDir() = %q, want %q", dir, expected)
+		t.Errorf("GetCellsDir() = %q, want %q", dir, expected)
 	}
 }
 
-// Note: TestInitClaudeConfig is skipped because it requires writing to ~/.docker-tui
+// Note: TestInitClaudeConfig is skipped because it requires writing to ~/.ccells
 // which may be outside the sandbox. The function is tested implicitly through
 // integration tests that run outside the sandbox.
 
 func TestCopyFile(t *testing.T) {
 	// Create temp directory
-	tmpDir, err := os.MkdirTemp("", "docker-tui-test-*")
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -56,7 +56,7 @@ func TestCopyFile(t *testing.T) {
 
 func TestCopyDir(t *testing.T) {
 	// Create temp directory
-	tmpDir, err := os.MkdirTemp("", "docker-tui-test-*")
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -101,4 +101,4 @@ func TestCopyDir(t *testing.T) {
 }
 
 // Note: TestInitClaudeConfig_OverwritesExisting is skipped because it requires writing
-// to ~/.docker-tui which may be outside the sandbox.
+// to ~/.ccells which may be outside the sandbox.

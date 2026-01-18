@@ -10,10 +10,10 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
-	"github.com/samuelreed/docker-tui/internal/docker"
-	"github.com/samuelreed/docker-tui/internal/git"
-	"github.com/samuelreed/docker-tui/internal/sync"
-	"github.com/samuelreed/docker-tui/internal/workstream"
+	"github.com/STRML/claude-cells/internal/docker"
+	"github.com/STRML/claude-cells/internal/git"
+	"github.com/STRML/claude-cells/internal/sync"
+	"github.com/STRML/claude-cells/internal/workstream"
 )
 
 // ContainerStartedMsg is sent when a container successfully starts.

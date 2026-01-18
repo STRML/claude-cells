@@ -52,7 +52,7 @@ func (s StatusBarModel) View() string {
 	}
 
 	// Left section: mode + app name and count
-	left := fmt.Sprintf("%s docker-tui: %d workstreams", modeIndicator, s.workstreamCount)
+	left := fmt.Sprintf("%s ccells: %d workstreams", modeIndicator, s.workstreamCount)
 
 	// Center section: pairing indicator
 	var center string

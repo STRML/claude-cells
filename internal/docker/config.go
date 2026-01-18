@@ -9,8 +9,8 @@ import (
 )
 
 const (
-	// DockerTUIDir is the directory where docker-tui stores its data
-	DockerTUIDir = ".docker-tui"
+	// CellsDir is the directory where ccells stores its data
+	CellsDir = ".claude-cells"
 	// ClaudeConfigDir is the subdirectory for the copied claude config
 	ClaudeConfigDir = "claude-config"
 	// ClaudeJSONFile is the claude.json filename
@@ -46,17 +46,17 @@ func GetClaudeConfig() (*ConfigPaths, error) {
 	return globalConfig, globalConfigErr
 }
 
-// GetDockerTUIDir returns the path to the docker-tui data directory
-func GetDockerTUIDir() (string, error) {
+// GetCellsDir returns the path to the ccells data directory
+func GetCellsDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("failed to get home directory: %w", err)
 	}
-	return filepath.Join(home, DockerTUIDir), nil
+	return filepath.Join(home, CellsDir), nil
 }
 
 // InitClaudeConfig copies the user's claude config to an isolated directory for container use.
-// This is called on docker-tui startup to ensure containers have fresh config
+// This is called on ccells startup to ensure containers have fresh config
 // without being able to corrupt the user's original config.
 func InitClaudeConfig() (*ConfigPaths, error) {
 	home, err := os.UserHomeDir()
@@ -69,12 +69,12 @@ func InitClaudeConfig() (*ConfigPaths, error) {
 	srcClaudeJSON := filepath.Join(home, ClaudeJSONFile)
 	srcGitConfig := filepath.Join(home, GitConfigFile)
 
-	// Destination paths (isolated copy for docker-tui)
-	dockerTUIDir, err := GetDockerTUIDir()
+	// Destination paths (isolated copy for ccells)
+	cellsDir, err := GetCellsDir()
 	if err != nil {
 		return nil, err
 	}
-	configDir := filepath.Join(dockerTUIDir, ClaudeConfigDir)
+	configDir := filepath.Join(cellsDir, ClaudeConfigDir)
 	dstClaudeDir := filepath.Join(configDir, ClaudeDir)
 	dstClaudeJSON := filepath.Join(configDir, ClaudeJSONFile)
 	dstGitConfig := filepath.Join(configDir, GitConfigFile)

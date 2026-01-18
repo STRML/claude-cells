@@ -47,7 +47,7 @@ func TestClaudeCodeContainer(t *testing.T) {
 
 	// Create container config
 	cfg := &ContainerConfig{
-		Name:      "docker-tui-integration-test-" + time.Now().Format("150405"),
+		Name:      "ccells-integration-test-" + time.Now().Format("150405"),
 		Image:     RequiredImage,
 		RepoPath:  projectRoot,
 		ClaudeCfg: claudeCfg,
@@ -183,7 +183,7 @@ func TestContainerClaudeCodeExec(t *testing.T) {
 	claudeCfg := filepath.Join(homeDir, ".claude")
 
 	cfg := &ContainerConfig{
-		Name:      "docker-tui-claude-exec-test-" + time.Now().Format("150405"),
+		Name:      "ccells-claude-exec-test-" + time.Now().Format("150405"),
 		Image:     RequiredImage,
 		RepoPath:  "/tmp",
 		ClaudeCfg: claudeCfg,

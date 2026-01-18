@@ -1,4 +1,4 @@
-module github.com/samuelreed/docker-tui
+module github.com/STRML/claude-cells
 
 go 1.25.5
 

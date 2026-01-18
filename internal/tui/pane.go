@@ -9,7 +9,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/hinshun/vt10x"
-	"github.com/samuelreed/docker-tui/internal/workstream"
+	"github.com/STRML/claude-cells/internal/workstream"
 )
 
 // PaneModel represents a single workstream pane

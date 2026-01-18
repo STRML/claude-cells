@@ -9,8 +9,8 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
-	"github.com/samuelreed/docker-tui/internal/docker"
-	"github.com/samuelreed/docker-tui/internal/workstream"
+	"github.com/STRML/claude-cells/internal/docker"
+	"github.com/STRML/claude-cells/internal/workstream"
 )
 
 const escapeTimeout = 300 * time.Millisecond
@@ -880,7 +880,7 @@ func (m AppModel) renderTitleBar() string {
 	}
 
 	// App title
-	title := titleStyle.Render(" Docker TUI ")
+	title := titleStyle.Render(" Claude Cells ")
 
 	// Keybinds hint
 	var hints string

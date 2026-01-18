@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/samuelreed/docker-tui/internal/docker"
-	"github.com/samuelreed/docker-tui/internal/workstream"
+	"github.com/STRML/claude-cells/internal/docker"
+	"github.com/STRML/claude-cells/internal/workstream"
 )
 
 // skipIfDockerUnavailable skips the test if Docker daemon is not accessible.
@@ -37,7 +37,7 @@ func setupTestRepo(t *testing.T) (string, func()) {
 	t.Helper()
 
 	// Create temp directory
-	tmpDir, err := os.MkdirTemp("", "docker-tui-test-*")
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}

@@ -1,4 +1,4 @@
-# Docker TUI
+# Claude Cells
 
 A terminal UI for running parallel Claude Code instances in isolated Docker containers.
 
@@ -18,10 +18,6 @@ A terminal UI for running parallel Claude Code instances in isolated Docker cont
 - **File Sync:** Mutagen
 - **Git/PR:** gh CLI
 
-## Key Files
-
-- `docs/plans/2025-01-15-docker-tui-design.md` - Full design spec
-
 ## Commands
 
 ```bash
@@ -35,16 +31,16 @@ go test -v ./...
 go test ./internal/workstream/...
 
 # Build
-go build ./cmd/docker-tui
+go build ./cmd/ccells
 
 # Run
-./docker-tui
+./ccells
 ```
 
 ## Architecture Overview
 
 ```
-cmd/docker-tui/main.go     # Entry point
+cmd/ccells/main.go         # Entry point
 internal/
   tui/                     # Bubble Tea UI components
   workstream/              # Workstream state & lifecycle
@@ -54,16 +50,3 @@ internal/
 configs/
   base.Dockerfile          # Base image with Claude Code
 ```
-
-## Implementation Order
-
-1. `internal/workstream/branch.go` - Branch name generation from prompts
-2. `internal/docker/client.go` - Docker client wrapper
-3. `internal/docker/container.go` - Container lifecycle
-4. `internal/workstream/workstream.go` - Workstream state
-5. `internal/workstream/manager.go` - Multi-workstream management
-6. `internal/sync/mutagen.go` - Mutagen wrapper
-7. `internal/sync/pairing.go` - Pairing mode logic
-8. `internal/git/branch.go` - Git branch operations
-9. `internal/git/pr.go` - PR creation
-10. `internal/tui/*` - TUI components (last)

@@ -354,7 +354,7 @@ func TestSettingsDialog_View(t *testing.T) {
 	if !strings.Contains(view, "7") {
 		t.Error("View should contain container count")
 	}
-	if !strings.Contains(view, "Prune stopped docker-tui") {
+	if !strings.Contains(view, "Prune stopped ccells") {
 		t.Error("View should contain menu item")
 	}
 	if !strings.Contains(view, "→") {

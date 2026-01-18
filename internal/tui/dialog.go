@@ -138,15 +138,15 @@ func NewMergeDialog(branchName, workstreamID string) DialogModel {
 
 // NewSettingsDialog creates a settings menu dialog
 func NewSettingsDialog(containerCount int) DialogModel {
-	body := fmt.Sprintf("Containers managed by docker-tui: %d\n", containerCount)
+	body := fmt.Sprintf("Containers managed by ccells: %d\n", containerCount)
 
 	return DialogModel{
 		Type:  DialogSettings,
 		Title: "Settings",
 		Body:  body,
 		MenuItems: []string{
-			"Prune stopped docker-tui containers",
-			"Prune ALL docker-tui containers (stops running)",
+			"Prune stopped ccells containers",
+			"Prune ALL ccells containers (stops running)",
 			"Cancel",
 		},
 		MenuSelection: 0,

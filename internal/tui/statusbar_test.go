@@ -58,8 +58,8 @@ func TestStatusBarModel_View(t *testing.T) {
 	view := sb.View()
 
 	// Should contain app name
-	if !strings.Contains(view, "docker-tui") {
-		t.Error("View should contain 'docker-tui'")
+	if !strings.Contains(view, "ccells") {
+		t.Error("View should contain 'ccells'")
 	}
 	// Should contain workstream count
 	if !strings.Contains(view, "3 workstreams") {
