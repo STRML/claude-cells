@@ -14,15 +14,17 @@ var idCounter atomic.Uint64
 type State string
 
 const (
-	StateRunning State = "running" // Claude active, processing or waiting
-	StateIdle    State = "idle"    // Claude finished, container alive
-	StatePairing State = "pairing" // Mutagen sync active with local
-	StateStopped State = "stopped" // Container halted, can resume
+	StateStarting State = "starting" // Container being created/started
+	StateRunning  State = "running"  // Claude active, processing or waiting
+	StateIdle     State = "idle"     // Claude finished, container alive
+	StatePairing  State = "pairing"  // Mutagen sync active with local
+	StateStopped  State = "stopped"  // Container halted, can resume
+	StateError    State = "error"    // Container failed to start or crashed
 )
 
 // IsActive returns true if the workstream container should be running.
 func (s State) IsActive() bool {
-	return s == StateRunning || s == StateIdle || s == StatePairing
+	return s == StateStarting || s == StateRunning || s == StateIdle || s == StatePairing
 }
 
 // Workstream represents a Docker container + git branch + Claude Code instance.
@@ -39,6 +41,7 @@ type Workstream struct {
 
 	// State
 	State        State     // Current lifecycle state
+	ErrorMessage string    // Error details if State == StateError
 	CreatedAt    time.Time // When workstream was created
 	LastActivity time.Time // Last interaction time
 
@@ -55,7 +58,20 @@ func New(prompt string) *Workstream {
 		ID:           fmt.Sprintf("%d-%d", now.UnixNano(), id),
 		Prompt:       prompt,
 		BranchName:   GenerateBranchName(prompt),
-		State:        StateStopped,
+		State:        StateStarting,
+		CreatedAt:    now,
+		LastActivity: now,
+	}
+}
+
+// NewWithID creates a workstream with a specific ID (for restoring from saved state).
+func NewWithID(id, branchName, prompt string) *Workstream {
+	now := time.Now()
+	return &Workstream{
+		ID:           id,
+		Prompt:       prompt,
+		BranchName:   branchName,
+		State:        StateStarting,
 		CreatedAt:    now,
 		LastActivity: now,
 	}
@@ -66,6 +82,18 @@ func (w *Workstream) SetState(state State) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.State = state
+	w.ErrorMessage = "" // Clear error when state changes
+	w.LastActivity = time.Now()
+}
+
+// SetError sets the workstream to error state with a message.
+func (w *Workstream) SetError(err error) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.State = StateError
+	if err != nil {
+		w.ErrorMessage = err.Error()
+	}
 	w.LastActivity = time.Now()
 }
 

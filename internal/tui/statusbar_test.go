@@ -123,7 +123,7 @@ func TestStatusBarModel_View_KeyHints(t *testing.T) {
 	view := sb.View()
 
 	// Check for all expected key hints
-	expectedHints := []string{"n", "p", "m", "d", "1-9", "?"}
+	expectedHints := []string{"n", "p", "m", "d", "i", "?"}
 	for _, hint := range expectedHints {
 		if !strings.Contains(view, hint) {
 			t.Errorf("View should contain key hint %q", hint)
@@ -149,5 +149,50 @@ func TestStatusBarModel_Update(t *testing.T) {
 	}
 	if updated.workstreamCount != 3 {
 		t.Error("Update should preserve state")
+	}
+}
+
+func TestStatusBarModel_SetInputMode(t *testing.T) {
+	sb := NewStatusBarModel()
+
+	// Initially false
+	if sb.inputMode {
+		t.Error("Initial inputMode should be false")
+	}
+
+	// Set to true
+	sb.SetInputMode(true)
+	if !sb.inputMode {
+		t.Error("inputMode should be true after SetInputMode(true)")
+	}
+
+	// Set back to false
+	sb.SetInputMode(false)
+	if sb.inputMode {
+		t.Error("inputMode should be false after SetInputMode(false)")
+	}
+}
+
+func TestStatusBarModel_View_NavMode(t *testing.T) {
+	sb := NewStatusBarModel()
+	sb.SetWidth(100)
+	sb.SetInputMode(false)
+
+	view := sb.View()
+
+	if !strings.Contains(view, "NAV") {
+		t.Error("View should contain 'NAV' when not in input mode")
+	}
+}
+
+func TestStatusBarModel_View_InputMode(t *testing.T) {
+	sb := NewStatusBarModel()
+	sb.SetWidth(100)
+	sb.SetInputMode(true)
+
+	view := sb.View()
+
+	if !strings.Contains(view, "INPUT") {
+		t.Error("View should contain 'INPUT' when in input mode")
 	}
 }

@@ -13,6 +13,7 @@ type StatusBarModel struct {
 	workstreamCount int
 	pairingBranch   string
 	showHelp        bool
+	inputMode       bool
 }
 
 // NewStatusBarModel creates a new status bar
@@ -32,8 +33,26 @@ func (s StatusBarModel) Update(msg tea.Msg) (StatusBarModel, tea.Cmd) {
 
 // View renders the status bar
 func (s StatusBarModel) View() string {
-	// Left section: app name and count
-	left := fmt.Sprintf("docker-tui: %d workstreams", s.workstreamCount)
+	// Mode indicator
+	var modeIndicator string
+	if s.inputMode {
+		inputStyle := lipgloss.NewStyle().
+			Background(lipgloss.Color("#00AA00")).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Padding(0, 1).
+			Bold(true)
+		modeIndicator = inputStyle.Render("INPUT")
+	} else {
+		navStyle := lipgloss.NewStyle().
+			Background(lipgloss.Color("#0066CC")).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Padding(0, 1).
+			Bold(true)
+		modeIndicator = navStyle.Render("NAV")
+	}
+
+	// Left section: mode + app name and count
+	left := fmt.Sprintf("%s docker-tui: %d workstreams", modeIndicator, s.workstreamCount)
 
 	// Center section: pairing indicator
 	var center string
@@ -48,7 +67,7 @@ func (s StatusBarModel) View() string {
 		KeyHint("p", "air"),
 		KeyHint("m", "erge/PR"),
 		KeyHint("d", "estroy"),
-		KeyHint("1-9", " focus"),
+		KeyHint("i", "nput"),
 		KeyHint("?", "help"),
 	}
 	right := ""
@@ -93,4 +112,9 @@ func (s *StatusBarModel) SetPairingBranch(branch string) {
 // SetShowHelp toggles help display
 func (s *StatusBarModel) SetShowHelp(show bool) {
 	s.showHelp = show
+}
+
+// SetInputMode sets whether the app is in input mode
+func (s *StatusBarModel) SetInputMode(inputMode bool) {
+	s.inputMode = inputMode
 }

@@ -1,10 +1,13 @@
 package tui
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/samuelreed/docker-tui/internal/workstream"
 )
 
 func TestNewAppModel(t *testing.T) {
@@ -475,5 +478,765 @@ func TestAppModel_DestroyFocusUpdate(t *testing.T) {
 	}
 	if !app.panes[1].focused {
 		t.Error("Pane 1 should have focus flag set")
+	}
+}
+
+func TestAppModel_InputMode(t *testing.T) {
+	app := NewAppModel()
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream first
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Should start in nav mode
+	if app.inputMode {
+		t.Error("Should start in nav mode")
+	}
+	if app.InputMode() {
+		t.Error("InputMode() should return false initially")
+	}
+
+	// Press 'i' to enter input mode
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")}
+	model, _ = app.Update(msg)
+	app = model.(AppModel)
+
+	if !app.inputMode {
+		t.Error("Should be in input mode after pressing 'i'")
+	}
+	if !app.InputMode() {
+		t.Error("InputMode() should return true")
+	}
+
+	// Press Escape to exit input mode
+	msg = tea.KeyMsg{Type: tea.KeyEscape}
+	model, _ = app.Update(msg)
+	app = model.(AppModel)
+
+	if app.inputMode {
+		t.Error("Should exit input mode after Escape")
+	}
+}
+
+func TestAppModel_InputMode_Enter(t *testing.T) {
+	app := NewAppModel()
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Press 'enter' to enter input mode
+	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	model, _ = app.Update(msg)
+	app = model.(AppModel)
+
+	if !app.inputMode {
+		t.Error("Should be in input mode after pressing Enter")
+	}
+}
+
+func TestAppModel_InputMode_RoutesKeysToPane(t *testing.T) {
+	app := NewAppModel()
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Enter input mode
+	app.inputMode = true
+
+	// Press 'n' - should NOT create a new workstream dialog
+	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")}
+	model, _ = app.Update(msg)
+	app = model.(AppModel)
+
+	if app.dialog != nil {
+		t.Error("In input mode, 'n' should not open dialog")
+	}
+}
+
+func TestAppModel_NavMode_Keybinds(t *testing.T) {
+	tests := []struct {
+		name     string
+		key      string
+		keyType  tea.KeyType
+		checkFn  func(app AppModel) bool
+		errorMsg string
+	}{
+		{
+			name:     "n opens new workstream dialog",
+			key:      "n",
+			keyType:  tea.KeyRunes,
+			checkFn:  func(app AppModel) bool { return app.dialog != nil },
+			errorMsg: "n should open dialog",
+		},
+		{
+			name:     "l does nothing without panes",
+			key:      "l",
+			keyType:  tea.KeyRunes,
+			checkFn:  func(app AppModel) bool { return app.dialog == nil },
+			errorMsg: "l without panes should do nothing",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := NewAppModel()
+			app.width = 100
+			app.height = 40
+
+			var msg tea.KeyMsg
+			if tt.keyType == tea.KeyRunes {
+				msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tt.key)}
+			} else {
+				msg = tea.KeyMsg{Type: tt.keyType}
+			}
+
+			model, _ := app.Update(msg)
+			result := model.(AppModel)
+
+			if !tt.checkFn(result) {
+				t.Error(tt.errorMsg)
+			}
+		})
+	}
+}
+
+func TestAppModel_TmuxPrefix_NavMode(t *testing.T) {
+	app := NewAppModel()
+	app.width = 100
+	app.height = 40
+
+	// Create two workstreams
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test1"})
+	app = model.(AppModel)
+	model, _ = app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test2"})
+	app = model.(AppModel)
+
+	// Focus should be on pane 1 (index 1, second pane)
+	if app.focusedPane != 1 {
+		t.Fatalf("Expected focusedPane=1, got %d", app.focusedPane)
+	}
+
+	// Press ctrl+b (tmux prefix)
+	msg := tea.KeyMsg{Type: tea.KeyCtrlB}
+	model, _ = app.Update(msg)
+	app = model.(AppModel)
+
+	if !app.tmuxPrefix {
+		t.Error("ctrl+b should set tmux prefix")
+	}
+
+	// Press left arrow
+	msg = tea.KeyMsg{Type: tea.KeyLeft}
+	model, _ = app.Update(msg)
+	app = model.(AppModel)
+
+	// Focus should move to pane 0
+	if app.focusedPane != 0 {
+		t.Errorf("ctrl+b + left should move focus to pane 0, got %d", app.focusedPane)
+	}
+	if app.tmuxPrefix {
+		t.Error("tmux prefix should be reset after use")
+	}
+}
+
+func TestAppModel_TmuxPrefix_InputMode(t *testing.T) {
+	app := NewAppModel()
+	app.width = 100
+	app.height = 40
+
+	// Create two workstreams
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test1"})
+	app = model.(AppModel)
+	model, _ = app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test2"})
+	app = model.(AppModel)
+
+	// Enter input mode
+	app.inputMode = true
+	app.focusedPane = 1
+
+	// Press ctrl+b (tmux prefix) - should work in input mode
+	msg := tea.KeyMsg{Type: tea.KeyCtrlB}
+	model, _ = app.Update(msg)
+	app = model.(AppModel)
+
+	if !app.tmuxPrefix {
+		t.Error("ctrl+b should set tmux prefix in input mode")
+	}
+
+	// Press right arrow
+	msg = tea.KeyMsg{Type: tea.KeyRight}
+	model, _ = app.Update(msg)
+	app = model.(AppModel)
+
+	// Focus should wrap to pane 0
+	if app.focusedPane != 0 {
+		t.Errorf("ctrl+b + right should move focus to pane 0 (wrapped), got %d", app.focusedPane)
+	}
+}
+
+func TestAppModel_TmuxPrefix_Timeout(t *testing.T) {
+	app := NewAppModel()
+	app.width = 100
+	app.height = 40
+
+	// Create two workstreams
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test1"})
+	app = model.(AppModel)
+	model, _ = app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test2"})
+	app = model.(AppModel)
+
+	// Set prefix with old timestamp (simulating timeout)
+	app.tmuxPrefix = true
+	app.tmuxPrefixTime = time.Now().Add(-3 * time.Second) // Expired
+
+	originalFocus := app.focusedPane
+
+	// Press left arrow - should NOT switch panes because prefix timed out
+	msg := tea.KeyMsg{Type: tea.KeyLeft}
+	model, _ = app.Update(msg)
+	app = model.(AppModel)
+
+	// In nav mode, arrow keys are not handled, so focus shouldn't change
+	// and prefix should be reset
+	if app.tmuxPrefix {
+		t.Error("Expired tmux prefix should be reset")
+	}
+	if app.focusedPane != originalFocus {
+		t.Error("Focus should not change with expired prefix")
+	}
+}
+
+func TestPaneModel_InputModeVisual(t *testing.T) {
+	ws := workstream.New("test prompt")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24)
+	pane.SetIndex(1)
+
+	// Test nav mode (focused, not in input mode)
+	pane.SetFocused(true)
+	pane.SetInputMode(false)
+	view := pane.View()
+
+	if !strings.Contains(view, "NAV") {
+		t.Error("Focused pane in nav mode should show NAV indicator")
+	}
+
+	// Test input mode (focused, in input mode)
+	pane.SetInputMode(true)
+	view = pane.View()
+
+	if !strings.Contains(view, "INPUT") {
+		t.Error("Focused pane in input mode should show INPUT indicator")
+	}
+
+	// Test unfocused pane (should not show mode indicator)
+	pane.SetFocused(false)
+	pane.SetInputMode(false)
+	view = pane.View()
+
+	if strings.Contains(view, "NAV") || strings.Contains(view, "INPUT") {
+		t.Error("Unfocused pane should not show mode indicator")
+	}
+}
+
+func TestAppModel_TmuxPrefix_UpDown(t *testing.T) {
+	app := NewAppModel()
+	app.width = 100
+	app.height = 40
+
+	// Create three workstreams
+	for _, name := range []string{"test1", "test2", "test3"} {
+		model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: name})
+		app = model.(AppModel)
+	}
+
+	// Focus is on pane 2 (last created)
+	if app.focusedPane != 2 {
+		t.Fatalf("Expected focusedPane=2, got %d", app.focusedPane)
+	}
+
+	// Press ctrl+b then up
+	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	app = model.(AppModel)
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyUp})
+	app = model.(AppModel)
+
+	// Should move to pane 1
+	if app.focusedPane != 1 {
+		t.Errorf("ctrl+b + up should move focus to pane 1, got %d", app.focusedPane)
+	}
+
+	// Press ctrl+b then down
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	app = model.(AppModel)
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyDown})
+	app = model.(AppModel)
+
+	// Should move to pane 2
+	if app.focusedPane != 2 {
+		t.Errorf("ctrl+b + down should move focus to pane 2, got %d", app.focusedPane)
+	}
+}
+
+func TestAppModel_TmuxPrefix_Wrapping(t *testing.T) {
+	app := NewAppModel()
+	app.width = 100
+	app.height = 40
+
+	// Create two workstreams
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test1"})
+	app = model.(AppModel)
+	model, _ = app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test2"})
+	app = model.(AppModel)
+
+	// Focus is on pane 1
+	app.focusedPane = 1
+	app.panes[0].SetFocused(false)
+	app.panes[1].SetFocused(true)
+
+	// Press ctrl+b then right - should wrap to pane 0
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	app = model.(AppModel)
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRight})
+	app = model.(AppModel)
+
+	if app.focusedPane != 0 {
+		t.Errorf("ctrl+b + right should wrap to pane 0, got %d", app.focusedPane)
+	}
+
+	// Press ctrl+b then left - should wrap to pane 1
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	app = model.(AppModel)
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	app = model.(AppModel)
+
+	if app.focusedPane != 1 {
+		t.Errorf("ctrl+b + left should wrap to pane 1, got %d", app.focusedPane)
+	}
+}
+
+func TestAppModel_TmuxPrefix_SinglePane(t *testing.T) {
+	app := NewAppModel()
+	app.width = 100
+	app.height = 40
+
+	// Create only one workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test1"})
+	app = model.(AppModel)
+
+	// Press ctrl+b then left
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	app = model.(AppModel)
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	app = model.(AppModel)
+
+	// Focus should stay on pane 0 (only pane)
+	if app.focusedPane != 0 {
+		t.Errorf("With single pane, focus should stay at 0, got %d", app.focusedPane)
+	}
+}
+
+func TestAppModel_TmuxPrefix_NoPanes(t *testing.T) {
+	app := NewAppModel()
+
+	// Press ctrl+b then left with no panes - should not panic
+	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	app = model.(AppModel)
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	app = model.(AppModel)
+
+	if app.focusedPane != 0 {
+		t.Errorf("With no panes, focus should stay at 0, got %d", app.focusedPane)
+	}
+}
+
+func TestAppModel_TmuxPrefix_ResetOnArrowKey(t *testing.T) {
+	app := NewAppModel()
+	app.width = 100
+	app.height = 40
+
+	// Create two workstreams
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test1"})
+	app = model.(AppModel)
+	model, _ = app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test2"})
+	app = model.(AppModel)
+
+	// Press ctrl+b
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	app = model.(AppModel)
+
+	if !app.tmuxPrefix {
+		t.Error("tmux prefix should be set")
+	}
+
+	// Press arrow key - should reset prefix after use
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	app = model.(AppModel)
+
+	if app.tmuxPrefix {
+		t.Error("tmux prefix should be reset after arrow key")
+	}
+}
+
+func TestAppModel_TmuxPrefix_OtherKeyStillWorks(t *testing.T) {
+	app := NewAppModel()
+	app.width = 100
+	app.height = 40
+
+	// Create two workstreams
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test1"})
+	app = model.(AppModel)
+	model, _ = app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test2"})
+	app = model.(AppModel)
+
+	originalFocus := app.focusedPane
+
+	// Press ctrl+b
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	app = model.(AppModel)
+
+	// Press 'n' (not an arrow key) - should still open dialog
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	app = model.(AppModel)
+
+	// Focus should not change
+	if app.focusedPane != originalFocus {
+		t.Error("Focus should not change on non-arrow key after prefix")
+	}
+	// Dialog should open (n key works normally)
+	if app.dialog == nil {
+		t.Error("Dialog should open when pressing 'n'")
+	}
+}
+
+func TestAppModel_InputMode_CtrlC(t *testing.T) {
+	app := NewAppModel()
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Enter input mode
+	app.inputMode = true
+
+	// Press ctrl+c - should be sent to pane, not quit app
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	app = model.(AppModel)
+
+	// App should not be quitting (ctrl+c was sent to pane)
+	if app.quitting {
+		t.Error("In input mode, ctrl+c should go to pane, not quit app")
+	}
+}
+
+func TestAppModel_InputMode_EscapeToNavMode(t *testing.T) {
+	app := NewAppModel()
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Enter input mode
+	app.inputMode = true
+
+	// Press escape - should exit to nav mode
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	app = model.(AppModel)
+
+	if app.inputMode {
+		t.Error("Single escape should exit input mode")
+	}
+}
+
+func TestAppModel_InputMode_ArrowWithoutTmuxPrefix(t *testing.T) {
+	app := NewAppModel()
+	app.width = 100
+	app.height = 40
+
+	// Create two workstreams
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test1"})
+	app = model.(AppModel)
+	model, _ = app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test2"})
+	app = model.(AppModel)
+
+	// Enter input mode
+	app.inputMode = true
+	originalFocus := app.focusedPane
+
+	// Press left arrow without tmux prefix - should not change focus
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	app = model.(AppModel)
+
+	// Focus should not change (arrow goes to pane in input mode)
+	if app.focusedPane != originalFocus {
+		t.Error("Arrow without tmux prefix in input mode should not change focus")
+	}
+}
+
+func TestAppModel_NavMode_ArrowWithoutTmuxPrefix(t *testing.T) {
+	app := NewAppModel()
+	app.width = 100
+	app.height = 40
+
+	// Create two workstreams
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test1"})
+	app = model.(AppModel)
+	model, _ = app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test2"})
+	app = model.(AppModel)
+
+	originalFocus := app.focusedPane
+
+	// Press left arrow without tmux prefix in nav mode
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	app = model.(AppModel)
+
+	// In nav mode, arrow without prefix should not change focus
+	if app.focusedPane != originalFocus {
+		t.Error("Arrow without tmux prefix in nav mode should not change focus")
+	}
+}
+
+func TestAppModel_StateLoadedMsg_NoState(t *testing.T) {
+	app := NewAppModel()
+	app.width = 100
+	app.height = 40
+
+	// Simulate state loaded with no saved state
+	model, _ := app.Update(StateLoadedMsg{State: nil, Error: nil})
+	app = model.(AppModel)
+
+	// Should have no panes
+	if len(app.panes) != 0 {
+		t.Errorf("Expected 0 panes with no state, got %d", len(app.panes))
+	}
+}
+
+func TestAppModel_StateLoadedMsg_WithError(t *testing.T) {
+	app := NewAppModel()
+	app.width = 100
+	app.height = 40
+
+	// Simulate state loaded with error
+	model, _ := app.Update(StateLoadedMsg{State: nil, Error: fmt.Errorf("test error")})
+	app = model.(AppModel)
+
+	// Should show toast with error
+	if app.toast == "" {
+		t.Error("Should show toast on state load error")
+	}
+	if !strings.Contains(app.toast, "Failed to load") {
+		t.Errorf("Toast should mention load failure, got: %s", app.toast)
+	}
+}
+
+func TestAppModel_StateSavedMsg_Success(t *testing.T) {
+	app := NewAppModel()
+	app.quitting = true
+
+	// Simulate state saved successfully
+	model, cmd := app.Update(StateSavedMsg{Error: nil})
+	app = model.(AppModel)
+
+	// Should return quit command
+	if cmd == nil {
+		t.Error("Should return quit command after state saved")
+	}
+}
+
+func TestAppModel_StateSavedMsg_WithError(t *testing.T) {
+	app := NewAppModel()
+	app.quitting = true
+
+	// Simulate state saved with error
+	model, cmd := app.Update(StateSavedMsg{Error: fmt.Errorf("save error")})
+	app = model.(AppModel)
+
+	// Should show toast with error but still quit
+	if app.toast == "" {
+		t.Error("Should show toast on save error")
+	}
+	if cmd == nil {
+		t.Error("Should still quit even with save error")
+	}
+}
+
+func TestAppModel_ToastHint_UnhandledKey(t *testing.T) {
+	app := NewAppModel()
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Press an unhandled key in nav mode
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	app = model.(AppModel)
+
+	// Should show toast hint
+	if app.toast == "" {
+		t.Error("Should show toast hint for unhandled key")
+	}
+	if !strings.Contains(app.toast, "input mode") {
+		t.Errorf("Toast should mention input mode, got: %s", app.toast)
+	}
+}
+
+func TestAppModel_View_ToastOverlay(t *testing.T) {
+	app := NewAppModel()
+	app.width = 80
+	app.height = 24
+	app.toast = "Test toast message"
+	app.toastExpiry = time.Now().Add(5 * time.Second)
+
+	view := app.View()
+
+	if !strings.Contains(view, "Test toast message") {
+		t.Error("View should contain active toast message")
+	}
+}
+
+func TestAppModel_View_ExpiredToast(t *testing.T) {
+	app := NewAppModel()
+	app.width = 80
+	app.height = 24
+	app.toast = "Expired toast"
+	app.toastExpiry = time.Now().Add(-1 * time.Second) // Already expired
+
+	view := app.View()
+
+	if strings.Contains(view, "Expired toast") {
+		t.Error("View should not contain expired toast message")
+	}
+}
+
+func TestAppModel_TitleBar_InputModeIndicator(t *testing.T) {
+	app := NewAppModel()
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Nav mode
+	app.inputMode = false
+	view := app.View()
+	if !strings.Contains(view, "NAV") {
+		t.Error("Title bar should show NAV in nav mode")
+	}
+
+	// Input mode
+	app.inputMode = true
+	view = app.View()
+	if !strings.Contains(view, "INPUT") {
+		t.Error("Title bar should show INPUT in input mode")
+	}
+}
+
+func TestAppModel_InputMode_WithDialog(t *testing.T) {
+	app := NewAppModel()
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Enter input mode
+	app.inputMode = true
+
+	// Open dialog (press escape first to exit input mode, then 'n')
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	app = model.(AppModel)
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	app = model.(AppModel)
+
+	// Dialog should be open
+	if app.dialog == nil {
+		t.Error("Dialog should be open")
+	}
+
+	// Input mode should be false when dialog is open
+	// (Keys go to dialog, not to pane)
+	if app.inputMode {
+		t.Error("Input mode should be disabled when exiting to nav mode")
+	}
+}
+
+func TestAppModel_ShiftTab(t *testing.T) {
+	app := NewAppModel()
+	app.width = 100
+	app.height = 40
+
+	// Create three workstreams
+	for _, name := range []string{"first", "second", "third"} {
+		model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: name})
+		app = model.(AppModel)
+	}
+
+	// Tab cycles forward
+	app.focusedPane = 0
+	for i := range app.panes {
+		app.panes[i].SetFocused(i == 0)
+	}
+
+	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyTab})
+	app = model.(AppModel)
+
+	if app.focusedPane != 1 {
+		t.Errorf("Tab should move to pane 1, got %d", app.focusedPane)
+	}
+}
+
+func TestPaneModel_Index(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+
+	// Initially index is 0
+	if pane.index != 0 {
+		t.Errorf("Initial index should be 0, got %d", pane.index)
+	}
+
+	// Set index
+	pane.SetIndex(3)
+	if pane.index != 3 {
+		t.Errorf("Index should be 3, got %d", pane.index)
+	}
+
+	// Verify index shows in view
+	pane.SetSize(80, 24)
+	pane.SetFocused(true)
+	view := pane.View()
+
+	if !strings.Contains(view, "3") {
+		t.Error("View should contain pane index")
+	}
+}
+
+func TestPaneModel_Dimensions(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+
+	// Set size
+	pane.SetSize(120, 50)
+
+	if pane.Width() != 120 {
+		t.Errorf("Width should be 120, got %d", pane.Width())
+	}
+	if pane.Height() != 50 {
+		t.Errorf("Height should be 50, got %d", pane.Height())
 	}
 }
