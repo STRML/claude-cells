@@ -448,8 +448,14 @@ Input Mode:
 		m.dialog = nil
 		switch msg.Type {
 		case DialogNewWorkstream:
-			// Create new workstream
-			ws := workstream.New(msg.Value)
+			// Collect existing branch names to ensure uniqueness
+			var existingBranches []string
+			for _, pane := range m.panes {
+				existingBranches = append(existingBranches, pane.Workstream().BranchName)
+			}
+
+			// Create new workstream with unique branch name
+			ws := workstream.NewWithUniqueBranch(msg.Value, existingBranches)
 			if err := m.manager.Add(ws); err != nil {
 				m.toast = fmt.Sprintf("Cannot create workstream: %v", err)
 				m.toastExpiry = time.Now().Add(toastDuration * 2)

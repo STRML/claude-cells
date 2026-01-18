@@ -64,6 +64,21 @@ func New(prompt string) *Workstream {
 	}
 }
 
+// NewWithUniqueBranch creates a new workstream with a branch name that's unique
+// among the provided existing branch names.
+func NewWithUniqueBranch(prompt string, existingBranches []string) *Workstream {
+	now := time.Now()
+	id := idCounter.Add(1)
+	return &Workstream{
+		ID:           fmt.Sprintf("%d-%d", now.UnixNano(), id),
+		Prompt:       prompt,
+		BranchName:   GenerateUniqueBranchName(prompt, existingBranches),
+		State:        StateStarting,
+		CreatedAt:    now,
+		LastActivity: now,
+	}
+}
+
 // NewWithID creates a workstream with a specific ID (for restoring from saved state).
 func NewWithID(id, branchName, prompt string) *Workstream {
 	now := time.Now()

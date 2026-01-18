@@ -96,3 +96,94 @@ func TestGenerateBranchName_NoTrailingHyphen(t *testing.T) {
 		t.Errorf("GenerateBranchName() has trailing hyphen: %q", got)
 	}
 }
+
+func TestGenerateUniqueBranchName(t *testing.T) {
+	tests := []struct {
+		name             string
+		prompt           string
+		existingBranches []string
+		expected         string
+	}{
+		{
+			name:             "no conflicts",
+			prompt:           "add authentication",
+			existingBranches: []string{},
+			expected:         "add-authentication",
+		},
+		{
+			name:             "no conflicts with other branches",
+			prompt:           "add authentication",
+			existingBranches: []string{"fix-bug", "add-feature"},
+			expected:         "add-authentication",
+		},
+		{
+			name:             "conflict adds suffix -2",
+			prompt:           "add authentication",
+			existingBranches: []string{"add-authentication"},
+			expected:         "add-authentication-2",
+		},
+		{
+			name:             "conflict with -2 adds -3",
+			prompt:           "add authentication",
+			existingBranches: []string{"add-authentication", "add-authentication-2"},
+			expected:         "add-authentication-3",
+		},
+		{
+			name:             "gaps in sequence are filled",
+			prompt:           "add authentication",
+			existingBranches: []string{"add-authentication", "add-authentication-3"},
+			expected:         "add-authentication-2",
+		},
+		{
+			name:             "multiple gaps",
+			prompt:           "add feature",
+			existingBranches: []string{"add-feature", "add-feature-2", "add-feature-5"},
+			expected:         "add-feature-3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GenerateUniqueBranchName(tt.prompt, tt.existingBranches)
+			if got != tt.expected {
+				t.Errorf("GenerateUniqueBranchName(%q, %v) = %q, want %q",
+					tt.prompt, tt.existingBranches, got, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGenerateUniqueBranchName_MaxLength(t *testing.T) {
+	// Long branch name that's near the limit
+	prompt := "implement a very long feature that has way too many words"
+	existing := []string{
+		"implement-very-long-feature-has-way-too-many-words",
+	}
+	got := GenerateUniqueBranchName(prompt, existing)
+	if len(got) > 50 {
+		t.Errorf("GenerateUniqueBranchName() returned %d chars, want <= 50: %q", len(got), got)
+	}
+	// Should still be unique (different from existing)
+	if got == existing[0] {
+		t.Errorf("GenerateUniqueBranchName() returned same as existing: %q", got)
+	}
+}
+
+func TestItoa(t *testing.T) {
+	tests := []struct {
+		input    int
+		expected string
+	}{
+		{0, "0"},
+		{1, "1"},
+		{10, "10"},
+		{123, "123"},
+		{-5, "-5"},
+	}
+	for _, tt := range tests {
+		got := itoa(tt.input)
+		if got != tt.expected {
+			t.Errorf("itoa(%d) = %q, want %q", tt.input, got, tt.expected)
+		}
+	}
+}
