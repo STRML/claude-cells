@@ -510,13 +510,22 @@ func TestAppModel_InputMode(t *testing.T) {
 		t.Error("InputMode() should return true")
 	}
 
-	// Press Escape to exit input mode
+	// Press Escape twice to exit input mode (single escape sends to pane, double exits)
+	msg = tea.KeyMsg{Type: tea.KeyEscape}
+	model, _ = app.Update(msg)
+	app = model.(AppModel)
+
+	if !app.inputMode {
+		t.Error("Single escape should NOT exit input mode (it sends to pane)")
+	}
+
+	// Second escape within timeout should exit input mode
 	msg = tea.KeyMsg{Type: tea.KeyEscape}
 	model, _ = app.Update(msg)
 	app = model.(AppModel)
 
 	if app.inputMode {
-		t.Error("Should exit input mode after Escape")
+		t.Error("Double escape should exit input mode")
 	}
 }
 
@@ -951,12 +960,20 @@ func TestAppModel_InputMode_EscapeToNavMode(t *testing.T) {
 	// Enter input mode
 	app.inputMode = true
 
-	// Press escape - should exit to nav mode
+	// Single escape should NOT exit (sends to pane)
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	app = model.(AppModel)
+
+	if !app.inputMode {
+		t.Error("Single escape should NOT exit input mode (it sends to pane)")
+	}
+
+	// Double escape should exit to nav mode
 	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyEscape})
 	app = model.(AppModel)
 
 	if app.inputMode {
-		t.Error("Single escape should exit input mode")
+		t.Error("Double escape should exit input mode")
 	}
 }
 
@@ -1158,8 +1175,10 @@ func TestAppModel_InputMode_WithDialog(t *testing.T) {
 	// Enter input mode
 	app.inputMode = true
 
-	// Open dialog (press escape first to exit input mode, then 'n')
+	// Open dialog (press escape twice to exit input mode, then 'n')
 	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	app = model.(AppModel)
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyEscape}) // Second escape to exit
 	app = model.(AppModel)
 	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
 	app = model.(AppModel)

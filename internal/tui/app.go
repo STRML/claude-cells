@@ -121,7 +121,8 @@ func PauseAllAndSaveCmd(dir string, workstreams []*workstream.Workstream, focuse
 // Init initializes the application
 func (m AppModel) Init() tea.Cmd {
 	// Try to load saved state on startup
-	return LoadStateCmd(m.workingDir)
+	// Start with cursor hidden since we begin in nav mode
+	return tea.Batch(LoadStateCmd(m.workingDir), tea.HideCursor)
 }
 
 // Update handles messages
@@ -145,17 +146,24 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.inputMode && len(m.panes) > 0 && m.focusedPane < len(m.panes) {
 			switch msg.String() {
 			case "esc":
-				// Check for double-escape (send escape to pane)
+				// Check for Ctrl+B prefix (exit to nav mode)
+				if m.tmuxPrefix && time.Since(m.tmuxPrefixTime) < tmuxPrefixTimeout {
+					m.tmuxPrefix = false
+					m.inputMode = false
+					return m, tea.HideCursor
+				}
+				m.tmuxPrefix = false
+				// Check for double-escape (exit to nav mode)
 				if time.Since(m.lastEscapeTime) < escapeTimeout {
 					m.lastEscapeTime = time.Time{} // Reset
-					var cmd tea.Cmd
-					m.panes[m.focusedPane], cmd = m.panes[m.focusedPane].Update(msg)
-					return m, cmd
+					m.inputMode = false
+					return m, tea.HideCursor
 				}
-				// Single escape - exit input mode but remember time for potential double-tap
+				// Single escape - send to pane (for vim, etc.) but remember time for potential double-tap
 				m.lastEscapeTime = time.Now()
-				m.inputMode = false
-				return m, nil
+				var cmd tea.Cmd
+				m.panes[m.focusedPane], cmd = m.panes[m.focusedPane].Update(msg)
+				return m, cmd
 			case "ctrl+c":
 				// Send ctrl+c to the pane (for interrupting processes)
 				var cmd tea.Cmd
@@ -203,15 +211,26 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 		}
 
-		// Check for double-escape even in nav mode (to send escape to pane)
-		if msg.String() == "esc" && len(m.panes) > 0 && m.focusedPane < len(m.panes) {
+		// In nav mode, double-escape quits ccells
+		if msg.String() == "esc" {
 			if time.Since(m.lastEscapeTime) < escapeTimeout {
-				// Double escape from nav mode - enter input mode and send escape
+				// Double escape in nav mode - quit
 				m.lastEscapeTime = time.Time{}
-				m.inputMode = true
-				var cmd tea.Cmd
-				m.panes[m.focusedPane], cmd = m.panes[m.focusedPane].Update(msg)
-				return m, cmd
+				if len(m.panes) > 0 {
+					var workstreams []*workstream.Workstream
+					for _, pane := range m.panes {
+						ws := pane.Workstream()
+						workstreams = append(workstreams, ws)
+						if pane.HasPTY() {
+							pane.PTY().Close()
+						}
+					}
+					m.quitting = true
+					return m, PauseAllAndSaveCmd(m.workingDir, workstreams, m.focusedPane)
+				}
+				m.quitting = true
+				_ = workstream.DeleteState(m.workingDir)
+				return m, tea.Quit
 			}
 			m.lastEscapeTime = time.Now()
 			return m, nil
@@ -340,6 +359,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Enter input mode for focused pane
 			if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
 				m.inputMode = true
+				return m, tea.ShowCursor
 			}
 			return m, nil
 
@@ -384,7 +404,29 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, ListContainersCmd()
 
 		case "?":
-			// Help (placeholder)
+			// Show help dialog
+			helpText := `Navigation Mode:
+  i, Enter    Enter input mode (interact with Claude)
+  n           New workstream
+  d           Destroy workstream
+  m           Merge/PR options
+  p           Toggle pairing mode
+  s           Settings
+  l           Show logs
+  1-9         Focus pane by number
+  ←→ or Tab   Cycle focus
+  Ctrl+B ←→   Switch pane (works in input mode too)
+  q           Quit (pauses containers)
+  Esc Esc     Quit
+
+Input Mode:
+  Esc Esc     Exit to nav mode
+  Ctrl+B Esc  Exit to nav mode
+  Ctrl+B ←→   Switch pane
+  All other keys sent to Claude Code`
+			dialog := NewLogDialog("Help", helpText)
+			dialog.SetSize(60, 25)
+			m.dialog = &dialog
 			return m, nil
 
 		default:
@@ -495,6 +537,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Auto-enter input mode if this is the focused pane
 				if i == m.focusedPane {
 					m.inputMode = true
+					return m, tea.ShowCursor
 				}
 				break
 			}
@@ -892,9 +935,9 @@ func (m AppModel) renderTitleBar() string {
 	// Keybinds hint
 	var hints string
 	if m.inputMode {
-		hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [Esc] nav mode  [Esc Esc] send escape")
+		hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [Esc Esc] nav  [Ctrl+B ←→] switch pane")
 	} else {
-		hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [n]ew  [p]air  [m]erge/PR  [d]estroy  [i]nput  [s]ettings  [q]uit")
+		hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [n]ew  [m]erge/PR  [d]estroy  [i]nput  [?]help  [Esc Esc]quit")
 	}
 
 	left := mode + title

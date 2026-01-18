@@ -255,6 +255,13 @@ func (p PaneModel) View() string {
 	p.viewport.SetContent(outputContent)
 	outputView := p.viewport.View()
 
+	// Dim content in nav mode (focused but not in input mode)
+	if p.focused && !p.inputMode {
+		// Apply dim effect by using faint styling
+		dimStyle := lipgloss.NewStyle().Faint(true)
+		outputView = dimStyle.Render(outputView)
+	}
+
 	// Input (only show when focused and no PTY)
 	var inputView string
 	if p.focused && (p.pty == nil || p.pty.IsClosed()) {
@@ -272,8 +279,8 @@ func (p PaneModel) View() string {
 			// Input mode - bright cyan border (more noticeable)
 			borderColor = "#0891B2"
 		} else {
-			// Nav mode - green border
-			borderColor = "#059669"
+			// Nav mode - dim border to reinforce "inactive" feel
+			borderColor = "#666666"
 		}
 		style = lipgloss.NewStyle().
 			Border(lipgloss.ThickBorder()).
