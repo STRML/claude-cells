@@ -1,8 +1,16 @@
 package workstream
 
 import (
+	"errors"
 	"sync"
 )
+
+// MaxWorkstreams is the maximum number of concurrent workstreams allowed.
+// This prevents resource exhaustion from too many Docker containers.
+const MaxWorkstreams = 12
+
+// ErrMaxWorkstreams is returned when attempting to add more workstreams than allowed.
+var ErrMaxWorkstreams = errors.New("maximum number of workstreams reached")
 
 // Manager tracks all workstreams.
 type Manager struct {
@@ -17,11 +25,24 @@ func NewManager() *Manager {
 	}
 }
 
-// Add registers a workstream.
-func (m *Manager) Add(ws *Workstream) {
+// Add registers a workstream. Returns ErrMaxWorkstreams if limit is reached.
+func (m *Manager) Add(ws *Workstream) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
+
+	if len(m.workstreams) >= MaxWorkstreams {
+		return ErrMaxWorkstreams
+	}
+
 	m.workstreams[ws.ID] = ws
+	return nil
+}
+
+// CanAdd returns true if another workstream can be added.
+func (m *Manager) CanAdd() bool {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return len(m.workstreams) < MaxWorkstreams
 }
 
 // Remove unregisters a workstream.

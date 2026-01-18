@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/STRML/claude-cells/internal/workstream"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 	"github.com/hinshun/vt10x"
-	"github.com/STRML/claude-cells/internal/workstream"
 )
 
 // PaneModel represents a single workstream pane
@@ -82,16 +82,52 @@ func (p PaneModel) Update(msg tea.Msg) (PaneModel, tea.Cmd) {
 					data = []byte{127}
 				case "tab":
 					data = []byte("\t")
+				case "shift+tab":
+					data = []byte{27, '[', 'Z'} // CSI Z - reverse tab
 				case "esc":
 					data = []byte{27}
+				case "ctrl+a":
+					data = []byte{1} // SOH - go to beginning of line
+				case "ctrl+b":
+					data = []byte{2} // STX - move backward one character
 				case "ctrl+c":
 					data = []byte{3} // ETX - interrupt signal
 				case "ctrl+d":
 					data = []byte{4} // EOT - end of transmission
-				case "ctrl+z":
-					data = []byte{26} // SUB - suspend
+				case "ctrl+e":
+					data = []byte{5} // ENQ - go to end of line
+				case "ctrl+f":
+					data = []byte{6} // ACK - move forward one character
+				case "ctrl+g":
+					data = []byte{7} // BEL - abort
+				case "ctrl+h":
+					data = []byte{8} // BS - backspace (alternative)
+				case "ctrl+k":
+					data = []byte{11} // VT - kill line forward (to end)
 				case "ctrl+l":
 					data = []byte{12} // FF - form feed (clear screen)
+				case "ctrl+n":
+					data = []byte{14} // SO - next line in history
+				case "ctrl+o":
+					data = []byte{15} // SI - operate-and-get-next
+				case "ctrl+p":
+					data = []byte{16} // DLE - previous line in history
+				case "ctrl+r":
+					data = []byte{18} // DC2 - reverse history search
+				case "ctrl+s":
+					data = []byte{19} // DC3 - forward history search
+				case "ctrl+t":
+					data = []byte{20} // DC4 - transpose characters
+				case "ctrl+u":
+					data = []byte{21} // NAK - kill line backward (to beginning)
+				case "ctrl+v":
+					data = []byte{22} // SYN - literal next character
+				case "ctrl+w":
+					data = []byte{23} // ETB - delete word backward
+				case "ctrl+y":
+					data = []byte{25} // EM - yank (paste from kill buffer)
+				case "ctrl+z":
+					data = []byte{26} // SUB - suspend
 				case "up":
 					data = []byte{27, '[', 'A'}
 				case "down":
@@ -100,9 +136,25 @@ func (p PaneModel) Update(msg tea.Msg) (PaneModel, tea.Cmd) {
 					data = []byte{27, '[', 'D'}
 				case "right":
 					data = []byte{27, '[', 'C'}
+				case "home":
+					data = []byte{27, '[', 'H'}
+				case "end":
+					data = []byte{27, '[', 'F'}
+				case "pgup":
+					data = []byte{27, '[', '5', '~'}
+				case "pgdown":
+					data = []byte{27, '[', '6', '~'}
+				case "delete":
+					data = []byte{27, '[', '3', '~'}
+				case "insert":
+					data = []byte{27, '[', '2', '~'}
 				default:
-					// For regular characters
-					if len(keyStr) == 1 {
+					// Handle alt+key combinations (ESC + key)
+					if strings.HasPrefix(keyStr, "alt+") && len(keyStr) == 5 {
+						// Alt key sends ESC followed by the character
+						data = []byte{27, keyStr[4]}
+					} else if len(keyStr) == 1 {
+						// Single character
 						data = []byte(keyStr)
 					} else if msg.Type == tea.KeyRunes {
 						data = []byte(string(msg.Runes))

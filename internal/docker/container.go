@@ -15,18 +15,18 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 )
 
-// ContainerPrefix is used to identify docker-tui containers
+// ContainerPrefix is used to identify ccells containers
 const ContainerPrefix = "ccells-"
 
 // ContainerConfig holds configuration for creating a workstream container.
 type ContainerConfig struct {
-	Name          string // Container name (ccells-<project>-<timestamp>)
-	Image         string // Docker image to use
-	RepoPath      string // Path to repo on host
-	ClaudeCfg     string // Path to ~/.claude directory on host
-	ClaudeJSON    string // Path to ~/.claude.json file on host (session state)
-	GitConfig     string // Path to ~/.gitconfig file on host (git identity)
-	Credentials   string // Path to credentials file (OAuth tokens from keychain)
+	Name        string // Container name (ccells-<project>-<timestamp>)
+	Image       string // Docker image to use
+	RepoPath    string // Path to repo on host
+	ClaudeCfg   string // Path to ~/.claude directory on host
+	ClaudeJSON  string // Path to ~/.claude.json file on host (session state)
+	GitConfig   string // Path to ~/.gitconfig file on host (git identity)
+	Credentials string // Path to credentials file (OAuth tokens from keychain)
 }
 
 // NewContainerConfig creates a container config for a workstream.
@@ -191,7 +191,7 @@ type ContainerInfo struct {
 	Created time.Time
 }
 
-// ListDockerTUIContainers lists all containers created by docker-tui
+// ListDockerTUIContainers lists all containers created by ccells
 func (c *Client) ListDockerTUIContainers(ctx context.Context) ([]ContainerInfo, error) {
 	// Filter by name prefix
 	filterArgs := filters.NewArgs()
@@ -221,7 +221,7 @@ func (c *Client) ListDockerTUIContainers(ctx context.Context) ([]ContainerInfo, 
 	return result, nil
 }
 
-// PruneDockerTUIContainers removes all stopped docker-tui containers
+// PruneDockerTUIContainers removes all stopped ccells containers
 func (c *Client) PruneDockerTUIContainers(ctx context.Context) (int, error) {
 	containers, err := c.ListDockerTUIContainers(ctx)
 	if err != nil {
@@ -239,7 +239,7 @@ func (c *Client) PruneDockerTUIContainers(ctx context.Context) (int, error) {
 	return pruned, nil
 }
 
-// PruneAllDockerTUIContainers removes ALL docker-tui containers (including running ones)
+// PruneAllDockerTUIContainers removes ALL ccells containers (including running ones)
 func (c *Client) PruneAllDockerTUIContainers(ctx context.Context) (int, error) {
 	containers, err := c.ListDockerTUIContainers(ctx)
 	if err != nil {
@@ -279,4 +279,39 @@ func (c *Client) SignalProcess(ctx context.Context, containerID, processName, si
 
 	// Start but don't wait for output - we just want to send the signal
 	return c.cli.ContainerExecStart(ctx, execID.ID, container.ExecStartOptions{})
+}
+
+// CleanupOrphanedContainers removes ccells containers that aren't in the known list.
+// This is used to clean up containers from crashed sessions.
+func (c *Client) CleanupOrphanedContainers(ctx context.Context, knownContainerIDs []string) (int, error) {
+	containers, err := c.ListDockerTUIContainers(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	// Build a set of known IDs for fast lookup
+	known := make(map[string]bool)
+	for _, id := range knownContainerIDs {
+		known[id] = true
+	}
+
+	removed := 0
+	for _, cont := range containers {
+		// Skip if this container is known (managed by current or resumable session)
+		if known[cont.ID] {
+			continue
+		}
+
+		// Stop if running
+		if cont.State == "running" || cont.State == "paused" {
+			_ = c.StopContainer(ctx, cont.ID)
+		}
+
+		// Remove the orphaned container
+		if err := c.RemoveContainer(ctx, cont.ID); err == nil {
+			removed++
+		}
+	}
+
+	return removed, nil
 }

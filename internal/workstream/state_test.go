@@ -9,7 +9,7 @@ import (
 
 func TestStateFilePath(t *testing.T) {
 	dir := "/some/directory"
-	expected := filepath.Join(dir, ".docker-tui-state.json")
+	expected := filepath.Join(dir, ".ccells-state.json")
 	got := StateFilePath(dir)
 	if got != expected {
 		t.Errorf("StateFilePath() = %v, want %v", got, expected)
@@ -18,7 +18,7 @@ func TestStateFilePath(t *testing.T) {
 
 func TestSaveAndLoadState(t *testing.T) {
 	// Create a temp directory
-	tmpDir, err := os.MkdirTemp("", "docker-tui-test-*")
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestSaveAndLoadState(t *testing.T) {
 
 func TestDeleteState(t *testing.T) {
 	// Create a temp directory
-	tmpDir, err := os.MkdirTemp("", "docker-tui-test-*")
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestDeleteState(t *testing.T) {
 
 func TestStateExists(t *testing.T) {
 	// Create a temp directory
-	tmpDir, err := os.MkdirTemp("", "docker-tui-test-*")
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -141,7 +141,7 @@ func TestStateExists(t *testing.T) {
 
 func TestLoadStateNonExistent(t *testing.T) {
 	// Create a temp directory with no state file
-	tmpDir, err := os.MkdirTemp("", "docker-tui-test-*")
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -156,7 +156,7 @@ func TestLoadStateNonExistent(t *testing.T) {
 
 func TestStateSavedAtTimestamp(t *testing.T) {
 	// Create a temp directory
-	tmpDir, err := os.MkdirTemp("", "docker-tui-test-*")
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -185,7 +185,7 @@ func TestStateSavedAtTimestamp(t *testing.T) {
 }
 
 func TestSaveStateEmptyWorkstreams(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "docker-tui-test-*")
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -209,7 +209,7 @@ func TestSaveStateEmptyWorkstreams(t *testing.T) {
 }
 
 func TestSaveStateOverwrite(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "docker-tui-test-*")
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -251,7 +251,7 @@ func TestSaveStateOverwrite(t *testing.T) {
 }
 
 func TestSaveStatePreservesAllFields(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "docker-tui-test-*")
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -291,7 +291,7 @@ func TestSaveStatePreservesAllFields(t *testing.T) {
 }
 
 func TestLoadStateCorruptJSON(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "docker-tui-test-*")
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -312,7 +312,7 @@ func TestLoadStateCorruptJSON(t *testing.T) {
 }
 
 func TestSaveStateNilWorkstreams(t *testing.T) {
-	tmpDir, err := os.MkdirTemp("", "docker-tui-test-*")
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
 	if err != nil {
 		t.Fatalf("Failed to create temp dir: %v", err)
 	}
@@ -342,10 +342,10 @@ func TestStateFilePath_DifferentDirectories(t *testing.T) {
 		dir      string
 		expected string
 	}{
-		{"/home/user/project", "/home/user/project/.docker-tui-state.json"},
-		{"/tmp", "/tmp/.docker-tui-state.json"},
-		{".", ".docker-tui-state.json"}, // filepath.Join normalizes "." + "file" to "file"
-		{"/", "/.docker-tui-state.json"},
+		{"/home/user/project", "/home/user/project/.ccells-state.json"},
+		{"/tmp", "/tmp/.ccells-state.json"},
+		{".", ".ccells-state.json"}, // filepath.Join normalizes "." + "file" to "file"
+		{"/", "/.ccells-state.json"},
 	}
 
 	for _, tt := range tests {
@@ -355,5 +355,31 @@ func TestStateFilePath_DifferentDirectories(t *testing.T) {
 				t.Errorf("StateFilePath(%q) = %q, want %q", tt.dir, got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestSaveStateAtomic(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Save state
+	ws := New("test")
+	err = SaveState(tmpDir, []*Workstream{ws}, 0)
+	if err != nil {
+		t.Fatalf("SaveState() error = %v", err)
+	}
+
+	// Verify no temp file remains
+	tempPath := StateFilePath(tmpDir) + ".tmp"
+	if _, err := os.Stat(tempPath); !os.IsNotExist(err) {
+		t.Error("Temp file should not exist after successful save")
+	}
+
+	// Verify final file exists
+	if !StateExists(tmpDir) {
+		t.Error("State file should exist after save")
 	}
 }

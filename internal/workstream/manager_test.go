@@ -8,7 +8,9 @@ func TestManager_Add(t *testing.T) {
 	m := NewManager()
 	ws := New("test prompt")
 
-	m.Add(ws)
+	if err := m.Add(ws); err != nil {
+		t.Fatalf("Add() error = %v", err)
+	}
 
 	got := m.Get(ws.ID)
 	if got != ws {
@@ -19,7 +21,7 @@ func TestManager_Add(t *testing.T) {
 func TestManager_Remove(t *testing.T) {
 	m := NewManager()
 	ws := New("test prompt")
-	m.Add(ws)
+	_ = m.Add(ws)
 
 	m.Remove(ws.ID)
 
@@ -33,8 +35,8 @@ func TestManager_List(t *testing.T) {
 	m := NewManager()
 	ws1 := New("first")
 	ws2 := New("second")
-	m.Add(ws1)
-	m.Add(ws2)
+	_ = m.Add(ws1)
+	_ = m.Add(ws2)
 
 	list := m.List()
 
@@ -50,7 +52,7 @@ func TestManager_Count(t *testing.T) {
 		t.Error("Count() should be 0 for new manager")
 	}
 
-	m.Add(New("test"))
+	_ = m.Add(New("test"))
 
 	if m.Count() != 1 {
 		t.Error("Count() should be 1 after Add()")
@@ -60,7 +62,7 @@ func TestManager_Count(t *testing.T) {
 func TestManager_GetByBranch(t *testing.T) {
 	m := NewManager()
 	ws := New("add user auth")
-	m.Add(ws)
+	_ = m.Add(ws)
 
 	got := m.GetByBranch("add-user-auth")
 	if got != ws {
@@ -79,8 +81,8 @@ func TestManager_Active(t *testing.T) {
 	ws1.SetState(StateRunning)
 	ws2 := New("stopped")
 	ws2.SetState(StateStopped)
-	m.Add(ws1)
-	m.Add(ws2)
+	_ = m.Add(ws1)
+	_ = m.Add(ws2)
 
 	active := m.Active()
 
@@ -96,7 +98,7 @@ func TestManager_GetPairing(t *testing.T) {
 	m := NewManager()
 	ws := New("pairing")
 	ws.SetState(StatePairing)
-	m.Add(ws)
+	_ = m.Add(ws)
 
 	got := m.GetPairing()
 	if got != ws {
@@ -108,10 +110,58 @@ func TestManager_GetPairing_None(t *testing.T) {
 	m := NewManager()
 	ws := New("running")
 	ws.SetState(StateRunning)
-	m.Add(ws)
+	_ = m.Add(ws)
 
 	got := m.GetPairing()
 	if got != nil {
 		t.Error("GetPairing() should return nil when none pairing")
+	}
+}
+
+func TestManager_MaxWorkstreams(t *testing.T) {
+	m := NewManager()
+
+	// Add up to the limit
+	for i := 0; i < MaxWorkstreams; i++ {
+		ws := New("test")
+		if err := m.Add(ws); err != nil {
+			t.Fatalf("Add() at %d should succeed, got error: %v", i, err)
+		}
+	}
+
+	// Adding one more should fail
+	ws := New("one too many")
+	err := m.Add(ws)
+	if err != ErrMaxWorkstreams {
+		t.Errorf("Add() beyond limit should return ErrMaxWorkstreams, got %v", err)
+	}
+
+	if m.Count() != MaxWorkstreams {
+		t.Errorf("Count() = %d, want %d", m.Count(), MaxWorkstreams)
+	}
+}
+
+func TestManager_CanAdd(t *testing.T) {
+	m := NewManager()
+
+	if !m.CanAdd() {
+		t.Error("CanAdd() should return true for empty manager")
+	}
+
+	// Fill up to limit
+	for i := 0; i < MaxWorkstreams; i++ {
+		_ = m.Add(New("test"))
+	}
+
+	if m.CanAdd() {
+		t.Error("CanAdd() should return false when at limit")
+	}
+
+	// Remove one
+	list := m.List()
+	m.Remove(list[0].ID)
+
+	if !m.CanAdd() {
+		t.Error("CanAdd() should return true after removing one")
 	}
 }

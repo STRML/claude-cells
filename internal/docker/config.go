@@ -113,9 +113,26 @@ func InitClaudeConfig() (*ConfigPaths, error) {
 	}
 
 	// Extract and save OAuth credentials from keychain
-	dstCredentials := filepath.Join(configDir, CredentialsFile)
+	// Write to BOTH locations:
+	// 1. Inside .claude/ directory (where Claude Code expects it on Linux)
+	// 2. Separate file for backup/explicit mounting
 	creds, err := GetClaudeCredentials()
 	if err == nil && creds != nil && creds.Raw != "" {
+		// Ensure .claude directory exists (might not if user has no ~/.claude/)
+		if err := os.MkdirAll(dstClaudeDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create .claude directory: %w", err)
+		}
+		// Write inside .claude directory (primary location for Claude Code on Linux)
+		// IMPORTANT: Linux expects .credentials.json (with leading dot), not credentials.json
+		credsInClaudeDir := filepath.Join(dstClaudeDir, ".credentials.json")
+		if err := os.WriteFile(credsInClaudeDir, []byte(creds.Raw), 0600); err != nil {
+			return nil, fmt.Errorf("failed to write .credentials.json: %w", err)
+		}
+	}
+
+	// Also write separate credentials file (for explicit mounting if needed)
+	dstCredentials := filepath.Join(configDir, CredentialsFile)
+	if creds != nil && creds.Raw != "" {
 		if err := os.WriteFile(dstCredentials, []byte(creds.Raw), 0600); err != nil {
 			return nil, fmt.Errorf("failed to write credentials: %w", err)
 		}
@@ -212,9 +229,16 @@ func copyDir(src, dst string) error {
 		srcPath := filepath.Join(src, entry.Name())
 		dstPath := filepath.Join(dst, entry.Name())
 
-		// Skip debug directory - it contains logs that aren't needed and can cause copy issues
-		if entry.Name() == "debug" {
-			continue
+		// Skip directories that aren't needed or cause copy issues
+		switch entry.Name() {
+		case "debug":
+			continue // Debug logs not needed
+		case ".git":
+			continue // Git repos in plugins can have permission issues
+		case "cache":
+			continue // Cache directories can be large and aren't needed
+		case "image-cache":
+			continue // Image cache not needed in container
 		}
 
 		// Check if it's a symlink
@@ -238,11 +262,13 @@ func copyDir(src, dst string) error {
 
 		if entry.IsDir() {
 			if err := copyDir(srcPath, dstPath); err != nil {
-				return err
+				// Log but continue - some dirs may have permission issues (e.g., plugin .git)
+				continue
 			}
 		} else {
 			if err := copyFile(srcPath, dstPath); err != nil {
-				return err
+				// Log but continue - some files may have permission issues
+				continue
 			}
 		}
 	}

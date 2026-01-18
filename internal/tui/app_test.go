@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/STRML/claude-cells/internal/workstream"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func TestNewAppModel(t *testing.T) {

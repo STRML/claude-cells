@@ -7,13 +7,13 @@ import (
 	"os"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/client"
 	"github.com/STRML/claude-cells/internal/docker"
 	"github.com/STRML/claude-cells/internal/git"
 	"github.com/STRML/claude-cells/internal/sync"
 	"github.com/STRML/claude-cells/internal/workstream"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/client"
 )
 
 // ContainerStartedMsg is sent when a container successfully starts.
@@ -87,7 +87,7 @@ func StartContainerCmd(ws *workstream.Workstream) tea.Cmd {
 		}
 		defer dockerClient.Close()
 
-		// Get isolated claude config paths (copied to ~/.docker-tui/claude-config/)
+		// Get isolated claude config paths (copied to ~/.ccells/claude-config/)
 		// This protects the user's original ~/.claude.json from container corruption
 		configPaths, err := docker.GetClaudeConfig()
 		if err != nil {
@@ -135,7 +135,9 @@ func StartContainerCmd(ws *workstream.Workstream) tea.Cmd {
 // StartPTYCmd returns a command that starts a PTY session in a container.
 func StartPTYCmd(ws *workstream.Workstream, initialPrompt string, width, height int) tea.Cmd {
 	return func() tea.Msg {
-		ctx := context.Background()
+		// Use a timeout for PTY session creation
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
 
 		dockerClient, err := client.NewClientWithOpts(client.FromEnv, client.WithAPIVersionNegotiation())
 		if err != nil {
@@ -260,7 +262,7 @@ func FetchContainerLogsCmd(ws *workstream.Workstream) tea.Cmd {
 	}
 }
 
-// PruneStoppedContainersCmd returns a command that prunes stopped docker-tui containers.
+// PruneStoppedContainersCmd returns a command that prunes stopped ccells containers.
 func PruneStoppedContainersCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -281,7 +283,7 @@ func PruneStoppedContainersCmd() tea.Cmd {
 	}
 }
 
-// PruneAllContainersCmd returns a command that prunes ALL docker-tui containers.
+// PruneAllContainersCmd returns a command that prunes ALL ccells containers.
 func PruneAllContainersCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -302,7 +304,7 @@ func PruneAllContainersCmd() tea.Cmd {
 	}
 }
 
-// ListContainersCmd returns a command that counts docker-tui containers.
+// ListContainersCmd returns a command that counts ccells containers.
 func ListContainersCmd() tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -323,7 +325,7 @@ func ListContainersCmd() tea.Cmd {
 	}
 }
 
-// ContainerCountMsg is sent with the count of docker-tui containers.
+// ContainerCountMsg is sent with the count of ccells containers.
 type ContainerCountMsg struct {
 	Count int
 	Error error
@@ -466,7 +468,7 @@ func CreatePRCmd(ws *workstream.Workstream) tea.Cmd {
 
 		// Generate PR title and body from the workstream prompt
 		prTitle := ws.BranchName
-		prBody := fmt.Sprintf("## Summary\n\n%s\n\n## Changes\n\nCreated by docker-tui.", ws.Prompt)
+		prBody := fmt.Sprintf("## Summary\n\n%s\n\n## Changes\n\nCreated by [claude-cells](https://github.com/STRML/claude-cells).", ws.Prompt)
 
 		pr, err := gh.CreatePR(ctx, repoPath, &git.PRRequest{
 			Title: prTitle,

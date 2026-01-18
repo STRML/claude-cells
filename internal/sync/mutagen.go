@@ -18,7 +18,7 @@ func NewMutagen() *Mutagen {
 // SessionName generates a mutagen session name for a branch.
 func SessionName(branchName string) string {
 	safe := strings.ReplaceAll(branchName, "/", "-")
-	return "docker-tui-" + safe
+	return "ccells-" + safe
 }
 
 // CheckInstalled verifies mutagen is available.

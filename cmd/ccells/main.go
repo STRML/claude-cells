@@ -4,11 +4,14 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
 	"github.com/STRML/claude-cells/internal/docker"
 	"github.com/STRML/claude-cells/internal/tui"
+	"github.com/STRML/claude-cells/internal/workstream"
+	tea "github.com/charmbracelet/bubbletea"
 )
 
 func main() {
@@ -18,11 +21,24 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Clean up orphaned containers from crashed sessions
+	cleanupOrphanedContainers()
+
 	app := tui.NewAppModel()
 	p := tea.NewProgram(app, tea.WithAltScreen())
 
 	// Set the program reference so PTY sessions can send messages
 	tui.SetProgram(p)
+
+	// Set up signal handling for graceful shutdown
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		// Bubbletea will handle the signal and call our shutdown logic
+		// Just quit the program cleanly
+		p.Quit()
+	}()
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running program: %v\n", err)
@@ -69,4 +85,42 @@ func validatePrerequisites() error {
 	}
 
 	return nil
+}
+
+// cleanupOrphanedContainers removes ccells containers from previous crashed sessions.
+// It loads the state file to find which containers should be kept.
+func cleanupOrphanedContainers() {
+	// Get current working directory for state file
+	cwd, err := os.Getwd()
+	if err != nil {
+		return // Silently skip if we can't get cwd
+	}
+
+	// Load known container IDs from state file
+	var knownIDs []string
+	if workstream.StateExists(cwd) {
+		state, err := workstream.LoadState(cwd)
+		if err == nil {
+			for _, ws := range state.Workstreams {
+				if ws.ContainerID != "" {
+					knownIDs = append(knownIDs, ws.ContainerID)
+				}
+			}
+		}
+	}
+
+	// Create docker client and clean up orphaned containers
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	client, err := docker.NewClient()
+	if err != nil {
+		return // Silently skip if we can't connect to Docker
+	}
+	defer client.Close()
+
+	removed, err := client.CleanupOrphanedContainers(ctx, knownIDs)
+	if err == nil && removed > 0 {
+		fmt.Printf("Cleaned up %d orphaned container(s) from previous session\n", removed)
+	}
 }

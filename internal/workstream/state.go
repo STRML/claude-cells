@@ -2,12 +2,13 @@ package workstream
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"time"
 )
 
-const stateFileName = ".docker-tui-state.json"
+const stateFileName = ".ccells-state.json"
 
 // SavedWorkstream represents a workstream saved to disk
 type SavedWorkstream struct {
@@ -31,7 +32,8 @@ func StateFilePath(dir string) string {
 	return filepath.Join(dir, stateFileName)
 }
 
-// SaveState saves the application state to a file
+// SaveState saves the application state to a file.
+// Uses atomic write (write to temp file, then rename) to prevent corruption.
 func SaveState(dir string, workstreams []*Workstream, focusedIndex int) error {
 	state := AppState{
 		Version:      1,
@@ -54,7 +56,21 @@ func SaveState(dir string, workstreams []*Workstream, focusedIndex int) error {
 		return err
 	}
 
-	return os.WriteFile(StateFilePath(dir), data, 0644)
+	// Atomic write: write to temp file in same directory, then rename
+	finalPath := StateFilePath(dir)
+	tempPath := finalPath + ".tmp"
+
+	if err := os.WriteFile(tempPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write temp state file: %w", err)
+	}
+
+	if err := os.Rename(tempPath, finalPath); err != nil {
+		// Clean up temp file on rename failure
+		os.Remove(tempPath)
+		return fmt.Errorf("failed to rename temp state file: %w", err)
+	}
+
+	return nil
 }
 
 // LoadState loads the application state from a file

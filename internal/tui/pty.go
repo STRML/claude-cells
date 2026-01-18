@@ -5,6 +5,7 @@ import (
 	"io"
 	"strings"
 	"sync"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/docker/docker/api/types"
@@ -12,13 +13,29 @@ import (
 	"github.com/docker/docker/client"
 )
 
-// escapeShellArg escapes a string for safe use in a shell command
+// escapeShellArg escapes a string for safe use in a shell command.
+// It handles special characters that could break out of double-quoted strings
+// or cause command injection.
 func escapeShellArg(s string) string {
-	// Escape backslashes and double quotes
+	// Remove null bytes entirely - they can't be safely escaped
+	s = strings.ReplaceAll(s, "\x00", "")
+
+	// Escape backslashes first (must be done before other escapes)
 	s = strings.ReplaceAll(s, `\`, `\\`)
+
+	// Escape double quotes
 	s = strings.ReplaceAll(s, `"`, `\"`)
+
+	// Escape dollar signs (variable expansion)
 	s = strings.ReplaceAll(s, `$`, `\$`)
+
+	// Escape backticks (command substitution)
 	s = strings.ReplaceAll(s, "`", "\\`")
+
+	// Escape newlines - convert to escaped form that won't break the command
+	s = strings.ReplaceAll(s, "\n", `\n`)
+	s = strings.ReplaceAll(s, "\r", `\r`)
+
 	return s
 }
 
@@ -38,6 +55,7 @@ type PTYSession struct {
 	stdin        io.WriteCloser
 	mu           sync.Mutex
 	closed       bool
+	done         chan struct{} // Signals goroutines to exit
 	workstreamID string
 	dockerClient *client.Client
 	width        int
@@ -80,11 +98,11 @@ func NewPTYSession(ctx context.Context, dockerClient *client.Client, containerID
 	// Build the command to run Claude Code
 	// First, check if credentials file exists and copy it to the expected location for Claude Code
 	// The credentials file is mounted at ~/.claude-credentials
-	// Claude Code on Linux stores credentials at ~/.claude/credentials.json
+	// Claude Code on Linux stores credentials at ~/.claude/.credentials.json (with leading dot!)
 	// Use --dangerously-skip-permissions since we're in an isolated container
-	setupCmd := `test -f /home/claude/.claude-credentials && cp /home/claude/.claude-credentials /home/claude/.claude/credentials.json 2>/dev/null; exec claude --dangerously-skip-permissions`
+	setupCmd := `test -f /home/claude/.claude-credentials && cp /home/claude/.claude-credentials /home/claude/.claude/.credentials.json 2>/dev/null; exec claude --dangerously-skip-permissions`
 	if initialPrompt != "" {
-		setupCmd = `test -f /home/claude/.claude-credentials && cp /home/claude/.claude-credentials /home/claude/.claude/credentials.json 2>/dev/null; exec claude --dangerously-skip-permissions "` + escapeShellArg(initialPrompt) + `"`
+		setupCmd = `test -f /home/claude/.claude-credentials && cp /home/claude/.claude-credentials /home/claude/.claude/.credentials.json 2>/dev/null; exec claude --dangerously-skip-permissions "` + escapeShellArg(initialPrompt) + `"`
 	}
 	cmd := []string{"/bin/bash", "-c", setupCmd}
 
@@ -128,6 +146,7 @@ func NewPTYSession(ctx context.Context, dockerClient *client.Client, containerID
 		execID:       execResp.ID,
 		conn:         &attachResp,
 		stdin:        attachResp.Conn,
+		done:         make(chan struct{}),
 		workstreamID: workstreamID,
 		dockerClient: dockerClient,
 		width:        width,
@@ -149,7 +168,11 @@ func (p *PTYSession) Resize(width, height int) error {
 	p.width = width
 	p.height = height
 
-	return p.dockerClient.ContainerExecResize(context.Background(), p.execID, container.ResizeOptions{
+	// Use a short timeout for resize - it should be fast
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	return p.dockerClient.ContainerExecResize(ctx, p.execID, container.ResizeOptions{
 		Height: uint(height),
 		Width:  uint(width),
 	})
@@ -160,6 +183,13 @@ func (p *PTYSession) Resize(width, height int) error {
 func (p *PTYSession) StartReadLoop() {
 	buf := make([]byte, 4096)
 	for {
+		// Check if we should exit via the done channel (non-blocking)
+		select {
+		case <-p.done:
+			return
+		default:
+		}
+
 		p.mu.Lock()
 		if p.closed {
 			p.mu.Unlock()
@@ -174,11 +204,15 @@ func (p *PTYSession) StartReadLoop() {
 
 		n, err := conn.Reader.Read(buf)
 		if err != nil {
-			p.mu.Lock()
-			closed := p.closed
-			p.mu.Unlock()
+			// Check done channel before sending error message
+			// This prevents sending spurious error messages during shutdown
+			select {
+			case <-p.done:
+				return
+			default:
+			}
 
-			if !closed && program != nil {
+			if program != nil {
 				program.Send(PTYClosedMsg{
 					WorkstreamID: p.workstreamID,
 					Error:        err,
@@ -232,6 +266,11 @@ func (p *PTYSession) Close() error {
 	}
 	p.closed = true
 
+	// Signal goroutines to exit
+	if p.done != nil {
+		close(p.done)
+	}
+
 	if p.conn != nil {
 		p.conn.Close()
 	}
@@ -244,4 +283,10 @@ func (p *PTYSession) IsClosed() bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	return p.closed
+}
+
+// Done returns a channel that's closed when the session is closed.
+// This can be used to wait for the session to end.
+func (p *PTYSession) Done() <-chan struct{} {
+	return p.done
 }

@@ -7,10 +7,10 @@ import (
 	"strings"
 	"time"
 
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/STRML/claude-cells/internal/docker"
 	"github.com/STRML/claude-cells/internal/workstream"
+	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 const escapeTimeout = 300 * time.Millisecond
@@ -402,7 +402,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case DialogNewWorkstream:
 			// Create new workstream
 			ws := workstream.New(msg.Value)
-			m.manager.Add(ws)
+			if err := m.manager.Add(ws); err != nil {
+				m.toast = fmt.Sprintf("Cannot create workstream: %v", err)
+				m.toastExpiry = time.Now().Add(toastDuration * 2)
+				return m, nil
+			}
 			pane := NewPaneModel(ws)
 			pane.AppendOutput("Starting container...\n")
 			m.panes = append(m.panes, pane)
@@ -574,7 +578,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				case MergeActionCreatePR:
 					m.panes[i].AppendOutput("\nCreating pull request...\n")
 					dialog := NewProgressDialog("Creating Pull Request", fmt.Sprintf("Branch: %s\n\nPushing and creating PR...", ws.BranchName), ws.ID)
-					dialog.SetSize(60, 15)
+					dialog.SetSize(80, 15) // Wide enough for PR URLs to be cmd-clickable
 					m.dialog = &dialog
 					return m, CreatePRCmd(ws)
 				case MergeActionPush:
@@ -749,7 +753,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			ws := workstream.NewWithID(saved.ID, saved.BranchName, saved.Prompt)
 			ws.ContainerID = saved.ContainerID
 			ws.CreatedAt = saved.CreatedAt
-			m.manager.Add(ws)
+			if err := m.manager.Add(ws); err != nil {
+				// Skip workstreams that exceed the limit during restore
+				continue
+			}
 
 			pane := NewPaneModel(ws)
 			pane.AppendOutput("Resuming session...\n")
@@ -809,7 +816,7 @@ func (m AppModel) View() string {
 	} else {
 		empty := lipgloss.NewStyle().
 			Width(m.width).
-			Height(m.height - 4).
+			Height(m.height-4).
 			Align(lipgloss.Center, lipgloss.Center).
 			Foreground(lipgloss.Color("#666666")).
 			Render("No workstreams. Press [n] to create one.")

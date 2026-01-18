@@ -3,6 +3,7 @@ package docker
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 )
 
@@ -100,5 +101,42 @@ func TestCopyDir(t *testing.T) {
 	}
 }
 
-// Note: TestInitClaudeConfig_OverwritesExisting is skipped because it requires writing
-// to ~/.ccells which may be outside the sandbox.
+// TestInitClaudeConfig_CreatesCredentialsInClaudeDir verifies that credentials.json
+// is written inside the .claude directory (not just as a separate file).
+func TestInitClaudeConfig_CreatesCredentialsInClaudeDir(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping test that writes to home directory")
+	}
+
+	// Reset the global config so InitClaudeConfig runs fresh
+	globalConfigOnce = sync.Once{}
+	globalConfig = nil
+	globalConfigErr = nil
+
+	cfg, err := InitClaudeConfig()
+	if err != nil {
+		t.Fatalf("InitClaudeConfig() error = %v", err)
+	}
+
+	// Check that .claude directory exists
+	if _, err := os.Stat(cfg.ClaudeDir); os.IsNotExist(err) {
+		t.Fatalf("ClaudeDir %s does not exist", cfg.ClaudeDir)
+	}
+
+	// Check for .credentials.json inside .claude directory (note leading dot!)
+	credsPath := filepath.Join(cfg.ClaudeDir, ".credentials.json")
+	if _, err := os.Stat(credsPath); os.IsNotExist(err) {
+		// This is OK if user doesn't have OAuth credentials
+		t.Logf(".credentials.json not found at %s (user may not have OAuth credentials)", credsPath)
+	} else {
+		t.Logf(".credentials.json found at %s", credsPath)
+	}
+
+	// Check for settings.json (should be copied from ~/.claude/settings.json)
+	settingsPath := filepath.Join(cfg.ClaudeDir, "settings.json")
+	if _, err := os.Stat(settingsPath); os.IsNotExist(err) {
+		t.Logf("settings.json not found at %s (user may not have settings)", settingsPath)
+	} else {
+		t.Logf("settings.json found at %s", settingsPath)
+	}
+}

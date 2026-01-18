@@ -10,8 +10,8 @@ func TestMutagenSessionName(t *testing.T) {
 		branch   string
 		expected string
 	}{
-		{"add-auth", "docker-tui-add-auth"},
-		{"feature/login", "docker-tui-feature-login"},
+		{"add-auth", "ccells-add-auth"},
+		{"feature/login", "ccells-feature-login"},
 	}
 
 	for _, tt := range tests {

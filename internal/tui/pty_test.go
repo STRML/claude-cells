@@ -36,6 +36,7 @@ func TestPTYSession_IsClosed(t *testing.T) {
 	session := &PTYSession{
 		workstreamID: "test",
 		closed:       false,
+		done:         make(chan struct{}),
 	}
 
 	if session.IsClosed() {
@@ -52,6 +53,7 @@ func TestPTYSession_Close(t *testing.T) {
 	session := &PTYSession{
 		workstreamID: "test",
 		closed:       false,
+		done:         make(chan struct{}),
 	}
 
 	err := session.Close()
@@ -61,6 +63,14 @@ func TestPTYSession_Close(t *testing.T) {
 
 	if !session.IsClosed() {
 		t.Error("Session should be closed after Close()")
+	}
+
+	// Verify done channel is closed
+	select {
+	case <-session.Done():
+		// Expected - channel is closed
+	default:
+		t.Error("Done channel should be closed after Close()")
 	}
 
 	// Closing again should be idempotent
@@ -88,21 +98,29 @@ func TestSetProgram(t *testing.T) {
 
 func TestEscapeShellArg(t *testing.T) {
 	tests := []struct {
+		name     string
 		input    string
 		expected string
 	}{
-		{"hello", "hello"},
-		{"hello world", "hello world"},
-		{`hello "world"`, `hello \"world\"`},
-		{`hello\world`, `hello\\world`},
-		{"hello $VAR", `hello \$VAR`},
-		{"hello `cmd`", "hello \\`cmd\\`"},
+		{"plain text", "hello", "hello"},
+		{"with space", "hello world", "hello world"},
+		{"double quotes", `hello "world"`, `hello \"world\"`},
+		{"backslash", `hello\world`, `hello\\world`},
+		{"dollar sign", "hello $VAR", `hello \$VAR`},
+		{"backticks", "hello `cmd`", "hello \\`cmd\\`"},
+		{"newline", "hello\nworld", `hello\nworld`},
+		{"carriage return", "hello\rworld", `hello\rworld`},
+		{"null byte", "hello\x00world", "helloworld"},
+		{"mixed special", "test\n$VAR\x00`cmd`", `test\n\$VAR\` + "`cmd\\`"},
+		{"multiple newlines", "line1\nline2\nline3", `line1\nline2\nline3`},
 	}
 
 	for _, tt := range tests {
-		result := escapeShellArg(tt.input)
-		if result != tt.expected {
-			t.Errorf("escapeShellArg(%q) = %q, want %q", tt.input, result, tt.expected)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			result := escapeShellArg(tt.input)
+			if result != tt.expected {
+				t.Errorf("escapeShellArg(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
 	}
 }

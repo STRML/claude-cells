@@ -195,7 +195,8 @@ func TestContainerClaudeCodeExec(t *testing.T) {
 	}
 
 	defer func() {
-		cleanupCtx, _ := context.WithTimeout(context.Background(), 30*time.Second)
+		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cleanupCancel()
 		_ = client.StopContainer(cleanupCtx, containerID)
 		_ = client.RemoveContainer(cleanupCtx, containerID)
 	}()
@@ -253,9 +254,10 @@ func TestMultipleContainers(t *testing.T) {
 	// Cleanup all containers
 	defer func() {
 		for _, id := range containerIDs {
-			cleanupCtx, _ := context.WithTimeout(context.Background(), 10*time.Second)
+			cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
 			_ = client.StopContainer(cleanupCtx, id)
 			_ = client.RemoveContainer(cleanupCtx, id)
+			cleanupCancel()
 		}
 	}()
 

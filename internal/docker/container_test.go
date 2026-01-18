@@ -9,12 +9,12 @@ import (
 
 func TestContainerConfig(t *testing.T) {
 	tests := []struct {
-		name              string
-		branchName        string
-		repoPath          string
-		wantPrefix        string
-		wantContains      []string // parts that should be in the name
-		wantNotContains   []string // parts that should NOT be in the name
+		name            string
+		branchName      string
+		repoPath        string
+		wantPrefix      string
+		wantContains    []string // parts that should be in the name
+		wantNotContains []string // parts that should NOT be in the name
 	}{
 		{
 			name:         "creates config with branch name and project",
@@ -269,5 +269,81 @@ func TestContainer_PauseUnpause(t *testing.T) {
 	}
 	if state != "running" {
 		t.Errorf("State = %q, want 'running'", state)
+	}
+}
+
+// Integration test for cleanup orphaned containers
+func TestContainer_CleanupOrphanedContainers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test")
+	}
+
+	client := skipIfDockerUnavailable(t)
+	defer client.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+
+	// Create two containers - one "known" and one "orphan"
+	knownCfg := &ContainerConfig{
+		Name:  "ccells-known-test-" + time.Now().Format("150405"),
+		Image: "alpine:latest",
+	}
+	orphanCfg := &ContainerConfig{
+		Name:  "ccells-orphan-test-" + time.Now().Format("150405"),
+		Image: "alpine:latest",
+	}
+
+	knownID, err := client.CreateContainer(ctx, knownCfg)
+	if err != nil {
+		t.Fatalf("CreateContainer(known) error = %v", err)
+	}
+
+	orphanID, err := client.CreateContainer(ctx, orphanCfg)
+	if err != nil {
+		_ = client.RemoveContainer(ctx, knownID)
+		t.Fatalf("CreateContainer(orphan) error = %v", err)
+	}
+
+	// Cleanup known container at end
+	defer func() {
+		_ = client.StopContainer(ctx, knownID)
+		_ = client.RemoveContainer(ctx, knownID)
+	}()
+
+	// Start both containers
+	if err := client.StartContainer(ctx, knownID); err != nil {
+		t.Fatalf("StartContainer(known) error = %v", err)
+	}
+	if err := client.StartContainer(ctx, orphanID); err != nil {
+		t.Fatalf("StartContainer(orphan) error = %v", err)
+	}
+
+	// Call cleanup with only knownID as known
+	removed, err := client.CleanupOrphanedContainers(ctx, []string{knownID})
+	if err != nil {
+		t.Fatalf("CleanupOrphanedContainers() error = %v", err)
+	}
+
+	// Should have removed the orphan
+	if removed < 1 {
+		t.Errorf("CleanupOrphanedContainers() removed = %d, want >= 1", removed)
+	}
+
+	// Verify orphan is gone
+	_, err = client.GetContainerState(ctx, orphanID)
+	if err == nil {
+		t.Error("Orphan container should have been removed")
+		_ = client.StopContainer(ctx, orphanID)
+		_ = client.RemoveContainer(ctx, orphanID)
+	}
+
+	// Verify known is still there
+	state, err := client.GetContainerState(ctx, knownID)
+	if err != nil {
+		t.Fatalf("GetContainerState(known) error = %v", err)
+	}
+	if state != "running" {
+		t.Errorf("Known container state = %q, want 'running'", state)
 	}
 }

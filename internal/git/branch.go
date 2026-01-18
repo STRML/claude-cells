@@ -58,7 +58,7 @@ func (g *Git) HasUncommittedChanges(ctx context.Context) (bool, error) {
 
 // Stash stashes uncommitted changes.
 func (g *Git) Stash(ctx context.Context) error {
-	_, err := g.run(ctx, "stash", "push", "-m", "docker-tui pairing mode")
+	_, err := g.run(ctx, "stash", "push", "-m", "ccells pairing mode")
 	return err
 }
 
