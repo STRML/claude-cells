@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	"github.com/STRML/claude-cells/internal/workstream"
@@ -11,6 +12,14 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/hinshun/vt10x"
 )
+
+// ansiRegex matches ANSI escape sequences
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+
+// stripANSI removes all ANSI escape sequences from a string
+func stripANSI(s string) string {
+	return ansiRegex.ReplaceAllString(s, "")
+}
 
 // PaneModel represents a single workstream pane
 type PaneModel struct {
@@ -255,11 +264,17 @@ func (p PaneModel) View() string {
 	p.viewport.SetContent(outputContent)
 	outputView := p.viewport.View()
 
-	// Dim content in nav mode (focused but not in input mode)
+	// Greyscale panes when not in input mode
 	if p.focused && !p.inputMode {
-		// Apply dim effect by using faint styling
-		dimStyle := lipgloss.NewStyle().Faint(true)
-		outputView = dimStyle.Render(outputView)
+		// Focused but nav mode: lighter grey
+		outputView = stripANSI(outputView)
+		greyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+		outputView = greyStyle.Render(outputView)
+	} else if !p.focused {
+		// Unfocused panes: dark grey
+		outputView = stripANSI(outputView)
+		greyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+		outputView = greyStyle.Render(outputView)
 	}
 
 	// Input (only show when focused and no PTY)
