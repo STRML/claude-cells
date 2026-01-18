@@ -266,29 +266,25 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "left", "right", "up", "down":
-			// Check for tmux-style prefix (ctrl-b + arrow)
-			if m.tmuxPrefix && time.Since(m.tmuxPrefixTime) < tmuxPrefixTimeout {
-				m.tmuxPrefix = false
-				if len(m.panes) > 1 {
-					m.panes[m.focusedPane].SetFocused(false)
-					switch msg.String() {
-					case "left", "up":
-						m.focusedPane--
-						if m.focusedPane < 0 {
-							m.focusedPane = len(m.panes) - 1
-						}
-					case "right", "down":
-						m.focusedPane++
-						if m.focusedPane >= len(m.panes) {
-							m.focusedPane = 0
-						}
-					}
-					m.panes[m.focusedPane].SetFocused(true)
-				}
-				return m, nil
-			}
-			// Reset prefix if not used
+			// Arrow keys switch panes in nav mode (also works with Ctrl+B prefix)
 			m.tmuxPrefix = false
+			if len(m.panes) > 1 {
+				m.panes[m.focusedPane].SetFocused(false)
+				switch msg.String() {
+				case "left", "up":
+					m.focusedPane--
+					if m.focusedPane < 0 {
+						m.focusedPane = len(m.panes) - 1
+					}
+				case "right", "down":
+					m.focusedPane++
+					if m.focusedPane >= len(m.panes) {
+						m.focusedPane = 0
+					}
+				}
+				m.panes[m.focusedPane].SetFocused(true)
+			}
+			return m, nil
 
 		case "n":
 			// New workstream dialog
@@ -406,6 +402,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "?":
 			// Show help dialog
 			helpText := `Navigation Mode:
+  ←→ ↑↓       Switch between panes
   i, Enter    Enter input mode (interact with Claude)
   n           New workstream
   d           Destroy workstream
@@ -414,15 +411,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
   s           Settings
   l           Show logs
   1-9         Focus pane by number
-  ←→ or Tab   Cycle focus
-  Ctrl+B ←→   Switch pane (works in input mode too)
+  Tab         Cycle focus
   q           Quit (pauses containers)
   Esc Esc     Quit
 
 Input Mode:
   Esc Esc     Exit to nav mode
   Ctrl+B Esc  Exit to nav mode
-  Ctrl+B ←→   Switch pane
+  Ctrl+B ←→   Switch pane (without exiting input mode)
   All other keys sent to Claude Code`
 			dialog := NewLogDialog("Help", helpText)
 			dialog.SetSize(60, 25)
@@ -514,6 +510,37 @@ Input Mode:
 				ws := m.panes[i].Workstream()
 				ws.SetError(msg.Error)
 				m.panes[i].AppendOutput(fmt.Sprintf("Error: %v\n", msg.Error))
+				break
+			}
+		}
+		return m, nil
+
+	case BranchConflictMsg:
+		// Branch already exists - show conflict resolution dialog
+		for i := range m.panes {
+			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				m.panes[i].AppendOutput(fmt.Sprintf("Branch '%s' already exists.\n", msg.BranchName))
+				dialog := NewBranchConflictDialog(msg.BranchName, msg.WorkstreamID)
+				dialog.SetSize(50, 15)
+				m.dialog = &dialog
+				break
+			}
+		}
+		return m, nil
+
+	case BranchConflictConfirmMsg:
+		m.dialog = nil
+		for i := range m.panes {
+			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				ws := m.panes[i].Workstream()
+				switch msg.Action {
+				case BranchConflictUseExisting:
+					m.panes[i].AppendOutput("Using existing branch...\n")
+					return m, StartContainerWithExistingBranchCmd(ws)
+				case BranchConflictDelete:
+					m.panes[i].AppendOutput("Deleting and recreating branch...\n")
+					return m, DeleteAndRestartContainerCmd(ws)
+				}
 				break
 			}
 		}
@@ -937,7 +964,7 @@ func (m AppModel) renderTitleBar() string {
 	if m.inputMode {
 		hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [Esc Esc] nav  [Ctrl+B ←→] switch pane")
 	} else {
-		hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [n]ew  [m]erge/PR  [d]estroy  [i]nput  [?]help  [Esc Esc]quit")
+		hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [←→]panes  [n]ew  [m]erge  [d]estroy  [i]nput  [?]help  [Esc Esc]quit")
 	}
 
 	left := mode + title
@@ -1053,31 +1080,60 @@ func (m AppModel) overlayDialog(background string) string {
 		y = 0
 	}
 
-	// Create a completely fresh view with dialog overlaid
-	// This avoids any ANSI corruption issues
+	// Overlay dialog on background, preserving background content outside dialog area
 	var result strings.Builder
 	dialogLines := strings.Split(dialog, "\n")
 	bgLines := strings.Split(background, "\n")
 
 	// Ensure we have enough lines
 	for len(bgLines) < m.height {
-		bgLines = append(bgLines, "")
+		bgLines = append(bgLines, strings.Repeat(" ", m.width))
 	}
 
 	for row := 0; row < m.height; row++ {
+		bgLine := ""
+		if row < len(bgLines) {
+			bgLine = bgLines[row]
+		}
+
 		// Check if this row is within the dialog area
 		dialogRow := row - y
 		if dialogRow >= 0 && dialogRow < len(dialogLines) {
-			// This row contains part of the dialog
-			leftPad := strings.Repeat(" ", x)
+			// This row contains part of the dialog - blend with background
 			dLine := dialogLines[dialogRow]
-			result.WriteString(leftPad)
-			result.WriteString(dLine)
-		} else {
-			// This row is outside the dialog - use background
-			if row < len(bgLines) {
-				result.WriteString(bgLines[row])
+			dLineWidth := lipgloss.Width(dLine)
+
+			// Get visible width of background line (for ANSI content, we need plain width)
+			bgRunes := []rune(stripANSI(bgLine))
+
+			// Build the composite line:
+			// 1. Left part of background (up to x)
+			// 2. Dialog content
+			// 3. Right part of background (after dialog)
+
+			// Left portion - just use spaces since background may have complex ANSI
+			if x > 0 {
+				result.WriteString(strings.Repeat(" ", x))
 			}
+
+			// Dialog content
+			result.WriteString(dLine)
+
+			// Right portion - fill remaining width with spaces
+			rightStart := x + dLineWidth
+			if rightStart < m.width {
+				remaining := m.width - rightStart
+				// Try to preserve some background on the right if possible
+				if rightStart < len(bgRunes) {
+					// Use spaces since background has complex ANSI that could corrupt
+					result.WriteString(strings.Repeat(" ", remaining))
+				} else {
+					result.WriteString(strings.Repeat(" ", remaining))
+				}
+			}
+		} else {
+			// This row is outside the dialog - use background as-is
+			result.WriteString(bgLine)
 		}
 		if row < m.height-1 {
 			result.WriteString("\n")

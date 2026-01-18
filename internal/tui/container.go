@@ -52,9 +52,55 @@ type ContainerLogsMsg struct {
 	Error        error
 }
 
+// BranchConflictMsg is sent when a branch already exists.
+type BranchConflictMsg struct {
+	WorkstreamID string
+	BranchName   string
+	RepoPath     string
+}
+
 // StartContainerCmd returns a command that creates and starts a container.
 // It first creates and checks out a feature branch for the workstream.
 func StartContainerCmd(ws *workstream.Workstream) tea.Cmd {
+	return startContainerWithOptions(ws, false)
+}
+
+// StartContainerWithExistingBranchCmd starts a container using an existing branch.
+func StartContainerWithExistingBranchCmd(ws *workstream.Workstream) tea.Cmd {
+	return startContainerWithOptions(ws, true)
+}
+
+// DeleteAndRestartContainerCmd deletes the existing branch and creates a new one.
+func DeleteAndRestartContainerCmd(ws *workstream.Workstream) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
+		repoPath, err := os.Getwd()
+		if err != nil {
+			return ContainerErrorMsg{
+				WorkstreamID: ws.ID,
+				Error:        err,
+			}
+		}
+
+		gitRepo := git.New(repoPath)
+
+		// Delete the existing branch
+		if err := gitRepo.DeleteBranch(ctx, ws.BranchName); err != nil {
+			return ContainerErrorMsg{
+				WorkstreamID: ws.ID,
+				Error:        fmt.Errorf("failed to delete branch %s: %w", ws.BranchName, err),
+			}
+		}
+
+		// Now start with a fresh branch (false = create new branch)
+		return startContainerWithOptions(ws, false)()
+	}
+}
+
+// startContainerWithOptions is the internal implementation for starting containers.
+func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
@@ -68,12 +114,34 @@ func StartContainerCmd(ws *workstream.Workstream) tea.Cmd {
 			}
 		}
 
-		// Create and checkout feature branch before starting container
 		gitRepo := git.New(repoPath)
-		if err := gitRepo.CreateAndCheckout(ctx, ws.BranchName); err != nil {
-			return ContainerErrorMsg{
-				WorkstreamID: ws.ID,
-				Error:        fmt.Errorf("failed to create branch %s: %w", ws.BranchName, err),
+
+		if useExistingBranch {
+			// Just checkout the existing branch
+			if err := gitRepo.Checkout(ctx, ws.BranchName); err != nil {
+				return ContainerErrorMsg{
+					WorkstreamID: ws.ID,
+					Error:        fmt.Errorf("failed to checkout branch %s: %w", ws.BranchName, err),
+				}
+			}
+		} else {
+			// Check if branch already exists
+			exists, _ := gitRepo.BranchExists(ctx, ws.BranchName)
+			if exists {
+				// Branch already exists - ask user what to do
+				return BranchConflictMsg{
+					WorkstreamID: ws.ID,
+					BranchName:   ws.BranchName,
+					RepoPath:     repoPath,
+				}
+			}
+
+			// Create and checkout feature branch before starting container
+			if err := gitRepo.CreateAndCheckout(ctx, ws.BranchName); err != nil {
+				return ContainerErrorMsg{
+					WorkstreamID: ws.ID,
+					Error:        fmt.Errorf("failed to create branch %s: %w", ws.BranchName, err),
+				}
 			}
 		}
 
@@ -87,19 +155,19 @@ func StartContainerCmd(ws *workstream.Workstream) tea.Cmd {
 		}
 		defer dockerClient.Close()
 
-		// Get isolated claude config paths (copied to ~/.ccells/claude-config/)
-		// This protects the user's original ~/.claude.json from container corruption
-		configPaths, err := docker.GetClaudeConfig()
+		// Create container config with unique name
+		cfg := docker.NewContainerConfig(ws.BranchName, repoPath)
+		cfg.Image = docker.RequiredImage
+
+		// Create per-container isolated config directory
+		// This prevents race conditions when multiple containers modify credentials
+		configPaths, err := docker.CreateContainerConfig(cfg.Name)
 		if err != nil {
 			return ContainerErrorMsg{
 				WorkstreamID: ws.ID,
-				Error:        fmt.Errorf("failed to initialize claude config: %w", err),
+				Error:        fmt.Errorf("failed to create container config: %w", err),
 			}
 		}
-
-		// Create container config
-		cfg := docker.NewContainerConfig(ws.BranchName, repoPath)
-		cfg.Image = docker.RequiredImage
 		cfg.ClaudeCfg = configPaths.ClaudeDir
 		cfg.ClaudeJSON = configPaths.ClaudeJSON
 		cfg.GitConfig = configPaths.GitConfig
@@ -164,6 +232,13 @@ func StartPTYCmd(ws *workstream.Workstream, initialPrompt string, width, height 
 			// Pass the raw credentials JSON - Claude Code will parse it
 			opts.EnvVars = append(opts.EnvVars, "CLAUDE_CODE_CREDENTIALS="+creds.Raw)
 		}
+
+		// Disable Claude Code auto-updater, error reporting, and telemetry
+		opts.EnvVars = append(opts.EnvVars,
+			"DISABLE_AUTOUPDATER=1",
+			"DISABLE_ERROR_REPORTING=1",
+			"DISABLE_TELEMETRY=1",
+		)
 
 		session, err := NewPTYSession(ctx, dockerClient, ws.ContainerID, ws.ID, initialPrompt, opts)
 		if err != nil {

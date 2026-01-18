@@ -175,27 +175,9 @@ func (p PaneModel) Update(msg tea.Msg) (PaneModel, tea.Cmd) {
 				return p, nil
 			}
 
-			// No PTY - use text input for prompts
-			switch msg.String() {
-			case "enter":
-				if p.input.Value() != "" {
-					prompt := p.input.Value()
-					p.input.Reset()
-					return p, func() tea.Msg {
-						return PromptMsg{
-							WorkstreamID: p.workstream.ID,
-							Prompt:       prompt,
-						}
-					}
-				}
-			}
-		}
-
-		// Only update text input if no PTY
-		if p.pty == nil || p.pty.IsClosed() {
-			var cmd tea.Cmd
-			p.input, cmd = p.input.Update(msg)
-			cmds = append(cmds, cmd)
+			// No PTY - don't accept input
+			// This can happen if the container failed to start or the session ended
+			return p, nil
 		}
 	}
 

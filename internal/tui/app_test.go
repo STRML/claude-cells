@@ -708,18 +708,23 @@ func TestAppModel_TmuxPrefix_Timeout(t *testing.T) {
 
 	originalFocus := app.focusedPane
 
-	// Press left arrow - should NOT switch panes because prefix timed out
+	// Press left arrow - in nav mode, arrow keys ALWAYS switch panes
+	// (the tmux prefix is only required in input mode)
 	msg := tea.KeyMsg{Type: tea.KeyLeft}
 	model, _ = app.Update(msg)
 	app = model.(AppModel)
 
-	// In nav mode, arrow keys are not handled, so focus shouldn't change
-	// and prefix should be reset
+	// Prefix should be reset
 	if app.tmuxPrefix {
 		t.Error("Expired tmux prefix should be reset")
 	}
-	if app.focusedPane != originalFocus {
-		t.Error("Focus should not change with expired prefix")
+	// Focus SHOULD change in nav mode (arrow keys work without prefix)
+	expectedFocus := originalFocus - 1
+	if expectedFocus < 0 {
+		expectedFocus = len(app.panes) - 1
+	}
+	if app.focusedPane != expectedFocus {
+		t.Errorf("Focus should change with arrow key in nav mode, expected %d, got %d", expectedFocus, app.focusedPane)
 	}
 }
 
@@ -1019,9 +1024,13 @@ func TestAppModel_NavMode_ArrowWithoutTmuxPrefix(t *testing.T) {
 	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyLeft})
 	app = model.(AppModel)
 
-	// In nav mode, arrow without prefix should not change focus
-	if app.focusedPane != originalFocus {
-		t.Error("Arrow without tmux prefix in nav mode should not change focus")
+	// In nav mode, arrow keys SHOULD change focus (no prefix needed)
+	expectedFocus := originalFocus - 1
+	if expectedFocus < 0 {
+		expectedFocus = len(app.panes) - 1
+	}
+	if app.focusedPane != expectedFocus {
+		t.Errorf("Arrow in nav mode should change focus, expected %d, got %d", expectedFocus, app.focusedPane)
 	}
 }
 

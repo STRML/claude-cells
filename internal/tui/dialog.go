@@ -20,6 +20,7 @@ const (
 	DialogMerge
 	DialogLog
 	DialogProgress
+	DialogBranchConflict
 )
 
 // DialogModel represents a modal dialog
@@ -117,6 +118,33 @@ const (
 	MergeActionPush     MergeAction = "push"
 	MergeActionCancel   MergeAction = "cancel"
 )
+
+// BranchConflictAction represents a branch conflict resolution action
+type BranchConflictAction string
+
+const (
+	BranchConflictUseExisting BranchConflictAction = "use_existing"
+	BranchConflictDelete      BranchConflictAction = "delete"
+	BranchConflictCancel      BranchConflictAction = "cancel"
+)
+
+// NewBranchConflictDialog creates a dialog for handling branch conflicts
+func NewBranchConflictDialog(branchName, workstreamID string) DialogModel {
+	body := fmt.Sprintf("Branch '%s' already exists.\n\nWhat would you like to do?", branchName)
+
+	return DialogModel{
+		Type:         DialogBranchConflict,
+		Title:        "Branch Already Exists",
+		Body:         body,
+		WorkstreamID: workstreamID,
+		MenuItems: []string{
+			"Use existing branch",
+			"Delete branch and recreate",
+			"Cancel",
+		},
+		MenuSelection: 0,
+	}
+}
 
 // NewMergeDialog creates a merge/PR menu dialog
 func NewMergeDialog(branchName, workstreamID string) DialogModel {
@@ -257,6 +285,24 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				}
 			}
 
+			if d.Type == DialogBranchConflict {
+				var action BranchConflictAction
+				switch d.MenuSelection {
+				case 0:
+					action = BranchConflictUseExisting
+				case 1:
+					action = BranchConflictDelete
+				default:
+					action = BranchConflictCancel
+				}
+				if action == BranchConflictCancel {
+					return d, func() tea.Msg { return DialogCancelMsg{} }
+				}
+				return d, func() tea.Msg {
+					return BranchConflictConfirmMsg{Action: action, WorkstreamID: d.WorkstreamID}
+				}
+			}
+
 			if d.Type == DialogDestroy {
 				if strings.ToLower(d.Input.Value()) == d.ConfirmWord {
 					return d, func() tea.Msg {
@@ -291,7 +337,7 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				return d, nil
 			}
 			// Only handle for menu dialogs, otherwise pass to input
-			if d.Type == DialogSettings || d.Type == DialogMerge {
+			if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict {
 				if d.MenuSelection > 0 {
 					d.MenuSelection--
 				}
@@ -306,7 +352,7 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				return d, nil
 			}
 			// Only handle for menu dialogs, otherwise pass to input
-			if d.Type == DialogSettings || d.Type == DialogMerge {
+			if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict {
 				if d.MenuSelection < len(d.MenuItems)-1 {
 					d.MenuSelection++
 				}
@@ -316,7 +362,7 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 	}
 
 	// For menu-style, log, and progress dialogs, don't pass keys to input
-	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogLog || d.Type == DialogProgress {
+	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogLog || d.Type == DialogProgress {
 		return d, nil
 	}
 
@@ -379,7 +425,7 @@ func (d DialogModel) View() string {
 	content.WriteString("\n\n")
 
 	// Menu-style dialogs render a selection list
-	if d.Type == DialogSettings || d.Type == DialogMerge {
+	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict {
 		for i, item := range d.MenuItems {
 			if i == d.MenuSelection {
 				content.WriteString("→ ")
@@ -442,5 +488,11 @@ type PruneResultMsg struct {
 // MergeConfirmMsg is sent when a merge action is confirmed
 type MergeConfirmMsg struct {
 	Action       MergeAction
+	WorkstreamID string
+}
+
+// BranchConflictConfirmMsg is sent when a branch conflict resolution is confirmed
+type BranchConflictConfirmMsg struct {
+	Action       BranchConflictAction
 	WorkstreamID string
 }

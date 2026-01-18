@@ -94,3 +94,13 @@ func (g *Git) BranchExistsRemote(ctx context.Context, name string) (bool, error)
 	}
 	return len(out) > 0, nil
 }
+
+// BranchExists checks if a local branch exists.
+func (g *Git) BranchExists(ctx context.Context, name string) (bool, error) {
+	_, err := g.run(ctx, "rev-parse", "--verify", "refs/heads/"+name)
+	if err != nil {
+		// Branch doesn't exist
+		return false, nil
+	}
+	return true, nil
+}

@@ -35,15 +35,113 @@ var (
 	globalConfig     *ConfigPaths
 	globalConfigOnce sync.Once
 	globalConfigErr  error
+	configMutex      sync.Mutex // Protects per-container config creation
 )
 
 // GetClaudeConfig returns the isolated claude config paths, initializing if needed.
 // This is safe to call from multiple goroutines.
+// DEPRECATED: Use CreateContainerConfig for per-container isolation.
 func GetClaudeConfig() (*ConfigPaths, error) {
 	globalConfigOnce.Do(func() {
 		globalConfig, globalConfigErr = InitClaudeConfig()
 	})
 	return globalConfig, globalConfigErr
+}
+
+// CreateContainerConfig creates an isolated config directory for a specific container.
+// Each container gets its own copy to prevent race conditions when multiple
+// Claude Code instances modify credentials simultaneously.
+func CreateContainerConfig(containerName string) (*ConfigPaths, error) {
+	configMutex.Lock()
+	defer configMutex.Unlock()
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get home directory: %w", err)
+	}
+
+	// Source paths (user's original config)
+	srcClaudeDir := filepath.Join(home, ClaudeDir)
+	srcClaudeJSON := filepath.Join(home, ClaudeJSONFile)
+	srcGitConfig := filepath.Join(home, GitConfigFile)
+
+	// Per-container destination paths
+	cellsDir, err := GetCellsDir()
+	if err != nil {
+		return nil, err
+	}
+	containerConfigDir := filepath.Join(cellsDir, "containers", containerName)
+	dstClaudeDir := filepath.Join(containerConfigDir, ClaudeDir)
+	dstClaudeJSON := filepath.Join(containerConfigDir, ClaudeJSONFile)
+	dstGitConfig := filepath.Join(containerConfigDir, GitConfigFile)
+
+	// Remove old container config if exists
+	_ = removeAllSafe(containerConfigDir)
+
+	// Create container config directory
+	if err := os.MkdirAll(containerConfigDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create container config directory: %w", err)
+	}
+
+	// Copy .claude directory if it exists
+	if _, err := os.Stat(srcClaudeDir); err == nil {
+		if err := copyDir(srcClaudeDir, dstClaudeDir); err != nil {
+			return nil, fmt.Errorf("failed to copy .claude directory: %w", err)
+		}
+	}
+
+	// Copy .claude.json if it exists
+	if _, err := os.Stat(srcClaudeJSON); err == nil {
+		if err := copyFileForce(srcClaudeJSON, dstClaudeJSON); err != nil {
+			return nil, fmt.Errorf("failed to copy .claude.json: %w", err)
+		}
+	}
+
+	// Copy .gitconfig if it exists
+	if _, err := os.Stat(srcGitConfig); err == nil {
+		if err := copyFileForce(srcGitConfig, dstGitConfig); err != nil {
+			return nil, fmt.Errorf("failed to copy .gitconfig: %w", err)
+		}
+	}
+
+	// Extract and save OAuth credentials
+	creds, err := GetClaudeCredentials()
+	if err == nil && creds != nil && creds.Raw != "" {
+		// Ensure .claude directory exists
+		if err := os.MkdirAll(dstClaudeDir, 0755); err != nil {
+			return nil, fmt.Errorf("failed to create .claude directory: %w", err)
+		}
+		// Write credentials inside .claude directory
+		credsInClaudeDir := filepath.Join(dstClaudeDir, ".credentials.json")
+		if err := os.WriteFile(credsInClaudeDir, []byte(creds.Raw), 0600); err != nil {
+			return nil, fmt.Errorf("failed to write .credentials.json: %w", err)
+		}
+	}
+
+	// Also write separate credentials file
+	dstCredentials := filepath.Join(containerConfigDir, CredentialsFile)
+	if creds != nil && creds.Raw != "" {
+		if err := os.WriteFile(dstCredentials, []byte(creds.Raw), 0600); err != nil {
+			return nil, fmt.Errorf("failed to write credentials: %w", err)
+		}
+	}
+
+	return &ConfigPaths{
+		ClaudeDir:   dstClaudeDir,
+		ClaudeJSON:  dstClaudeJSON,
+		GitConfig:   dstGitConfig,
+		Credentials: dstCredentials,
+	}, nil
+}
+
+// CleanupContainerConfig removes the config directory for a container.
+func CleanupContainerConfig(containerName string) error {
+	cellsDir, err := GetCellsDir()
+	if err != nil {
+		return err
+	}
+	containerConfigDir := filepath.Join(cellsDir, "containers", containerName)
+	return removeAllSafe(containerConfigDir)
 }
 
 // GetCellsDir returns the path to the ccells data directory
