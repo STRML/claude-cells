@@ -762,7 +762,9 @@ Input Mode:
 			} else {
 				logContent = fmt.Sprintf("Container Logs (last 100 lines):\n\n%s", msg.Logs)
 			}
-			dialog := NewLogDialog(m.dialog.Title, logContent)
+			// Extract branch name from existing title (strip "Logs: " prefix)
+			branchName := strings.TrimPrefix(m.dialog.Title, "Logs: ")
+			dialog := NewLogDialog(branchName, logContent)
 			dialog.SetSize(m.width-10, m.height-6)
 			m.dialog = &dialog
 			return m, nil
