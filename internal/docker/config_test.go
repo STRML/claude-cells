@@ -3,6 +3,7 @@ package docker
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 )
@@ -138,5 +139,77 @@ func TestInitClaudeConfig_CreatesCredentialsInClaudeDir(t *testing.T) {
 		t.Logf("settings.json not found at %s (user may not have settings)", settingsPath)
 	} else {
 		t.Logf("settings.json found at %s", settingsPath)
+	}
+}
+
+// TestContainerConfig tests the NewContainerConfig function (no Docker required).
+func TestContainerConfig(t *testing.T) {
+	tests := []struct {
+		name            string
+		branchName      string
+		repoPath        string
+		wantPrefix      string
+		wantContains    []string
+		wantNotContains []string
+	}{
+		{
+			name:         "creates config with branch name and project",
+			branchName:   "add-auth",
+			repoPath:     "/path/to/repo",
+			wantPrefix:   "ccells-",
+			wantContains: []string{"repo", "add-auth"},
+		},
+		{
+			name:            "sanitizes slashes in branch name",
+			branchName:      "feature/add-auth",
+			repoPath:        "/path/to/repo",
+			wantPrefix:      "ccells-",
+			wantContains:    []string{"repo", "feature-add-auth"},
+			wantNotContains: []string{"/"},
+		},
+		{
+			name:         "sanitizes spaces in branch name",
+			branchName:   "my feature",
+			repoPath:     "/path/to/project",
+			wantPrefix:   "ccells-",
+			wantContains: []string{"project", "my-feature"},
+		},
+		{
+			name:         "handles empty repo path",
+			branchName:   "test",
+			repoPath:     "",
+			wantPrefix:   "ccells-",
+			wantContains: []string{"workspace", "test"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := NewContainerConfig(tt.branchName, tt.repoPath)
+
+			if !strings.HasPrefix(cfg.Name, tt.wantPrefix) {
+				t.Errorf("Name = %q, want prefix %q", cfg.Name, tt.wantPrefix)
+			}
+
+			for _, part := range tt.wantContains {
+				if !strings.Contains(cfg.Name, part) {
+					t.Errorf("Name = %q, want to contain %q", cfg.Name, part)
+				}
+			}
+
+			for _, part := range tt.wantNotContains {
+				if strings.Contains(cfg.Name, part) {
+					t.Errorf("Name = %q, should not contain %q", cfg.Name, part)
+				}
+			}
+
+			if !strings.Contains(cfg.Name, "-202") {
+				t.Errorf("Name = %q, should contain timestamp", cfg.Name)
+			}
+
+			if tt.repoPath != "" && cfg.RepoPath != tt.repoPath {
+				t.Errorf("RepoPath = %q, want %q", cfg.RepoPath, tt.repoPath)
+			}
+		})
 	}
 }

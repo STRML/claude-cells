@@ -100,23 +100,24 @@ func NewPTYSession(ctx context.Context, dockerClient *client.Client, containerID
 
 	// Build the command to run Claude Code
 	// Setup steps:
-	// 1. Copy credentials file to expected location
+	// 1. Copy credentials file to expected location (uses $HOME for portability)
 	// 2. Create ~/.local/bin and symlink claude if needed (suppresses "native install" warning)
 	// 3. If claude is not installed, install it via npm (for devcontainer images without claude)
 	// 4. Run claude with --dangerously-skip-permissions since we're in an isolated container
 	//    - If resuming, use --continue to resume the previous session
 	//    - If new session with prompt, pass the prompt as argument
 	setupScript := `
-test -f /home/claude/.claude-credentials && cp /home/claude/.claude-credentials /home/claude/.claude/.credentials.json 2>/dev/null
-mkdir -p /home/claude/.local/bin 2>/dev/null
-test ! -f /home/claude/.local/bin/claude && which claude >/dev/null 2>&1 && ln -sf "$(which claude)" /home/claude/.local/bin/claude 2>/dev/null
+# Ensure PATH includes user's local bin directories
+export PATH="$HOME/.local/bin:$HOME/.claude/local/bin:$PATH"
+
+test -f "$HOME/.claude-credentials" && cp "$HOME/.claude-credentials" "$HOME/.claude/.credentials.json" 2>/dev/null
+mkdir -p "$HOME/.local/bin" 2>/dev/null
+test ! -f "$HOME/.local/bin/claude" && which claude >/dev/null 2>&1 && ln -sf "$(which claude)" "$HOME/.local/bin/claude" 2>/dev/null
 
 # Install Claude Code if not available
 if ! which claude >/dev/null 2>&1; then
   echo "Claude Code not found in container, installing..."
   curl -fsSL https://claude.ai/install.sh | bash 2>&1
-  # Add to PATH for this session
-  export PATH="$HOME/.claude/local/bin:$PATH"
 fi
 `
 	var setupCmd string
@@ -133,17 +134,18 @@ fi
 	cmd := []string{"/bin/bash", "-c", setupCmd}
 
 	// Build environment variables
+	// Don't hardcode HOME or user-specific paths - let the container determine them
 	env := []string{
 		"TERM=xterm-256color",
 		"COLORTERM=truecolor",
-		"PATH=/home/claude/.local/bin:/usr/local/bin:/usr/bin:/bin",
-		"HOME=/home/claude",
 	}
 	if opts != nil && len(opts.EnvVars) > 0 {
 		env = append(env, opts.EnvVars...)
 	}
 
 	// Create exec with TTY and terminal size
+	// Don't specify User - let Docker use the container's default user
+	// (base.Dockerfile sets USER claude, devcontainers typically use vscode/node)
 	execCfg := container.ExecOptions{
 		Cmd:          cmd,
 		AttachStdin:  true,
