@@ -364,9 +364,69 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 
 		// Create container config - mount the WORKTREE, not the main repo
 		cfg := docker.NewContainerConfig(ws.BranchName, worktreePath)
-		cfg.Image = docker.RequiredImage
 		// Mount host repo's .git directory so worktree references resolve correctly
 		cfg.HostGitDir = repoPath + "/.git"
+
+		// Load devcontainer config and determine image
+		devCfg, err := docker.LoadDevcontainerConfig(repoPath)
+		if err != nil {
+			_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+			return ContainerErrorMsg{
+				WorkstreamID: ws.ID,
+				Error:        fmt.Errorf("failed to load devcontainer config: %w", err),
+			}
+		}
+
+		// Get the image to use
+		imageName, needsBuild, err := docker.GetProjectImage(repoPath)
+		if err != nil {
+			_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+			return ContainerErrorMsg{
+				WorkstreamID: ws.ID,
+				Error:        fmt.Errorf("failed to determine project image: %w", err),
+			}
+		}
+
+		// Check if image exists
+		imageExists, err := dockerClient.ImageExists(ctx, imageName)
+		if err != nil {
+			_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+			return ContainerErrorMsg{
+				WorkstreamID: ws.ID,
+				Error:        fmt.Errorf("failed to check image existence: %w", err),
+			}
+		}
+
+		// Build image if needed
+		if !imageExists && needsBuild && devCfg != nil {
+			// Use a longer timeout for build
+			buildCtx, buildCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer buildCancel()
+
+			// Build to a discard writer for now (no output streaming in tea.Cmd)
+			// TODO: Stream build output to pane
+			if err := docker.BuildProjectImage(buildCtx, repoPath, devCfg, io.Discard); err != nil {
+				_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+				return ContainerErrorMsg{
+					WorkstreamID: ws.ID,
+					Error:        fmt.Errorf("failed to build project image: %w", err),
+				}
+			}
+		} else if !imageExists && !needsBuild {
+			// Image doesn't exist and doesn't need building - should pull
+			_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+			return ContainerErrorMsg{
+				WorkstreamID: ws.ID,
+				Error:        fmt.Errorf("image '%s' not found. Run: docker pull %s", imageName, imageName),
+			}
+		}
+
+		cfg.Image = imageName
+
+		// Apply containerEnv from devcontainer.json
+		if devCfg != nil && devCfg.ContainerEnv != nil {
+			cfg.ExtraEnv = devCfg.ContainerEnv
+		}
 
 		// Create per-container isolated config directory
 		// This prevents race conditions when multiple containers modify credentials
