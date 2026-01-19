@@ -395,6 +395,21 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toastExpiry = time.Now().Add(toastDuration)
 			return m, nil
 
+		case "z":
+			// Swap focused pane with main pane (position 0)
+			if len(m.panes) > 1 && m.focusedPane > 0 {
+				// Swap panes
+				m.panes[0], m.panes[m.focusedPane] = m.panes[m.focusedPane], m.panes[0]
+				// Move focus to position 0 (where the previously focused pane now is)
+				m.panes[m.focusedPane].SetFocused(false)
+				m.focusedPane = 0
+				m.panes[0].SetFocused(true)
+				m.updateLayout()
+				m.toast = "Moved to main pane"
+				m.toastExpiry = time.Now().Add(toastDuration)
+			}
+			return m, nil
+
 		case "tab":
 			// Cycle focus (stay in nav mode)
 			if len(m.panes) > 0 {
@@ -432,6 +447,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
   s           Settings
   l           Show logs
   L           Cycle layout (Grid/Main+Stack/Main+Row/Rows/Columns)
+  z           Move focused pane to main (largest) position
   1-9         Focus pane by number
   Tab         Cycle focus
   q           Quit (pauses containers)
@@ -443,7 +459,7 @@ Input Mode:
   Ctrl+B ←→   Switch pane (without exiting input mode)
   All other keys sent to Claude Code`
 			dialog := NewLogDialog("Help", helpText)
-			dialog.SetSize(60, 26)
+			dialog.SetSize(60, 27)
 			m.dialog = &dialog
 			return m, nil
 
