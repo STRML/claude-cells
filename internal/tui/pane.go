@@ -154,6 +154,8 @@ func (p PaneModel) Update(msg tea.Msg) (PaneModel, tea.Cmd) {
 				switch keyStr {
 				case "enter":
 					data = []byte("\r")
+				case "shift+enter":
+					data = []byte("\n") // Insert literal newline (multiline input)
 				case "backspace":
 					data = []byte{127}
 				case "tab":
