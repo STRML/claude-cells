@@ -23,6 +23,7 @@ type AppModel struct {
 	manager        *workstream.Manager
 	panes          []PaneModel
 	focusedPane    int
+	nextPaneIndex  int        // Counter for assigning permanent pane indices
 	layout         LayoutType // Current pane layout
 	statusBar      StatusBarModel
 	dialog         *DialogModel
@@ -49,10 +50,11 @@ const tmuxPrefixTimeout = 2 * time.Second
 func NewAppModel(ctx context.Context) AppModel {
 	cwd, _ := os.Getwd()
 	return AppModel{
-		ctx:        ctx,
-		manager:    workstream.NewManager(),
-		statusBar:  NewStatusBarModel(),
-		workingDir: cwd,
+		ctx:           ctx,
+		manager:       workstream.NewManager(),
+		statusBar:     NewStatusBarModel(),
+		workingDir:    cwd,
+		nextPaneIndex: 1, // Start pane numbering at 1
 	}
 }
 
@@ -395,7 +397,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toastExpiry = time.Now().Add(toastDuration)
 			return m, nil
 
-		case "z":
+		case " ":
 			// Swap focused pane with main pane (position 0)
 			if len(m.panes) > 1 && m.focusedPane > 0 {
 				// Swap panes
@@ -447,7 +449,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
   s           Settings
   l           Show logs
   L           Cycle layout (Grid/Main+Stack/Main+Row/Rows/Columns)
-  z           Move focused pane to main (largest) position
+  Space       Move focused pane to main (largest) position
   1-9         Focus pane by number
   Tab         Cycle focus
   q           Quit (pauses containers)
@@ -490,6 +492,8 @@ Input Mode:
 				return m, nil
 			}
 			pane := NewPaneModel(ws)
+			pane.SetIndex(m.nextPaneIndex) // Assign permanent index
+			m.nextPaneIndex++
 			pane.SetInitializing(true)
 			pane.SetInitStatus("Starting container...")
 			m.panes = append(m.panes, pane)
@@ -899,6 +903,8 @@ Input Mode:
 			}
 
 			pane := NewPaneModel(ws)
+			pane.SetIndex(m.nextPaneIndex) // Assign permanent index
+			m.nextPaneIndex++
 			pane.SetInitializing(true)
 			pane.SetInitStatus("Resuming session...")
 			m.panes = append(m.panes, pane)
@@ -1097,9 +1103,8 @@ func (m AppModel) renderPanes() string {
 		return ""
 	}
 
-	// Set indices and input mode on all panes
+	// Set input mode on panes (indices are assigned permanently at creation)
 	for i := range m.panes {
-		m.panes[i].SetIndex(i + 1)
 		// Only focused pane can be in input mode
 		if i == m.focusedPane && m.inputMode {
 			m.panes[i].SetInputMode(true)
