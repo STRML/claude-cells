@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/STRML/claude-cells/internal/workstream"
 	"github.com/charmbracelet/bubbles/textinput"
@@ -12,6 +13,9 @@ import (
 	"github.com/charmbracelet/lipgloss"
 	"github.com/hinshun/vt10x"
 )
+
+// initTimeout is how long to wait for initialization before showing a warning
+const initTimeout = 60 * time.Second
 
 // ansiRegex matches ANSI escape sequences
 var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
@@ -36,6 +40,7 @@ type PaneModel struct {
 	lastVtermRender string         // Cached last successful vterm render
 	index           int            // Pane index (1-based for display)
 	initializing    bool           // True while waiting for Claude Code to be ready
+	initStartTime   time.Time      // When initialization started (for timeout)
 	spinnerFrame    int            // Current spinner animation frame
 	initStatus      string         // Status message during initialization
 	initStep        int            // Current initialization step (1-3)
@@ -81,12 +86,29 @@ func (p PaneModel) Init() tea.Cmd {
 func (p *PaneModel) SetInitializing(initializing bool) {
 	p.initializing = initializing
 	if initializing {
+		p.initStartTime = time.Now()
 		p.initSteps = 3
 		if p.initStatus == "" {
 			p.initStatus = "Starting..."
 			p.initStep = 1
 		}
 	}
+}
+
+// InitTimedOut returns true if initialization has taken longer than initTimeout
+func (p *PaneModel) InitTimedOut() bool {
+	if !p.initializing || p.initStartTime.IsZero() {
+		return false
+	}
+	return time.Since(p.initStartTime) > initTimeout
+}
+
+// InitElapsed returns how long initialization has been running
+func (p *PaneModel) InitElapsed() time.Duration {
+	if p.initStartTime.IsZero() {
+		return 0
+	}
+	return time.Since(p.initStartTime)
 }
 
 // SetInitStatus sets the initialization status message and step
@@ -310,6 +332,12 @@ func (p PaneModel) View() string {
 		statusMsg := p.initStatus
 		if statusMsg == "" {
 			statusMsg = "Starting..."
+		}
+
+		// Add elapsed time to status
+		elapsed := p.InitElapsed().Round(time.Second)
+		if elapsed > 0 {
+			statusMsg = fmt.Sprintf("%s (%v)", statusMsg, elapsed)
 		}
 
 		spinnerText := spinnerStyle.Render(spinner) + " " + messageStyle.Render(statusMsg)

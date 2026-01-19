@@ -389,10 +389,24 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
 				pane := m.panes[m.focusedPane]
 				ws := pane.Workstream()
-				logContent := pane.GetFullOutput()
-				if logContent == "" {
-					logContent = "(No output yet)"
+
+				// If initializing or no output, fetch container logs
+				if pane.IsInitializing() || pane.GetFullOutput() == "" {
+					if ws.ContainerID != "" {
+						// Show a loading dialog while fetching logs
+						dialog := NewLogDialog(ws.BranchName, "Fetching container logs...")
+						dialog.SetSize(m.width-10, m.height-6)
+						m.dialog = &dialog
+						return m, FetchContainerLogsCmd(ws)
+					}
+					// No container yet
+					dialog := NewLogDialog(ws.BranchName, "(Container not started yet)")
+					dialog.SetSize(m.width-10, m.height-6)
+					m.dialog = &dialog
+					return m, nil
 				}
+
+				logContent := pane.GetFullOutput()
 				dialog := NewLogDialog(ws.BranchName, logContent)
 				dialog.SetSize(m.width-10, m.height-6)
 				m.dialog = &dialog
@@ -670,12 +684,22 @@ Input Mode:
 		return m, nil
 
 	case spinnerTickMsg:
-		// Animate spinner for any initializing panes
+		// Animate spinner for any initializing panes and check for timeout
 		anyInitializing := false
 		for i := range m.panes {
 			if m.panes[i].IsInitializing() {
 				m.panes[i].TickSpinner()
 				anyInitializing = true
+
+				// Check for initialization timeout
+				if m.panes[i].InitTimedOut() {
+					ws := m.panes[i].Workstream()
+					elapsed := m.panes[i].InitElapsed().Round(time.Second)
+					m.panes[i].SetInitializing(false)
+					m.panes[i].AppendOutput(fmt.Sprintf("\n[Error] Startup timed out after %v\n", elapsed))
+					m.panes[i].AppendOutput("Press 'l' to view container logs, or 'd' to destroy and retry.\n")
+					ws.SetError(fmt.Errorf("startup timed out after %v", elapsed))
+				}
 			}
 		}
 		// Continue ticking if any pane is still initializing
@@ -728,7 +752,23 @@ Input Mode:
 		return m, nil
 
 	case ContainerLogsMsg:
-		// Show container logs in pane
+		// If there's a log dialog open, update it with the fetched logs
+		if m.dialog != nil && m.dialog.Type == DialogLog {
+			var logContent string
+			if msg.Error != nil {
+				logContent = fmt.Sprintf("Error fetching logs: %v", msg.Error)
+			} else if msg.Logs == "" {
+				logContent = "(No container logs available yet)\n\nThe container may still be starting up."
+			} else {
+				logContent = fmt.Sprintf("Container Logs (last 100 lines):\n\n%s", msg.Logs)
+			}
+			dialog := NewLogDialog(m.dialog.Title, logContent)
+			dialog.SetSize(m.width-10, m.height-6)
+			m.dialog = &dialog
+			return m, nil
+		}
+
+		// Otherwise append to pane output
 		for i := range m.panes {
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
 				if msg.Error != nil {
