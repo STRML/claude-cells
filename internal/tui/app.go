@@ -337,7 +337,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "n":
 			// New workstream dialog
 			dialog := NewWorkstreamDialog()
-			dialog.SetSize(50, 15)
+			dialog.SetSize(70, 15)
 			m.dialog = &dialog
 			return m, nil
 

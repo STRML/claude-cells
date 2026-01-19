@@ -592,3 +592,73 @@ func TestProgressDialog_AppendBody(t *testing.T) {
 		t.Errorf("Body should be 'Line 1\\nLine 2\\n', got %q", d.Body)
 	}
 }
+
+func TestWorkstreamDialog_TextAreaWidthUpdatesOnSetSize(t *testing.T) {
+	d := NewWorkstreamDialog()
+
+	// Initial width before SetSize - just verify it exists
+	initialWidth := d.TextArea.Width()
+	if initialWidth <= 0 {
+		t.Errorf("Initial TextArea width should be > 0, got %d", initialWidth)
+	}
+
+	// Set dialog size to 70 (as used in app.go)
+	d.SetSize(70, 15)
+
+	// TextArea width should be dialog width - 12 (for borders and padding)
+	expectedWidth := 70 - 12
+	actualWidth := d.TextArea.Width()
+	if actualWidth != expectedWidth {
+		t.Errorf("TextArea width should be %d after SetSize(70, 15), got %d", expectedWidth, actualWidth)
+	}
+}
+
+func TestWorkstreamDialog_TextAreaWidthMinimum(t *testing.T) {
+	d := NewWorkstreamDialog()
+
+	// Set a very small dialog size
+	d.SetSize(20, 10)
+
+	// TextArea width should be at least 20 (the minimum)
+	actualWidth := d.TextArea.Width()
+	if actualWidth < 20 {
+		t.Errorf("TextArea width should be at least 20, got %d", actualWidth)
+	}
+}
+
+func TestWorkstreamDialog_TextAreaWidthVarious(t *testing.T) {
+	testCases := []struct {
+		dialogWidth    int
+		expectedMinWidth int
+	}{
+		{50, 38},  // 50 - 12 = 38
+		{60, 48},  // 60 - 12 = 48
+		{70, 58},  // 70 - 12 = 58
+		{80, 68},  // 80 - 12 = 68
+		{100, 88}, // 100 - 12 = 88
+	}
+
+	for _, tc := range testCases {
+		d := NewWorkstreamDialog()
+		d.SetSize(tc.dialogWidth, 15)
+
+		actualWidth := d.TextArea.Width()
+		if actualWidth != tc.expectedMinWidth {
+			t.Errorf("With dialog width %d, TextArea width should be %d, got %d",
+				tc.dialogWidth, tc.expectedMinWidth, actualWidth)
+		}
+	}
+}
+
+func TestWorkstreamDialog_NonTextAreaDialogUnaffectedBySetSize(t *testing.T) {
+	// Destroy dialog uses textinput, not textarea
+	d := NewDestroyDialog("test-branch", "ws-123")
+
+	// This should not panic even though it's not a textarea dialog
+	d.SetSize(70, 15)
+
+	// Verify width is set
+	if d.width != 70 {
+		t.Errorf("width should be 70, got %d", d.width)
+	}
+}
