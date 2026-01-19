@@ -28,6 +28,7 @@ func (g *GH) CheckInstalled(ctx context.Context) error {
 type PRRequest struct {
 	Title string
 	Body  string
+	Head  string // Branch to create PR from (required for worktrees)
 	Base  string // Optional, defaults to default branch
 	Draft bool
 }
@@ -65,6 +66,10 @@ func (g *GH) CreatePR(ctx context.Context, repoPath string, req *PRRequest) (*PR
 		"--body", req.Body,
 	}
 
+	// --head is required for worktrees since gh may not detect the branch correctly
+	if req.Head != "" {
+		args = append(args, "--head", req.Head)
+	}
 	if req.Base != "" {
 		args = append(args, "--base", req.Base)
 	}

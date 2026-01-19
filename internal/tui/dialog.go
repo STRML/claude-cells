@@ -24,6 +24,7 @@ const (
 	DialogProgress
 	DialogBranchConflict
 	DialogPruneAllConfirm
+	DialogCommitBeforeMerge
 )
 
 // DialogModel represents a modal dialog
@@ -147,9 +148,19 @@ const (
 type MergeAction string
 
 const (
-	MergeActionCreatePR MergeAction = "create_pr"
-	MergeActionPush     MergeAction = "push"
-	MergeActionCancel   MergeAction = "cancel"
+	MergeActionCreatePR   MergeAction = "create_pr"
+	MergeActionMergeMain  MergeAction = "merge_main"
+	MergeActionPush       MergeAction = "push"
+	MergeActionCancel     MergeAction = "cancel"
+)
+
+// CommitBeforeMergeAction represents a commit-before-merge dialog action
+type CommitBeforeMergeAction string
+
+const (
+	CommitBeforeMergeYes    CommitBeforeMergeAction = "yes"
+	CommitBeforeMergeNo     CommitBeforeMergeAction = "no"
+	CommitBeforeMergeCancel CommitBeforeMergeAction = "cancel"
 )
 
 // BranchConflictAction represents a branch conflict resolution action
@@ -196,7 +207,26 @@ func NewMergeDialog(branchName, workstreamID string) DialogModel {
 		WorkstreamID: workstreamID,
 		MenuItems: []string{
 			"Create Pull Request",
+			"Merge into main",
 			"Push branch only",
+			"Cancel",
+		},
+		MenuSelection: 0,
+	}
+}
+
+// NewCommitBeforeMergeDialog creates a dialog asking if user wants to commit uncommitted changes
+func NewCommitBeforeMergeDialog(branchName, workstreamID string) DialogModel {
+	body := fmt.Sprintf("Branch '%s' has uncommitted changes.\n\nWould you like Claude to commit them first?", branchName)
+
+	return DialogModel{
+		Type:         DialogCommitBeforeMerge,
+		Title:        "Uncommitted Changes",
+		Body:         body,
+		WorkstreamID: workstreamID,
+		MenuItems: []string{
+			"Yes, commit changes",
+			"No, continue without committing",
 			"Cancel",
 		},
 		MenuSelection: 0,
@@ -345,6 +375,8 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				case 0:
 					action = MergeActionCreatePR
 				case 1:
+					action = MergeActionMergeMain
+				case 2:
 					action = MergeActionPush
 				default:
 					action = MergeActionCancel
@@ -354,6 +386,24 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				}
 				return d, func() tea.Msg {
 					return MergeConfirmMsg{Action: action, WorkstreamID: d.WorkstreamID}
+				}
+			}
+
+			if d.Type == DialogCommitBeforeMerge {
+				var action CommitBeforeMergeAction
+				switch d.MenuSelection {
+				case 0:
+					action = CommitBeforeMergeYes
+				case 1:
+					action = CommitBeforeMergeNo
+				default:
+					action = CommitBeforeMergeCancel
+				}
+				if action == CommitBeforeMergeCancel {
+					return d, func() tea.Msg { return DialogCancelMsg{} }
+				}
+				return d, func() tea.Msg {
+					return CommitBeforeMergeConfirmMsg{Action: action, WorkstreamID: d.WorkstreamID}
 				}
 			}
 
@@ -425,7 +475,7 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				return d, nil
 			}
 			// Only handle for menu dialogs, otherwise pass to input
-			if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict {
+			if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge {
 				if d.MenuSelection > 0 {
 					d.MenuSelection--
 				}
@@ -440,7 +490,7 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				return d, nil
 			}
 			// Only handle for menu dialogs, otherwise pass to input
-			if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict {
+			if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge {
 				if d.MenuSelection < len(d.MenuItems)-1 {
 					d.MenuSelection++
 				}
@@ -488,7 +538,7 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 	}
 
 	// For menu-style, log, and progress dialogs, don't pass keys to input
-	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogLog || d.Type == DialogProgress {
+	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogLog || d.Type == DialogProgress {
 		return d, nil
 	}
 
@@ -557,7 +607,7 @@ func (d DialogModel) View() string {
 	content.WriteString("\n\n")
 
 	// Menu-style dialogs render a selection list
-	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict {
+	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge {
 		for i, item := range d.MenuItems {
 			if i == d.MenuSelection {
 				content.WriteString("→ ")
@@ -648,6 +698,12 @@ type PruneResultMsg struct {
 // MergeConfirmMsg is sent when a merge action is confirmed
 type MergeConfirmMsg struct {
 	Action       MergeAction
+	WorkstreamID string
+}
+
+// CommitBeforeMergeConfirmMsg is sent when a commit-before-merge action is confirmed
+type CommitBeforeMergeConfirmMsg struct {
+	Action       CommitBeforeMergeAction
 	WorkstreamID string
 }
 

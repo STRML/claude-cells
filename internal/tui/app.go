@@ -405,12 +405,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, EnablePairingCmd(ws)
 
 		case "m":
-			// Merge/PR menu
+			// Merge/PR menu - first check for uncommitted changes
 			if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
 				ws := m.panes[m.focusedPane].Workstream()
-				dialog := NewMergeDialog(ws.BranchName, ws.ID)
-				dialog.SetSize(50, 15)
-				m.dialog = &dialog
+				// Check for uncommitted changes before showing merge dialog
+				return m, CheckUncommittedChangesCmd(ws)
 			}
 			return m, nil
 
@@ -690,6 +689,58 @@ Input Mode:
 		}
 		return m, nil
 
+	case UncommittedChangesMsg:
+		// Result of checking for uncommitted changes before merge
+		for i := range m.panes {
+			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				ws := m.panes[i].Workstream()
+				if msg.Error != nil {
+					// Error checking - just show merge dialog anyway
+					dialog := NewMergeDialog(ws.BranchName, ws.ID)
+					dialog.SetSize(50, 15)
+					m.dialog = &dialog
+				} else if msg.HasChanges {
+					// Has uncommitted changes - ask if user wants to commit first
+					dialog := NewCommitBeforeMergeDialog(ws.BranchName, ws.ID)
+					dialog.SetSize(55, 12)
+					m.dialog = &dialog
+				} else {
+					// No uncommitted changes - show merge dialog directly
+					dialog := NewMergeDialog(ws.BranchName, ws.ID)
+					dialog.SetSize(50, 15)
+					m.dialog = &dialog
+				}
+				break
+			}
+		}
+		return m, nil
+
+	case CommitBeforeMergeConfirmMsg:
+		m.dialog = nil
+		for i := range m.panes {
+			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				ws := m.panes[i].Workstream()
+				switch msg.Action {
+				case CommitBeforeMergeYes:
+					// Send /commit command to Claude Code in the container
+					if m.panes[i].HasPTY() {
+						m.panes[i].AppendOutput("\nAsking Claude to commit changes...\n")
+						_ = m.panes[i].PTY().WriteString("/commit\n")
+					} else {
+						m.panes[i].AppendOutput("\nNo active session to commit.\n")
+					}
+					// Don't show merge dialog yet - user can press 'm' again after commit
+				case CommitBeforeMergeNo:
+					// Continue to merge dialog without committing
+					dialog := NewMergeDialog(ws.BranchName, ws.ID)
+					dialog.SetSize(50, 15)
+					m.dialog = &dialog
+				}
+				break
+			}
+		}
+		return m, nil
+
 	case BranchConflictConfirmMsg:
 		m.dialog = nil
 		for i := range m.panes {
@@ -880,6 +931,12 @@ Input Mode:
 					dialog.SetSize(80, 15) // Wide enough for PR URLs to be cmd-clickable
 					m.dialog = &dialog
 					return m, CreatePRCmd(ws)
+				case MergeActionMergeMain:
+					m.panes[i].AppendOutput("\nMerging branch into main...\n")
+					dialog := NewProgressDialog("Merging Branch", fmt.Sprintf("Branch: %s\n\nMerging into main...", ws.BranchName), ws.ID)
+					dialog.SetSize(60, 15)
+					m.dialog = &dialog
+					return m, MergeBranchCmd(ws)
 				case MergeActionPush:
 					m.panes[i].AppendOutput("\nPushing branch to origin...\n")
 					dialog := NewProgressDialog("Pushing Branch", fmt.Sprintf("Branch: %s\n\nPushing to origin...", ws.BranchName), ws.ID)
@@ -928,6 +985,27 @@ Input Mode:
 					// Update progress dialog if open
 					if m.dialog != nil && m.dialog.Type == DialogProgress && m.dialog.WorkstreamID == msg.WorkstreamID {
 						m.dialog.SetComplete(fmt.Sprintf("Pull Request Created!\n\nPR #%d: %s\n\nPress Enter or Esc to close.", msg.PRNumber, msg.PRURL))
+					}
+				}
+				break
+			}
+		}
+		return m, nil
+
+	case MergeBranchMsg:
+		for i := range m.panes {
+			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				if msg.Error != nil {
+					m.panes[i].AppendOutput(fmt.Sprintf("Merge failed: %v\n", msg.Error))
+					// Update progress dialog if open
+					if m.dialog != nil && m.dialog.Type == DialogProgress && m.dialog.WorkstreamID == msg.WorkstreamID {
+						m.dialog.SetComplete(fmt.Sprintf("Merge Failed\n\n%v", msg.Error))
+					}
+				} else {
+					m.panes[i].AppendOutput("Branch merged into main successfully!\n")
+					// Update progress dialog if open
+					if m.dialog != nil && m.dialog.Type == DialogProgress && m.dialog.WorkstreamID == msg.WorkstreamID {
+						m.dialog.SetComplete("Branch merged into main!\n\nPress Enter or Esc to close.")
 					}
 				}
 				break
