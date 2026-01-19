@@ -97,30 +97,58 @@ func runHeartbeat(ctx context.Context, tracker *docker.ContainerTracker) {
 }
 
 func validatePrerequisites() error {
+	// Get project path (current working directory)
+	projectPath, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get working directory: %w", err)
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	result, err := docker.ValidatePrerequisites(ctx)
+	result, err := docker.ValidatePrerequisites(ctx, projectPath)
 	if err != nil {
 		return fmt.Errorf("failed to validate prerequisites: %w", err)
 	}
 
-	// If Docker is available but image is missing, build it automatically
+	// If Docker is available but image is missing, try to build/pull it
 	if result.DockerAvailable && !result.ImageExists {
-		fmt.Printf("Required image '%s' not found. Building automatically...\n\n", docker.RequiredImage)
+		if result.NeedsBuild {
+			// Build from devcontainer.json
+			fmt.Printf("Project image '%s' not found. Building from devcontainer.json...\n\n", result.ImageName)
 
-		// Use a longer timeout for the build (can take several minutes)
-		buildCtx, buildCancel := context.WithTimeout(context.Background(), 10*time.Minute)
-		defer buildCancel()
+			devCfg, err := docker.LoadDevcontainerConfig(projectPath)
+			if err != nil {
+				return fmt.Errorf("failed to load devcontainer config: %w", err)
+			}
 
-		if err := docker.BuildImage(buildCtx, os.Stdout); err != nil {
-			return fmt.Errorf("failed to build image: %w", err)
+			buildCtx, buildCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer buildCancel()
+
+			if err := docker.BuildProjectImage(buildCtx, projectPath, devCfg, os.Stdout); err != nil {
+				return fmt.Errorf("failed to build project image: %w", err)
+			}
+
+			fmt.Println("\nImage built successfully!")
+		} else if result.ImageName == docker.DefaultImage {
+			// Build the default ccells image
+			fmt.Printf("Required image '%s' not found. Building automatically...\n\n", docker.DefaultImage)
+
+			buildCtx, buildCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer buildCancel()
+
+			if err := docker.BuildImage(buildCtx, os.Stdout); err != nil {
+				return fmt.Errorf("failed to build image: %w", err)
+			}
+
+			fmt.Println("\nImage built successfully!")
+		} else {
+			// External image from devcontainer.json - prompt to pull
+			return fmt.Errorf("image '%s' from devcontainer.json not found. Run: docker pull %s", result.ImageName, result.ImageName)
 		}
 
-		fmt.Println("\nImage built successfully!")
-
 		// Re-validate to confirm
-		result, err = docker.ValidatePrerequisites(ctx)
+		result, err = docker.ValidatePrerequisites(ctx, projectPath)
 		if err != nil {
 			return fmt.Errorf("failed to validate after build: %w", err)
 		}
