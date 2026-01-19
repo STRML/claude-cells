@@ -16,8 +16,8 @@ RUN ARCH=$(case "${TARGETARCH}" in "arm64") echo "arm64" ;; *) echo "x64" ;; esa
     curl -fsSL https://nodejs.org/dist/v20.11.0/node-v20.11.0-linux-${ARCH}.tar.xz \
     | tar -xJ -C /usr/local --strip-components=1
 
-# Install Claude Code CLI
-RUN npm install -g @anthropic-ai/claude-code
+# Install Claude Code CLI and common statusline tools
+RUN npm install -g @anthropic-ai/claude-code ccstatusline
 
 # Create non-root user for Claude Code (--dangerously-skip-permissions requires non-root)
 RUN useradd -m -s /bin/bash claude && \
