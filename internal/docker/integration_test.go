@@ -15,6 +15,7 @@ func TestClaudeCodeContainer(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
+	t.Parallel()
 
 	client := skipIfDockerUnavailable(t)
 	defer client.Close()
@@ -161,6 +162,7 @@ func TestContainerClaudeCodeExec(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
+	t.Parallel()
 
 	// Skip if ANTHROPIC_API_KEY is not set (can't actually run Claude)
 	if os.Getenv("ANTHROPIC_API_KEY") == "" {
@@ -227,6 +229,7 @@ func TestMultipleContainers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
+	t.Parallel()
 
 	client := skipIfDockerUnavailable(t)
 	defer client.Close()

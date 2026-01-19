@@ -85,6 +85,7 @@ func TestContainer_Lifecycle(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
+	t.Parallel()
 
 	client := skipIfDockerUnavailable(t)
 	defer client.Close()
@@ -160,6 +161,7 @@ func TestContainer_SignalProcess(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
+	t.Parallel()
 
 	client := skipIfDockerUnavailable(t)
 	defer client.Close()
@@ -214,6 +216,7 @@ func TestContainer_PauseUnpause(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
+	t.Parallel()
 
 	client := skipIfDockerUnavailable(t)
 	defer client.Close()
@@ -273,10 +276,12 @@ func TestContainer_PauseUnpause(t *testing.T) {
 }
 
 // Integration test for cleanup orphaned containers
+// NOTE: This test cannot run in parallel as it removes containers globally
 func TestContainer_CleanupOrphanedContainers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping integration test")
 	}
+	// NOT parallel - this test removes containers globally
 
 	client := skipIfDockerUnavailable(t)
 	defer client.Close()
