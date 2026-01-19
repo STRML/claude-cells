@@ -290,7 +290,7 @@ func (p PaneModel) View() string {
 	indexLabel := indexStyle.Render(fmt.Sprintf("%d", p.index))
 
 	status := StatusStyle(string(p.workstream.GetState()))
-	title := PaneTitle.Render(p.workstream.BranchName)
+	title := PaneTitle.Render(p.workstream.GetTitle())
 	stateLabel := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render(fmt.Sprintf("(%s)", p.workstream.GetState()))
 
 	var header string

@@ -130,3 +130,30 @@ type testError struct {
 func (e *testError) Error() string {
 	return e.msg
 }
+
+func TestWorkstream_SetTitle(t *testing.T) {
+	ws := New("implement user auth")
+	ws.SetTitle("User Auth Implementation")
+
+	if ws.Title != "User Auth Implementation" {
+		t.Errorf("Title = %q, want %q", ws.Title, "User Auth Implementation")
+	}
+}
+
+func TestWorkstream_GetTitle_ReturnsTitle(t *testing.T) {
+	ws := New("implement user auth")
+	ws.SetTitle("User Auth Implementation")
+
+	if got := ws.GetTitle(); got != "User Auth Implementation" {
+		t.Errorf("GetTitle() = %q, want %q", got, "User Auth Implementation")
+	}
+}
+
+func TestWorkstream_GetTitle_FallbackToBranchName(t *testing.T) {
+	ws := New("implement user auth")
+	// Title not set, should fallback to branch name
+
+	if got := ws.GetTitle(); got != ws.BranchName {
+		t.Errorf("GetTitle() = %q, want %q (branch name)", got, ws.BranchName)
+	}
+}
