@@ -725,6 +725,20 @@ Scroll Mode:
 		}
 		return m, nil
 
+	case ContainerNotFoundMsg:
+		// Container no longer exists - rebuild it and resume with --continue
+		for i := range m.panes {
+			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				ws := m.panes[i].Workstream()
+				// Clear the old container ID
+				ws.ContainerID = ""
+				m.panes[i].AppendOutput("\nContainer not found, rebuilding...\n")
+				m.panes[i].SetInitializing(true)
+				return m, RebuildContainerCmd(ws)
+			}
+		}
+		return m, nil
+
 	case BranchConflictMsg:
 		// Branch already exists - show conflict resolution dialog with branch info
 		for i := range m.panes {

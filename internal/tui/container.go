@@ -65,6 +65,12 @@ type ContainerStoppedMsg struct {
 	WorkstreamID string
 }
 
+// ContainerNotFoundMsg is sent when a container no longer exists but can be rebuilt.
+// This triggers automatic rebuild with --continue to resume the Claude session.
+type ContainerNotFoundMsg struct {
+	WorkstreamID string
+}
+
 // PTYReadyMsg is sent when a PTY session is ready for use.
 type PTYReadyMsg struct {
 	WorkstreamID string
@@ -271,6 +277,162 @@ func DeleteAndRestartContainerCmd(ws *workstream.Workstream) tea.Cmd {
 
 		// Now start with a fresh branch (false = create new branch)
 		return startContainerWithOptions(ws, false)()
+	}
+}
+
+// RebuildContainerCmd rebuilds a container for a workstream whose container was lost.
+// This reuses the existing branch/worktree and sets IsResume=true so claude --continue is used.
+func RebuildContainerCmd(ws *workstream.Workstream) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
+		// Get current working directory as repo path
+		repoPath, err := os.Getwd()
+		if err != nil {
+			return ContainerErrorMsg{
+				WorkstreamID: ws.ID,
+				Error:        err,
+			}
+		}
+
+		gitRepo := git.New(repoPath)
+
+		// Determine worktree path for this container
+		worktreePath := getWorktreePath(ws.BranchName)
+
+		// Ensure the worktrees directory exists
+		if err := os.MkdirAll("/tmp/ccells/worktrees", 0755); err != nil {
+			return ContainerErrorMsg{
+				WorkstreamID: ws.ID,
+				Error:        fmt.Errorf("failed to create worktrees directory: %w", err),
+			}
+		}
+
+		// Check if worktree exists, create if needed
+		if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+			// Worktree doesn't exist - create from existing branch
+			if err := gitRepo.CreateWorktreeFromExisting(ctx, worktreePath, ws.BranchName); err != nil {
+				return ContainerErrorMsg{
+					WorkstreamID: ws.ID,
+					Error:        fmt.Errorf("failed to create worktree for branch %s: %w", ws.BranchName, err),
+				}
+			}
+		}
+
+		// Store worktree path in workstream
+		ws.WorktreePath = worktreePath
+
+		// Create Docker client
+		dockerClient, err := docker.NewClient()
+		if err != nil {
+			return ContainerErrorMsg{
+				WorkstreamID: ws.ID,
+				Error:        err,
+			}
+		}
+		defer dockerClient.Close()
+
+		// Create container config - mount the WORKTREE
+		cfg := docker.NewContainerConfig(ws.BranchName, worktreePath)
+		cfg.HostGitDir = repoPath + "/.git"
+
+		// Load devcontainer config and determine image
+		devCfg, err := docker.LoadDevcontainerConfig(repoPath)
+		if err != nil {
+			return ContainerErrorMsg{
+				WorkstreamID: ws.ID,
+				Error:        fmt.Errorf("failed to load devcontainer config: %w", err),
+			}
+		}
+
+		imageName, needsBuild, err := docker.GetProjectImage(repoPath)
+		if err != nil {
+			return ContainerErrorMsg{
+				WorkstreamID: ws.ID,
+				Error:        fmt.Errorf("failed to determine project image: %w", err),
+			}
+		}
+
+		imageExists, err := dockerClient.ImageExists(ctx, imageName)
+		if err != nil {
+			return ContainerErrorMsg{
+				WorkstreamID: ws.ID,
+				Error:        fmt.Errorf("failed to check image existence: %w", err),
+			}
+		}
+
+		// Build image if needed
+		if !imageExists && needsBuild && devCfg != nil {
+			buildCtx, buildCancel := context.WithTimeout(context.Background(), 10*time.Minute)
+			defer buildCancel()
+
+			cliStatus := docker.CheckDevcontainerCLI()
+			if cliStatus.Available {
+				if _, err := docker.BuildWithDevcontainerCLI(buildCtx, repoPath, io.Discard); err != nil {
+					return ContainerErrorMsg{
+						WorkstreamID: ws.ID,
+						Error:        fmt.Errorf("failed to build with devcontainer CLI: %w", err),
+					}
+				}
+			} else {
+				if err := docker.BuildProjectImage(buildCtx, repoPath, devCfg, io.Discard); err != nil {
+					return ContainerErrorMsg{
+						WorkstreamID: ws.ID,
+						Error:        fmt.Errorf("failed to build project image: %w", err),
+					}
+				}
+			}
+		} else if !imageExists && !needsBuild {
+			return ContainerErrorMsg{
+				WorkstreamID: ws.ID,
+				Error:        fmt.Errorf("image '%s' not found. Run: docker pull %s", imageName, imageName),
+			}
+		}
+
+		cfg.Image = imageName
+
+		if devCfg != nil && devCfg.ContainerEnv != nil {
+			cfg.ExtraEnv = devCfg.ContainerEnv
+		}
+
+		configPaths, err := docker.CreateContainerConfig(cfg.Name)
+		if err != nil {
+			return ContainerErrorMsg{
+				WorkstreamID: ws.ID,
+				Error:        fmt.Errorf("failed to create container config: %w", err),
+			}
+		}
+		cfg.ClaudeCfg = configPaths.ClaudeDir
+		cfg.ClaudeJSON = configPaths.ClaudeJSON
+		cfg.GitConfig = configPaths.GitConfig
+		cfg.Credentials = configPaths.Credentials
+
+		containerID, err := dockerClient.CreateContainer(ctx, cfg)
+		if err != nil {
+			return ContainerErrorMsg{
+				WorkstreamID: ws.ID,
+				Error:        err,
+			}
+		}
+
+		err = dockerClient.StartContainer(ctx, containerID)
+		if err != nil {
+			_ = dockerClient.RemoveContainer(ctx, containerID)
+			return ContainerErrorMsg{
+				WorkstreamID: ws.ID,
+				Error:        err,
+			}
+		}
+
+		trackContainer(containerID, ws.ID, ws.BranchName, worktreePath)
+
+		// Return with IsResume=true so PTY uses --continue
+		return ContainerStartedMsg{
+			WorkstreamID: ws.ID,
+			ContainerID:  containerID,
+			IsResume:     true,
+		}
 	}
 }
 
@@ -880,9 +1042,9 @@ func ResumeContainerCmd(ws *workstream.Workstream, width, height int) tea.Cmd {
 		state, err := dockerClient.GetContainerState(ctx, ws.ContainerID)
 		if err != nil {
 			dockerClient.Close()
-			return ContainerErrorMsg{
+			// Container no longer exists - trigger rebuild
+			return ContainerNotFoundMsg{
 				WorkstreamID: ws.ID,
-				Error:        fmt.Errorf("container not found: %w", err),
 			}
 		}
 
