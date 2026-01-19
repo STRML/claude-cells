@@ -45,6 +45,8 @@ type PaneModel struct {
 	initStatus      string         // Status message during initialization
 	initStep        int            // Current initialization step (1-3)
 	initSteps       int            // Total initialization steps
+	scrollback      []string       // Scrollback buffer (lines that scrolled off top)
+	scrollMode      bool           // True when viewing scrollback (not following live output)
 }
 
 // Width returns the pane width
@@ -305,14 +307,34 @@ func (p PaneModel) View() string {
 	// Output content - use virtual terminal if PTY is active
 	var outputContent string
 	if p.pty != nil && !p.pty.IsClosed() {
-		// Render from virtual terminal
-		outputContent = p.renderVTerm()
+		// Combine scrollback with current vterm content
+		var fullContent strings.Builder
+		if len(p.scrollback) > 0 {
+			fullContent.WriteString(strings.Join(p.scrollback, "\n"))
+			fullContent.WriteString("\n")
+		}
+		fullContent.WriteString(p.renderVTerm())
+		outputContent = fullContent.String()
 	} else {
 		// Use simple output buffer for non-PTY mode
 		outputContent = p.output.String()
 	}
 
+	// Remember scroll position before setting content
+	wasAtBottom := p.viewport.AtBottom()
+	yOffset := p.viewport.YOffset
+
 	p.viewport.SetContent(outputContent)
+
+	// Restore scroll position or go to bottom
+	if p.scrollMode {
+		// In scroll mode - try to maintain position
+		p.viewport.SetYOffset(yOffset)
+	} else if wasAtBottom || !p.scrollMode {
+		// Follow live output
+		p.viewport.GotoBottom()
+	}
+
 	outputView := p.viewport.View()
 
 	// Show spinner overlay while initializing
@@ -569,7 +591,44 @@ func (p *PaneModel) AppendOutput(text string) {
 
 // WritePTYOutput writes raw PTY output to the virtual terminal
 func (p *PaneModel) WritePTYOutput(data []byte) {
+	// Capture current first line before write (to detect scrolling)
+	firstLineBefore := p.getVtermLine(0)
+
 	p.vterm.Write(data)
+
+	// Check if content scrolled (first line changed)
+	firstLineAfter := p.getVtermLine(0)
+	if firstLineBefore != "" && firstLineBefore != firstLineAfter {
+		// Content scrolled - save old first line to scrollback
+		// Limit scrollback to 10000 lines to prevent memory issues
+		if len(p.scrollback) >= 10000 {
+			// Remove oldest 1000 lines when limit reached
+			p.scrollback = p.scrollback[1000:]
+		}
+		p.scrollback = append(p.scrollback, firstLineBefore)
+	}
+}
+
+// getVtermLine returns a single line from the vterm (0-indexed)
+func (p *PaneModel) getVtermLine(row int) string {
+	if p.vterm == nil {
+		return ""
+	}
+	cols, rows := p.vterm.Size()
+	if row < 0 || row >= rows || cols <= 0 {
+		return ""
+	}
+
+	var line strings.Builder
+	for col := 0; col < cols; col++ {
+		cell := p.vterm.Cell(col, row)
+		if cell.Char == 0 {
+			line.WriteRune(' ')
+		} else {
+			line.WriteRune(cell.Char)
+		}
+	}
+	return strings.TrimRight(line.String(), " ")
 }
 
 // Workstream returns the underlying workstream
@@ -615,6 +674,32 @@ func (p *PaneModel) GetFullOutput() string {
 	}
 
 	return result.String()
+}
+
+// ScrollPageUp scrolls the viewport up by one page
+func (p *PaneModel) ScrollPageUp() {
+	p.scrollMode = true
+	p.viewport.ViewUp()
+}
+
+// ScrollPageDown scrolls the viewport down by one page
+func (p *PaneModel) ScrollPageDown() {
+	p.viewport.ViewDown()
+	// Exit scroll mode if at bottom
+	if p.viewport.AtBottom() {
+		p.scrollMode = false
+	}
+}
+
+// ScrollToBottom scrolls to the bottom and exits scroll mode
+func (p *PaneModel) ScrollToBottom() {
+	p.viewport.GotoBottom()
+	p.scrollMode = false
+}
+
+// IsScrollMode returns true if the pane is in scroll mode (not following live output)
+func (p *PaneModel) IsScrollMode() bool {
+	return p.scrollMode
 }
 
 // PromptMsg is sent when user submits a prompt
