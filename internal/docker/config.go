@@ -48,6 +48,24 @@ func GetClaudeConfig() (*ConfigPaths, error) {
 	return globalConfig, globalConfigErr
 }
 
+// CCellsInstructions is the CLAUDE.md content for ccells containers
+const CCellsInstructions = `# CCells Session
+
+You are running inside a **ccells container** - an isolated Docker environment for parallel Claude Code development.
+
+## Environment
+- **Isolated git worktree**: Your changes are in a separate worktree, not the main repo
+- **Independent branch**: You have your own feature branch
+- **Safe to experiment**: Changes here don't affect other workstreams
+
+## Workflow
+When you've completed the task from the initial prompt:
+1. **Commit your changes** with a descriptive commit message
+2. Let the user know the task is complete
+
+Remember: Each ccells session is focused on a single task. Stay focused on the original prompt.
+`
+
 // CreateContainerConfig creates an isolated config directory for a specific container.
 // Each container gets its own copy to prevent race conditions when multiple
 // Claude Code instances modify credentials simultaneously.
@@ -124,6 +142,16 @@ func CreateContainerConfig(containerName string) (*ConfigPaths, error) {
 		if err := os.WriteFile(dstCredentials, []byte(creds.Raw), 0600); err != nil {
 			return nil, fmt.Errorf("failed to write credentials: %w", err)
 		}
+	}
+
+	// Write ccells-specific CLAUDE.md instructions
+	// Ensure .claude directory exists first
+	if err := os.MkdirAll(dstClaudeDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create .claude directory: %w", err)
+	}
+	claudeMdPath := filepath.Join(dstClaudeDir, "CLAUDE.md")
+	if err := os.WriteFile(claudeMdPath, []byte(CCellsInstructions), 0644); err != nil {
+		return nil, fmt.Errorf("failed to write CLAUDE.md: %w", err)
 	}
 
 	return &ConfigPaths{
