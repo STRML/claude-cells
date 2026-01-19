@@ -164,9 +164,15 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.inputMode && len(m.panes) > 0 && m.focusedPane < len(m.panes) {
 			switch msg.String() {
 			case "esc":
-				// Check for Ctrl+B prefix (exit to nav mode)
+				// Check for Ctrl+B prefix - exit scroll mode or nav mode
 				if m.tmuxPrefix && time.Since(m.tmuxPrefixTime) < tmuxPrefixTimeout {
 					m.tmuxPrefix = false
+					// If in scroll mode, exit scroll mode first
+					if m.panes[m.focusedPane].IsScrollMode() {
+						m.panes[m.focusedPane].ScrollToBottom()
+						return m, nil
+					}
+					// Otherwise exit to nav mode
 					m.inputMode = false
 					return m, tea.HideCursor
 				}
@@ -245,6 +251,24 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				var cmd tea.Cmd
 				m.panes[m.focusedPane], cmd = m.panes[m.focusedPane].Update(msg)
 				return m, cmd
+			case "pgup", "pgdown":
+				// Check for tmux-style prefix (ctrl-b + pgup/pgdown) - scroll pane
+				if m.tmuxPrefix && time.Since(m.tmuxPrefixTime) < tmuxPrefixTimeout {
+					m.tmuxPrefix = false
+					if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
+						if msg.String() == "pgup" {
+							m.panes[m.focusedPane].ScrollPageUp()
+						} else {
+							m.panes[m.focusedPane].ScrollPageDown()
+						}
+					}
+					return m, nil
+				}
+				// Not a tmux sequence - pass to pane
+				m.tmuxPrefix = false
+				var cmd tea.Cmd
+				m.panes[m.focusedPane], cmd = m.panes[m.focusedPane].Update(msg)
+				return m, cmd
 			default:
 				// Reset tmux prefix on any other key
 				m.tmuxPrefix = false
@@ -257,6 +281,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// In nav mode, double-escape quits ccells
 		if msg.String() == "esc" {
+			// First check if we're in scroll mode - single escape exits scroll
+			if len(m.panes) > 0 && m.focusedPane < len(m.panes) && m.panes[m.focusedPane].IsScrollMode() {
+				m.panes[m.focusedPane].ScrollToBottom()
+				return m, nil
+			}
+
 			if time.Since(m.lastEscapeTime) < escapeTimeout {
 				// Double escape in nav mode - quit
 				m.lastEscapeTime = time.Time{}
@@ -331,6 +361,20 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.focusedPane = neighbor
 					m.panes[m.focusedPane].SetFocused(true)
 				}
+			}
+			return m, nil
+
+		case "pgup":
+			// Scroll focused pane up
+			if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
+				m.panes[m.focusedPane].ScrollPageUp()
+			}
+			return m, nil
+
+		case "pgdown":
+			// Scroll focused pane down
+			if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
+				m.panes[m.focusedPane].ScrollPageDown()
 			}
 			return m, nil
 
@@ -530,17 +574,24 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
   Space       Move focused pane to main (largest) position
   1-9         Focus pane by number
   Tab         Cycle focus
+  PgUp/PgDn   Scroll pane (enters scroll mode)
   q           Quit (pauses containers)
   Esc Esc     Quit
 
 Input Mode:
   Esc Esc     Exit to nav mode
-  Ctrl+B Esc  Exit to nav mode
+  Ctrl+B Esc  Exit to nav mode (or scroll mode)
   Ctrl+B ←→   Switch pane (without exiting input mode)
   Ctrl+B 1-9  Switch pane by number
-  All other keys sent to Claude Code`
+  Ctrl+B PgUp/Dn  Scroll pane (enters scroll mode)
+  Shift+Enter Insert newline
+  All other keys sent to Claude Code
+
+Scroll Mode:
+  PgUp/PgDn   Continue scrolling
+  Esc         Exit scroll mode (return to live)`
 			dialog := NewLogDialog("Help", helpText)
-			dialog.SetSize(60, 27)
+			dialog.SetSize(60, 32)
 			m.dialog = &dialog
 			return m, nil
 
@@ -1288,18 +1339,32 @@ func (m AppModel) renderTitleBar() string {
 		mode = titleStyle.Copy().Background(lipgloss.Color("#7C3AED")).Render(" NAV ")
 	}
 
+	// Scroll mode indicator
+	var scrollIndicator string
+	if len(m.panes) > 0 && m.focusedPane < len(m.panes) && m.panes[m.focusedPane].IsScrollMode() {
+		scrollIndicator = titleStyle.Copy().Background(lipgloss.Color("#D97706")).Render(" SCROLL ")
+	}
+
 	// App title
 	title := titleStyle.Render(" Claude Cells ")
 
 	// Keybinds hint
 	var hints string
 	if m.inputMode {
-		hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [Esc Esc] nav  [Ctrl+B ←→] switch pane")
+		if scrollIndicator != "" {
+			hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [Ctrl+B PgUp/Dn] scroll  [Esc] exit scroll")
+		} else {
+			hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [Esc Esc] nav  [Ctrl+B ←→] switch  [Ctrl+B PgUp/Dn] scroll")
+		}
 	} else {
-		hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [←→]panes  [n]ew  [m]erge  [d]estroy  [l]ogs  [i]nput  [?]help  [Esc Esc]quit")
+		if scrollIndicator != "" {
+			hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [PgUp/Dn] scroll  [Esc] exit scroll  [i]nput")
+		} else {
+			hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [←→]panes  [n]ew  [m]erge  [d]estroy  [l]ogs  [i]nput  [?]help  [Esc Esc]quit")
+		}
 	}
 
-	left := mode + title
+	left := mode + scrollIndicator + title
 	right := hints
 
 	// Calculate spacing
