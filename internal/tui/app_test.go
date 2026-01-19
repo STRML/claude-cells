@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"context"
 	"fmt"
 	"strings"
 	"testing"
@@ -11,7 +12,7 @@ import (
 )
 
 func TestNewAppModel(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 
 	if app.manager == nil {
 		t.Error("Manager should not be nil")
@@ -38,7 +39,7 @@ func TestAppModel_Update_Quit(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			app := NewAppModel()
+			app := NewAppModel(context.Background())
 			var msg tea.KeyMsg
 			if tt.key == "ctrl+c" {
 				msg = tea.KeyMsg{Type: tea.KeyCtrlC}
@@ -59,7 +60,7 @@ func TestAppModel_Update_Quit(t *testing.T) {
 }
 
 func TestAppModel_Update_NewWorkstreamDialog(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 
 	// Press 'n' to open dialog
 	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
@@ -74,7 +75,7 @@ func TestAppModel_Update_NewWorkstreamDialog(t *testing.T) {
 }
 
 func TestAppModel_Update_DestroyDialog(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -98,7 +99,7 @@ func TestAppModel_Update_DestroyDialog(t *testing.T) {
 }
 
 func TestAppModel_Update_DestroyWithNoPanes(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 
 	// Press 'd' with no panes - should not crash
 	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
@@ -110,7 +111,7 @@ func TestAppModel_Update_DestroyWithNoPanes(t *testing.T) {
 }
 
 func TestAppModel_Update_DialogConfirm(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -136,7 +137,7 @@ func TestAppModel_Update_DialogConfirm(t *testing.T) {
 }
 
 func TestAppModel_Update_DialogCancel(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 
 	// Open dialog
 	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
@@ -156,7 +157,7 @@ func TestAppModel_Update_DialogCancel(t *testing.T) {
 }
 
 func TestAppModel_Update_DialogBlocksInput(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -186,7 +187,7 @@ func TestAppModel_Update_DialogBlocksInput(t *testing.T) {
 }
 
 func TestAppModel_Update_DestroyWorkstream(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -214,7 +215,7 @@ func TestAppModel_Update_DestroyWorkstream(t *testing.T) {
 }
 
 func TestAppModel_Update_TabCycle(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -253,7 +254,7 @@ func TestAppModel_Update_TabCycle(t *testing.T) {
 }
 
 func TestAppModel_Update_TabWithNoPanes(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 
 	// Tab with no panes should not panic
 	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyTab})
@@ -265,7 +266,7 @@ func TestAppModel_Update_TabWithNoPanes(t *testing.T) {
 }
 
 func TestAppModel_Update_NumberKeyFocus(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -298,7 +299,7 @@ func TestAppModel_Update_NumberKeyFocus(t *testing.T) {
 }
 
 func TestAppModel_Update_NumberKeyOutOfRange(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -317,7 +318,7 @@ func TestAppModel_Update_NumberKeyOutOfRange(t *testing.T) {
 }
 
 func TestAppModel_Update_WindowSize(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 
 	model, _ := app.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	app = model.(AppModel)
@@ -331,7 +332,7 @@ func TestAppModel_Update_WindowSize(t *testing.T) {
 }
 
 func TestAppModel_View_Empty(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 80
 	app.height = 24
 
@@ -346,7 +347,7 @@ func TestAppModel_View_Empty(t *testing.T) {
 }
 
 func TestAppModel_View_Quitting(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.quitting = true
 
 	view := app.View()
@@ -357,7 +358,7 @@ func TestAppModel_View_Quitting(t *testing.T) {
 }
 
 func TestAppModel_View_WithPanes(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -372,7 +373,7 @@ func TestAppModel_View_WithPanes(t *testing.T) {
 }
 
 func TestAppModel_View_WithDialog(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -388,7 +389,7 @@ func TestAppModel_View_WithDialog(t *testing.T) {
 }
 
 func TestAppModel_UpdateLayout_SinglePane(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -402,7 +403,7 @@ func TestAppModel_UpdateLayout_SinglePane(t *testing.T) {
 }
 
 func TestAppModel_UpdateLayout_TwoPanes(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -421,7 +422,7 @@ func TestAppModel_UpdateLayout_TwoPanes(t *testing.T) {
 }
 
 func TestAppModel_Manager(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 
 	if app.Manager() == nil {
 		t.Error("Manager() should return the manager")
@@ -432,7 +433,7 @@ func TestAppModel_Manager(t *testing.T) {
 }
 
 func TestAppModel_Update_PromptMsg(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -452,7 +453,7 @@ func TestAppModel_Update_PromptMsg(t *testing.T) {
 }
 
 func TestAppModel_DestroyFocusUpdate(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -482,7 +483,7 @@ func TestAppModel_DestroyFocusUpdate(t *testing.T) {
 }
 
 func TestAppModel_InputMode(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -530,7 +531,7 @@ func TestAppModel_InputMode(t *testing.T) {
 }
 
 func TestAppModel_InputMode_Enter(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -549,7 +550,7 @@ func TestAppModel_InputMode_Enter(t *testing.T) {
 }
 
 func TestAppModel_InputMode_RoutesKeysToPane(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -596,7 +597,7 @@ func TestAppModel_NavMode_Keybinds(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			app := NewAppModel()
+			app := NewAppModel(context.Background())
 			app.width = 100
 			app.height = 40
 
@@ -618,7 +619,7 @@ func TestAppModel_NavMode_Keybinds(t *testing.T) {
 }
 
 func TestAppModel_TmuxPrefix_NavMode(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -657,7 +658,7 @@ func TestAppModel_TmuxPrefix_NavMode(t *testing.T) {
 }
 
 func TestAppModel_TmuxPrefix_InputMode(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -692,7 +693,7 @@ func TestAppModel_TmuxPrefix_InputMode(t *testing.T) {
 }
 
 func TestAppModel_TmuxPrefix_Timeout(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -762,7 +763,7 @@ func TestPaneModel_InputModeVisual(t *testing.T) {
 }
 
 func TestAppModel_TmuxPrefix_UpDown(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -801,7 +802,7 @@ func TestAppModel_TmuxPrefix_UpDown(t *testing.T) {
 }
 
 func TestAppModel_TmuxPrefix_Wrapping(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -838,7 +839,7 @@ func TestAppModel_TmuxPrefix_Wrapping(t *testing.T) {
 }
 
 func TestAppModel_TmuxPrefix_SinglePane(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -859,7 +860,7 @@ func TestAppModel_TmuxPrefix_SinglePane(t *testing.T) {
 }
 
 func TestAppModel_TmuxPrefix_NoPanes(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 
 	// Press ctrl+b then left with no panes - should not panic
 	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
@@ -873,7 +874,7 @@ func TestAppModel_TmuxPrefix_NoPanes(t *testing.T) {
 }
 
 func TestAppModel_TmuxPrefix_ResetOnArrowKey(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -901,7 +902,7 @@ func TestAppModel_TmuxPrefix_ResetOnArrowKey(t *testing.T) {
 }
 
 func TestAppModel_TmuxPrefix_OtherKeyStillWorks(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -932,7 +933,7 @@ func TestAppModel_TmuxPrefix_OtherKeyStillWorks(t *testing.T) {
 }
 
 func TestAppModel_InputMode_CtrlC(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -954,7 +955,7 @@ func TestAppModel_InputMode_CtrlC(t *testing.T) {
 }
 
 func TestAppModel_InputMode_EscapeToNavMode(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -983,7 +984,7 @@ func TestAppModel_InputMode_EscapeToNavMode(t *testing.T) {
 }
 
 func TestAppModel_InputMode_ArrowWithoutTmuxPrefix(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -1008,7 +1009,7 @@ func TestAppModel_InputMode_ArrowWithoutTmuxPrefix(t *testing.T) {
 }
 
 func TestAppModel_NavMode_ArrowWithoutTmuxPrefix(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -1035,7 +1036,7 @@ func TestAppModel_NavMode_ArrowWithoutTmuxPrefix(t *testing.T) {
 }
 
 func TestAppModel_StateLoadedMsg_NoState(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -1050,7 +1051,7 @@ func TestAppModel_StateLoadedMsg_NoState(t *testing.T) {
 }
 
 func TestAppModel_StateLoadedMsg_WithError(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -1068,7 +1069,7 @@ func TestAppModel_StateLoadedMsg_WithError(t *testing.T) {
 }
 
 func TestAppModel_StateSavedMsg_Success(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.quitting = true
 
 	// Simulate state saved successfully
@@ -1082,7 +1083,7 @@ func TestAppModel_StateSavedMsg_Success(t *testing.T) {
 }
 
 func TestAppModel_StateSavedMsg_WithError(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.quitting = true
 
 	// Simulate state saved with error
@@ -1099,7 +1100,7 @@ func TestAppModel_StateSavedMsg_WithError(t *testing.T) {
 }
 
 func TestAppModel_ToastHint_UnhandledKey(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -1121,7 +1122,7 @@ func TestAppModel_ToastHint_UnhandledKey(t *testing.T) {
 }
 
 func TestAppModel_View_ToastOverlay(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 80
 	app.height = 24
 	app.toast = "Test toast message"
@@ -1135,7 +1136,7 @@ func TestAppModel_View_ToastOverlay(t *testing.T) {
 }
 
 func TestAppModel_View_ExpiredToast(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 80
 	app.height = 24
 	app.toast = "Expired toast"
@@ -1149,7 +1150,7 @@ func TestAppModel_View_ExpiredToast(t *testing.T) {
 }
 
 func TestAppModel_TitleBar_InputModeIndicator(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -1173,7 +1174,7 @@ func TestAppModel_TitleBar_InputModeIndicator(t *testing.T) {
 }
 
 func TestAppModel_InputMode_WithDialog(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 
@@ -1205,7 +1206,7 @@ func TestAppModel_InputMode_WithDialog(t *testing.T) {
 }
 
 func TestAppModel_ShiftTab(t *testing.T) {
-	app := NewAppModel()
+	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
 

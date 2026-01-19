@@ -16,6 +16,28 @@ import (
 	"github.com/docker/docker/client"
 )
 
+// containerTracker holds the global container tracker for crash recovery
+var containerTracker *docker.ContainerTracker
+
+// SetContainerTracker sets the container tracker for tracking container lifecycle
+func SetContainerTracker(tracker *docker.ContainerTracker) {
+	containerTracker = tracker
+}
+
+// trackContainer adds a container to the tracker if available
+func trackContainer(containerID, workstreamID, branchName, repoPath string) {
+	if containerTracker != nil {
+		containerTracker.Track(containerID, workstreamID, branchName, repoPath)
+	}
+}
+
+// untrackContainer removes a container from the tracker if available
+func untrackContainer(containerID string) {
+	if containerTracker != nil {
+		containerTracker.Untrack(containerID)
+	}
+}
+
 // ContainerStartedMsg is sent when a container successfully starts.
 type ContainerStartedMsg struct {
 	WorkstreamID string
@@ -208,6 +230,9 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 			}
 		}
 
+		// Track the container for crash recovery
+		trackContainer(containerID, ws.ID, ws.BranchName, repoPath)
+
 		return ContainerStartedMsg{
 			WorkstreamID: ws.ID,
 			ContainerID:  containerID,
@@ -293,6 +318,9 @@ func StopContainerCmd(ws *workstream.Workstream) tea.Cmd {
 		// Stop and remove container
 		_ = client.StopContainer(ctx, ws.ContainerID)
 		_ = client.RemoveContainer(ctx, ws.ContainerID)
+
+		// Untrack the container since it's been removed
+		untrackContainer(ws.ContainerID)
 
 		return ContainerStoppedMsg{WorkstreamID: ws.ID}
 	}
@@ -492,6 +520,10 @@ func ResumeContainerCmd(ws *workstream.Workstream, width, height int) tea.Cmd {
 		}
 
 		dockerClient.Close()
+
+		// Track the resumed container for crash recovery
+		repoPath, _ := os.Getwd()
+		trackContainer(ws.ContainerID, ws.ID, ws.BranchName, repoPath)
 
 		// Container is running, notify success
 		return ContainerStartedMsg{

@@ -1,0 +1,19 @@
+# Binaries
+ccells
+*.exe
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+
+# Build artifacts
+/dist/
+
+# Test coverage
+coverage.out
+coverage.html

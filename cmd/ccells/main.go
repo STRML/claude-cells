@@ -15,16 +15,40 @@ import (
 )
 
 func main() {
+	// Create a cancellable context for the entire application.
+	// This context is cancelled on SIGINT/SIGTERM and propagates
+	// cancellation to all running operations.
+	appCtx, appCancel := context.WithCancel(context.Background())
+	defer appCancel()
+
 	// Validate Docker prerequisites before starting
 	if err := validatePrerequisites(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
 
-	// Clean up orphaned containers from crashed sessions
-	cleanupOrphanedContainers()
+	// Initialize container tracker for crash recovery
+	tracker, err := docker.NewContainerTracker()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to initialize container tracker: %v\n", err)
+		// Continue without tracking - not fatal
+	}
 
-	app := tui.NewAppModel()
+	// Clean up orphaned containers from crashed sessions
+	cleanupOrphanedContainers(tracker)
+
+	// Start heartbeat goroutine to detect crashes
+	if tracker != nil {
+		go runHeartbeat(appCtx, tracker)
+	}
+
+	app := tui.NewAppModel(appCtx)
+
+	// Set the tracker on the app so it can track container lifecycle
+	if tracker != nil {
+		tui.SetContainerTracker(tracker)
+	}
+
 	p := tea.NewProgram(app, tea.WithAltScreen())
 
 	// Set the program reference so PTY sessions can send messages
@@ -35,14 +59,40 @@ func main() {
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		// Bubbletea will handle the signal and call our shutdown logic
-		// Just quit the program cleanly
+		// Cancel the app context to signal all operations to stop
+		appCancel()
+		// Also tell bubbletea to quit
 		p.Quit()
 	}()
 
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "Error running program: %v\n", err)
 		os.Exit(1)
+	}
+
+	// Clean shutdown - remove heartbeat and clear tracking
+	if tracker != nil {
+		tracker.RemoveHeartbeat()
+		tracker.Clear()
+	}
+}
+
+// runHeartbeat writes heartbeat every 5 seconds until context is cancelled
+func runHeartbeat(ctx context.Context, tracker *docker.ContainerTracker) {
+	pid := os.Getpid()
+	ticker := time.NewTicker(5 * time.Second)
+	defer ticker.Stop()
+
+	// Write initial heartbeat
+	tracker.WriteHeartbeat(pid)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			tracker.WriteHeartbeat(pid)
+		}
 	}
 }
 
@@ -88,15 +138,17 @@ func validatePrerequisites() error {
 }
 
 // cleanupOrphanedContainers removes ccells containers from previous crashed sessions.
-// It loads the state file to find which containers should be kept.
-func cleanupOrphanedContainers() {
+// It uses the container tracker (if available) and state file to find which containers should be kept.
+func cleanupOrphanedContainers(tracker *docker.ContainerTracker) {
 	// Get current working directory for state file
 	cwd, err := os.Getwd()
 	if err != nil {
 		return // Silently skip if we can't get cwd
 	}
 
-	// Load known container IDs from state file
+	// Collect known container IDs from multiple sources
+
+	// 1. From state file (for graceful shutdown resume)
 	var knownIDs []string
 	if workstream.StateExists(cwd) {
 		state, err := workstream.LoadState(cwd)
@@ -106,6 +158,15 @@ func cleanupOrphanedContainers() {
 					knownIDs = append(knownIDs, ws.ContainerID)
 				}
 			}
+		}
+	}
+
+	// 2. From tracker - if heartbeat is stale, these are orphaned from crash
+	var orphanedFromCrash []docker.TrackedContainer
+	if tracker != nil {
+		orphanedFromCrash = tracker.GetOrphanedContainers()
+		if len(orphanedFromCrash) > 0 {
+			fmt.Printf("Detected %d container(s) from crashed session\n", len(orphanedFromCrash))
 		}
 	}
 
@@ -119,8 +180,14 @@ func cleanupOrphanedContainers() {
 	}
 	defer client.Close()
 
+	// Clean up containers that aren't in knownIDs (from state file)
 	removed, err := client.CleanupOrphanedContainers(ctx, knownIDs)
 	if err == nil && removed > 0 {
 		fmt.Printf("Cleaned up %d orphaned container(s) from previous session\n", removed)
+	}
+
+	// Clear the tracker since we've handled orphaned containers
+	if tracker != nil && len(orphanedFromCrash) > 0 {
+		tracker.Clear()
 	}
 }

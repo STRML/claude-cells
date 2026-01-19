@@ -3,6 +3,7 @@ package workstream
 import (
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -372,14 +373,69 @@ func TestSaveStateAtomic(t *testing.T) {
 		t.Fatalf("SaveState() error = %v", err)
 	}
 
-	// Verify no temp file remains
-	tempPath := StateFilePath(tmpDir) + ".tmp"
-	if _, err := os.Stat(tempPath); !os.IsNotExist(err) {
-		t.Error("Temp file should not exist after successful save")
+	// Verify no temp file remains (check for any .tmp files)
+	entries, _ := os.ReadDir(tmpDir)
+	for _, entry := range entries {
+		if filepath.Ext(entry.Name()) == ".tmp" || len(entry.Name()) > 20 && entry.Name()[len(entry.Name())-4:] == ".tmp" {
+			t.Errorf("Temp file should not exist after successful save: %s", entry.Name())
+		}
 	}
 
 	// Verify final file exists
 	if !StateExists(tmpDir) {
 		t.Error("State file should exist after save")
+	}
+}
+
+func TestSaveStateConcurrent(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Run multiple concurrent saves
+	const numGoroutines = 10
+	var wg sync.WaitGroup
+	errors := make(chan error, numGoroutines)
+
+	for i := 0; i < numGoroutines; i++ {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			ws := New("concurrent test")
+			ws.ContainerID = "container-" + itoa(idx)
+			if err := SaveState(tmpDir, []*Workstream{ws}, 0); err != nil {
+				errors <- err
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errors)
+
+	// Check for errors
+	for err := range errors {
+		t.Errorf("SaveState() error during concurrent access: %v", err)
+	}
+
+	// State file should exist and be valid
+	state, err := LoadState(tmpDir)
+	if err != nil {
+		t.Fatalf("LoadState() error after concurrent saves: %v", err)
+	}
+
+	// Should have exactly one workstream (last one wins)
+	if len(state.Workstreams) != 1 {
+		t.Errorf("Expected 1 workstream after concurrent saves, got %d", len(state.Workstreams))
+	}
+
+	// No temp files should remain
+	entries, _ := os.ReadDir(tmpDir)
+	for _, entry := range entries {
+		name := entry.Name()
+		if name != ".ccells-state.json" {
+			t.Errorf("Unexpected file after concurrent saves: %s", name)
+		}
 	}
 }

@@ -19,6 +19,7 @@ const toastDuration = 2 * time.Second
 
 // AppModel is the main application model
 type AppModel struct {
+	ctx            context.Context // App-level context for cancellation
 	manager        *workstream.Manager
 	panes          []PaneModel
 	focusedPane    int
@@ -44,9 +45,10 @@ type AppModel struct {
 const tmuxPrefixTimeout = 2 * time.Second
 
 // NewAppModel creates a new application model
-func NewAppModel() AppModel {
+func NewAppModel(ctx context.Context) AppModel {
 	cwd, _ := os.Getwd()
 	return AppModel{
+		ctx:        ctx,
 		manager:    workstream.NewManager(),
 		statusBar:  NewStatusBarModel(),
 		workingDir: cwd,

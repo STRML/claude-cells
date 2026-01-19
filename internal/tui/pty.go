@@ -55,7 +55,9 @@ type PTYSession struct {
 	stdin        io.WriteCloser
 	mu           sync.Mutex
 	closed       bool
-	done         chan struct{} // Signals goroutines to exit
+	done         chan struct{} // Signals goroutines to exit (legacy, kept for Done() method)
+	ctx          context.Context
+	cancel       context.CancelFunc
 	workstreamID string
 	dockerClient *client.Client
 	width        int
@@ -148,12 +150,17 @@ test ! -f /home/claude/.local/bin/claude && which claude >/dev/null 2>&1 && ln -
 		return nil, err
 	}
 
+	// Create a cancellable context for this session
+	sessionCtx, sessionCancel := context.WithCancel(context.Background())
+
 	session := &PTYSession{
 		containerID:  containerID,
 		execID:       execResp.ID,
 		conn:         &attachResp,
 		stdin:        attachResp.Conn,
 		done:         make(chan struct{}),
+		ctx:          sessionCtx,
+		cancel:       sessionCancel,
 		workstreamID: workstreamID,
 		dockerClient: dockerClient,
 		width:        width,
@@ -176,12 +183,15 @@ func (p *PTYSession) autoAcceptBypassPermissions() error {
 	// Buffer to accumulate output
 	var accumulated strings.Builder
 	buf := make([]byte, 1024)
-	timeout := time.After(10 * time.Second)
+
+	// Create a timeout context
+	ctx, cancel := context.WithTimeout(p.ctx, 10*time.Second)
+	defer cancel()
 
 	for {
 		select {
-		case <-timeout:
-			// Timeout - prompt may not have appeared, continue anyway
+		case <-ctx.Done():
+			// Timeout or cancelled - prompt may not have appeared, continue anyway
 			return nil
 		default:
 		}
@@ -203,7 +213,7 @@ func (p *PTYSession) autoAcceptBypassPermissions() error {
 		}()
 
 		select {
-		case <-timeout:
+		case <-ctx.Done():
 			return nil
 		case result := <-readDone:
 			if result.err != nil {
@@ -257,17 +267,20 @@ func (p *PTYSession) Resize(width, height int) error {
 }
 
 // StartReadLoop starts reading from the PTY and sending output messages.
-// This should be called in a goroutine.
+// This should be called in a goroutine. Uses context-based cancellation
+// to avoid race conditions with Close().
 func (p *PTYSession) StartReadLoop() {
 	buf := make([]byte, 4096)
+
 	for {
-		// Check if we should exit via the done channel (non-blocking)
+		// Check context first (non-blocking)
 		select {
-		case <-p.done:
+		case <-p.ctx.Done():
 			return
 		default:
 		}
 
+		// Get connection reference under lock
 		p.mu.Lock()
 		if p.closed {
 			p.mu.Unlock()
@@ -280,33 +293,55 @@ func (p *PTYSession) StartReadLoop() {
 			return
 		}
 
-		n, err := conn.Reader.Read(buf)
-		if err != nil {
-			// Check done channel before sending error message
-			// This prevents sending spurious error messages during shutdown
-			select {
-			case <-p.done:
+		// Wrap read in a goroutine so we can select on context cancellation.
+		// This prevents the race condition where Close() is called while
+		// we're blocked on Read().
+		type readResult struct {
+			n   int
+			err error
+		}
+		readCh := make(chan readResult, 1)
+
+		go func() {
+			n, err := conn.Reader.Read(buf)
+			readCh <- readResult{n, err}
+		}()
+
+		// Wait for either read completion or context cancellation
+		select {
+		case <-p.ctx.Done():
+			// Context cancelled (Close() was called)
+			// The read goroutine will eventually complete and the channel
+			// will be garbage collected. This is acceptable since we're shutting down.
+			return
+		case result := <-readCh:
+			if result.err != nil {
+				// Check context before sending error message
+				// This prevents sending spurious error messages during shutdown
+				select {
+				case <-p.ctx.Done():
+					return
+				default:
+				}
+
+				if program != nil {
+					program.Send(PTYClosedMsg{
+						WorkstreamID: p.workstreamID,
+						Error:        result.err,
+					})
+				}
 				return
-			default:
 			}
 
-			if program != nil {
-				program.Send(PTYClosedMsg{
+			if result.n > 0 && program != nil {
+				// Make a copy of the buffer to send
+				output := make([]byte, result.n)
+				copy(output, buf[:result.n])
+				program.Send(PTYOutputMsg{
 					WorkstreamID: p.workstreamID,
-					Error:        err,
+					Output:       output,
 				})
 			}
-			return
-		}
-
-		if n > 0 && program != nil {
-			// Make a copy of the buffer to send
-			output := make([]byte, n)
-			copy(output, buf[:n])
-			program.Send(PTYOutputMsg{
-				WorkstreamID: p.workstreamID,
-				Output:       output,
-			})
 		}
 	}
 }
@@ -334,8 +369,16 @@ func (p *PTYSession) SendKey(key string) error {
 	return p.WriteString(key)
 }
 
-// Close closes the PTY session.
+// Close closes the PTY session and releases all resources.
+// Thread-safe: can be called concurrently with StartReadLoop.
 func (p *PTYSession) Close() error {
+	// Cancel context first to signal goroutines to exit.
+	// This must be done BEFORE acquiring the lock to avoid deadlock
+	// with StartReadLoop which holds a reference to conn.
+	if p.cancel != nil {
+		p.cancel()
+	}
+
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -344,13 +387,20 @@ func (p *PTYSession) Close() error {
 	}
 	p.closed = true
 
-	// Signal goroutines to exit
+	// Signal goroutines via done channel (legacy, for Done() method)
 	if p.done != nil {
 		close(p.done)
 	}
 
+	// Close the connection - any blocked Read() will return with error
 	if p.conn != nil {
 		p.conn.Close()
+	}
+
+	// Close the Docker client to avoid resource leak
+	if p.dockerClient != nil {
+		p.dockerClient.Close()
+		p.dockerClient = nil
 	}
 
 	return nil

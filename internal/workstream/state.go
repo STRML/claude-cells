@@ -5,8 +5,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 )
+
+// stateMu protects concurrent SaveState calls from racing on temp file
+var stateMu sync.Mutex
 
 const stateFileName = ".ccells-state.json"
 
@@ -34,7 +38,11 @@ func StateFilePath(dir string) string {
 
 // SaveState saves the application state to a file.
 // Uses atomic write (write to temp file, then rename) to prevent corruption.
+// Thread-safe: protected by mutex to prevent concurrent write races.
 func SaveState(dir string, workstreams []*Workstream, focusedIndex int) error {
+	stateMu.Lock()
+	defer stateMu.Unlock()
+
 	state := AppState{
 		Version:      1,
 		FocusedIndex: focusedIndex,
@@ -56,9 +64,9 @@ func SaveState(dir string, workstreams []*Workstream, focusedIndex int) error {
 		return err
 	}
 
-	// Atomic write: write to temp file in same directory, then rename
+	// Atomic write: write to temp file with unique name, then rename
 	finalPath := StateFilePath(dir)
-	tempPath := finalPath + ".tmp"
+	tempPath := fmt.Sprintf("%s.tmp.%d", finalPath, time.Now().UnixNano())
 
 	if err := os.WriteFile(tempPath, data, 0644); err != nil {
 		return fmt.Errorf("failed to write temp state file: %w", err)
