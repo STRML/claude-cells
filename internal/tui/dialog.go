@@ -7,6 +7,7 @@ import (
 	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/lipgloss"
 )
 
 // DialogType represents the type of dialog
@@ -84,17 +85,18 @@ func NewWorkstreamDialog() DialogModel {
 	ta := textarea.New()
 	ta.Placeholder = "describe the task..."
 	ta.CharLimit = 500
-	ta.SetWidth(50)
-	ta.SetHeight(3) // Start with 3 lines, will grow
+	ta.SetWidth(48)
+	ta.SetHeight(3)
 	ta.Focus()
 	ta.ShowLineNumbers = false
 
-	// Style the textarea for a polished look
-	ta.Prompt = "› "
-	ta.FocusedStyle.Prompt = DialogInputPrompt
+	// Style the textarea - remove default border, minimal chrome
+	ta.Prompt = "" // No per-line prompt
+	ta.FocusedStyle.Base = lipgloss.NewStyle() // No border
 	ta.FocusedStyle.Text = DialogInputText
 	ta.FocusedStyle.Placeholder = DialogInputPlaceholder
-	ta.FocusedStyle.CursorLine = DialogInputText // No special cursor line highlight
+	ta.FocusedStyle.CursorLine = DialogInputText
+	ta.FocusedStyle.EndOfBuffer = lipgloss.NewStyle().Foreground(lipgloss.Color("#333333"))
 	ta.BlurredStyle = ta.FocusedStyle
 
 	return DialogModel{
