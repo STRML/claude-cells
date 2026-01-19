@@ -344,7 +344,22 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "d":
 			// Destroy focused workstream
 			if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
-				ws := m.panes[m.focusedPane].Workstream()
+				pane := m.panes[m.focusedPane]
+				ws := pane.Workstream()
+				// Skip confirmation for errored workstreams - nothing to lose
+				if ws.GetState() == workstream.StateError {
+					// Same logic as DialogDestroy handler
+					m.manager.Remove(ws.ID)
+					m.panes = append(m.panes[:m.focusedPane], m.panes[m.focusedPane+1:]...)
+					if m.focusedPane >= len(m.panes) && len(m.panes) > 0 {
+						m.focusedPane = len(m.panes) - 1
+					}
+					if len(m.panes) > 0 {
+						m.panes[m.focusedPane].SetFocused(true)
+					}
+					m.updateLayout()
+					return m, StopContainerCmd(ws)
+				}
 				dialog := NewDestroyDialog(ws.BranchName, ws.ID)
 				dialog.SetSize(50, 15)
 				m.dialog = &dialog
