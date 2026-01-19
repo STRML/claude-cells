@@ -451,6 +451,12 @@ func (p *PaneModel) renderVTerm() (result string) {
 						} else {
 							line.WriteString(fmt.Sprintf("\x1b[%dm", 90+cell.FG-8))
 						}
+					} else if cell.FG > 255 {
+						// Truecolor RGB - vt10x stores as r<<16 | g<<8 | b
+						r := (cell.FG >> 16) & 0xFF
+						g := (cell.FG >> 8) & 0xFF
+						b := cell.FG & 0xFF
+						line.WriteString(fmt.Sprintf("\x1b[38;2;%d;%d;%dm", r, g, b))
 					} else {
 						// 256-color mode
 						line.WriteString(fmt.Sprintf("\x1b[38;5;%dm", cell.FG))
@@ -464,6 +470,12 @@ func (p *PaneModel) renderVTerm() (result string) {
 						} else {
 							line.WriteString(fmt.Sprintf("\x1b[%dm", 100+cell.BG-8))
 						}
+					} else if cell.BG > 255 {
+						// Truecolor RGB - vt10x stores as r<<16 | g<<8 | b
+						r := (cell.BG >> 16) & 0xFF
+						g := (cell.BG >> 8) & 0xFF
+						b := cell.BG & 0xFF
+						line.WriteString(fmt.Sprintf("\x1b[48;2;%d;%d;%dm", r, g, b))
 					} else {
 						// 256-color mode
 						line.WriteString(fmt.Sprintf("\x1b[48;5;%dm", cell.BG))
