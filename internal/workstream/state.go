@@ -19,6 +19,7 @@ type SavedWorkstream struct {
 	ID          string    `json:"id"`
 	BranchName  string    `json:"branch_name"`
 	Prompt      string    `json:"prompt"`
+	Title       string    `json:"title,omitempty"` // Short summary title
 	ContainerID string    `json:"container_id"`
 	CreatedAt   time.Time `json:"created_at"`
 }
@@ -56,6 +57,7 @@ func SaveState(dir string, workstreams []*Workstream, focusedIndex int, layout i
 			ID:          ws.ID,
 			BranchName:  ws.BranchName,
 			Prompt:      ws.Prompt,
+			Title:       ws.Title,
 			ContainerID: ws.ContainerID,
 			CreatedAt:   ws.CreatedAt,
 		})

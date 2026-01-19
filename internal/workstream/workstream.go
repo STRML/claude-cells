@@ -35,6 +35,7 @@ type Workstream struct {
 	ID         string // Unique identifier
 	Prompt     string // Original user prompt
 	BranchName string // Generated git branch name
+	Title      string // Short summary title (generated async via Claude CLI)
 
 	// Docker
 	ContainerID string // Docker container ID
@@ -120,6 +121,23 @@ func (w *Workstream) SetContainerID(id string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.ContainerID = id
+}
+
+// SetTitle sets the workstream title (generated async via Claude CLI).
+func (w *Workstream) SetTitle(title string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.Title = title
+}
+
+// GetTitle returns the title, or BranchName as fallback if title not yet set.
+func (w *Workstream) GetTitle() string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	if w.Title != "" {
+		return w.Title
+	}
+	return w.BranchName
 }
 
 // UpdateActivity updates the last activity timestamp.

@@ -584,8 +584,8 @@ Input Mode:
 			}
 			m.focusedPane = len(m.panes) - 1
 			m.panes[m.focusedPane].SetFocused(true)
-			// Start container asynchronously and spinner animation
-			return m, tea.Batch(StartContainerCmd(ws), spinnerTickCmd())
+			// Start container and title generation asynchronously, plus spinner animation
+			return m, tea.Batch(StartContainerCmd(ws), GenerateTitleCmd(ws), spinnerTickCmd())
 
 		case DialogDestroy:
 			// Destroy workstream
@@ -672,6 +672,19 @@ Input Mode:
 				}
 				dialog.SetSize(60, height)
 				m.dialog = &dialog
+				break
+			}
+		}
+		return m, nil
+
+	case TitleGeneratedMsg:
+		// Title generated via Claude CLI - update workstream
+		for i := range m.panes {
+			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				if msg.Error == nil && msg.Title != "" {
+					m.panes[i].Workstream().SetTitle(msg.Title)
+				}
+				// Silently ignore errors - fallback to branch name is fine
 				break
 			}
 		}
@@ -1056,6 +1069,7 @@ Input Mode:
 			ws := workstream.NewWithID(saved.ID, saved.BranchName, saved.Prompt)
 			ws.ContainerID = saved.ContainerID
 			ws.CreatedAt = saved.CreatedAt
+			ws.Title = saved.Title // Restore generated title
 			if err := m.manager.Add(ws); err != nil {
 				// Skip workstreams that exceed the limit during restore
 				continue

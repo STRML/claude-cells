@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"os"
+	"os/exec"
 	"strings"
 	"time"
 
@@ -82,6 +83,50 @@ type BranchConflictMsg struct {
 	BranchName   string
 	RepoPath     string
 	BranchInfo   string // Summary of commits and diff on the existing branch
+}
+
+// TitleGeneratedMsg is sent when a workstream title is generated via Claude CLI.
+type TitleGeneratedMsg struct {
+	WorkstreamID string
+	Title        string
+	Error        error
+}
+
+// GenerateTitleCmd returns a command that generates a short title for a workstream
+// using the Claude CLI. This runs asynchronously while the container starts.
+func GenerateTitleCmd(ws *workstream.Workstream) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		// Build the prompt for Claude CLI
+		prompt := fmt.Sprintf(`Generate a 3-5 word title summarizing this task. Output ONLY the title text, no quotes or explanation.
+
+Task: %s`, ws.Prompt)
+
+		// Run claude CLI with -p flag for non-interactive mode
+		cmd := exec.CommandContext(ctx, "claude", "-p", prompt)
+		output, err := cmd.Output()
+		if err != nil {
+			return TitleGeneratedMsg{
+				WorkstreamID: ws.ID,
+				Error:        err,
+			}
+		}
+
+		// Clean up the output - trim whitespace
+		title := strings.TrimSpace(string(output))
+
+		// Limit title length to prevent UI issues
+		if len(title) > 50 {
+			title = title[:47] + "..."
+		}
+
+		return TitleGeneratedMsg{
+			WorkstreamID: ws.ID,
+			Title:        title,
+		}
+	}
 }
 
 // StartContainerCmd returns a command that creates and starts a container.
