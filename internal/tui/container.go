@@ -92,6 +92,50 @@ type TitleGeneratedMsg struct {
 	Error        error
 }
 
+// UncommittedChangesMsg is sent after checking for uncommitted changes in a worktree.
+type UncommittedChangesMsg struct {
+	WorkstreamID string
+	HasChanges   bool
+	Error        error
+}
+
+// CheckUncommittedChangesCmd checks if a worktree has uncommitted changes.
+func CheckUncommittedChangesCmd(ws *workstream.Workstream) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		// Use the worktree path if set, otherwise compute it
+		worktreePath := ws.WorktreePath
+		if worktreePath == "" && ws.BranchName != "" {
+			worktreePath = getWorktreePath(ws.BranchName)
+		}
+
+		if worktreePath == "" {
+			return UncommittedChangesMsg{
+				WorkstreamID: ws.ID,
+				HasChanges:   false,
+				Error:        fmt.Errorf("no worktree path"),
+			}
+		}
+
+		gitRepo := git.New(worktreePath)
+		hasChanges, err := gitRepo.HasUncommittedChanges(ctx)
+		if err != nil {
+			return UncommittedChangesMsg{
+				WorkstreamID: ws.ID,
+				HasChanges:   false,
+				Error:        err,
+			}
+		}
+
+		return UncommittedChangesMsg{
+			WorkstreamID: ws.ID,
+			HasChanges:   hasChanges,
+		}
+	}
+}
+
 // GenerateTitleCmd returns a command that generates a short title for a workstream
 // using the Claude CLI. This runs asynchronously while the container starts.
 func GenerateTitleCmd(ws *workstream.Workstream) tea.Cmd {
@@ -812,12 +856,17 @@ func PushBranchCmd(ws *workstream.Workstream) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
 
-		repoPath, err := os.Getwd()
-		if err != nil {
-			return PushBranchResultMsg{WorkstreamID: ws.ID, Error: err}
+		// Use worktree path for git operations
+		worktreePath := ws.WorktreePath
+		if worktreePath == "" && ws.BranchName != "" {
+			worktreePath = getWorktreePath(ws.BranchName)
 		}
 
-		gitRepo := git.New(repoPath)
+		if worktreePath == "" {
+			return PushBranchResultMsg{WorkstreamID: ws.ID, Error: fmt.Errorf("no worktree path for branch")}
+		}
+
+		gitRepo := git.New(worktreePath)
 		if err := gitRepo.Push(ctx, ws.BranchName); err != nil {
 			return PushBranchResultMsg{WorkstreamID: ws.ID, Error: err}
 		}
@@ -840,28 +889,34 @@ func CreatePRCmd(ws *workstream.Workstream) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
 
-		repoPath, err := os.Getwd()
-		if err != nil {
-			return PRCreatedMsg{WorkstreamID: ws.ID, Error: err}
+		// Use worktree path for git operations - that's where the branch is checked out
+		worktreePath := ws.WorktreePath
+		if worktreePath == "" && ws.BranchName != "" {
+			worktreePath = getWorktreePath(ws.BranchName)
 		}
 
-		gitRepo := git.New(repoPath)
+		if worktreePath == "" {
+			return PRCreatedMsg{WorkstreamID: ws.ID, Error: fmt.Errorf("no worktree path for branch")}
+		}
 
-		// First push the branch
+		gitRepo := git.New(worktreePath)
+
+		// First push the branch from the worktree
 		if err := gitRepo.Push(ctx, ws.BranchName); err != nil {
 			return PRCreatedMsg{WorkstreamID: ws.ID, Error: fmt.Errorf("failed to push branch: %w", err)}
 		}
 
-		// Create PR using gh CLI
+		// Create PR using gh CLI - run from worktree so it picks up the right branch
 		gh := git.NewGH()
 
 		// Generate PR title and body from the workstream prompt
 		prTitle := ws.BranchName
 		prBody := fmt.Sprintf("## Summary\n\n%s\n\n## Changes\n\nCreated by [claude-cells](https://github.com/STRML/claude-cells).", ws.Prompt)
 
-		pr, err := gh.CreatePR(ctx, repoPath, &git.PRRequest{
+		pr, err := gh.CreatePR(ctx, worktreePath, &git.PRRequest{
 			Title: prTitle,
 			Body:  prBody,
+			Head:  ws.BranchName, // Explicitly specify branch for worktrees
 		})
 		if err != nil {
 			return PRCreatedMsg{WorkstreamID: ws.ID, Error: err}
@@ -872,6 +927,34 @@ func CreatePRCmd(ws *workstream.Workstream) tea.Cmd {
 			PRURL:        pr.URL,
 			PRNumber:     pr.Number,
 		}
+	}
+}
+
+// MergeBranchMsg is sent when a branch merge completes.
+type MergeBranchMsg struct {
+	WorkstreamID string
+	Error        error
+}
+
+// MergeBranchCmd returns a command that merges a branch into main.
+func MergeBranchCmd(ws *workstream.Workstream) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
+
+		repoPath, err := os.Getwd()
+		if err != nil {
+			return MergeBranchMsg{WorkstreamID: ws.ID, Error: err}
+		}
+
+		gitRepo := git.New(repoPath)
+
+		// Merge the branch into main
+		if err := gitRepo.MergeBranch(ctx, ws.BranchName); err != nil {
+			return MergeBranchMsg{WorkstreamID: ws.ID, Error: fmt.Errorf("failed to merge branch: %w", err)}
+		}
+
+		return MergeBranchMsg{WorkstreamID: ws.ID}
 	}
 }
 

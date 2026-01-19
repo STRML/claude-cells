@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"fmt"
 	"os/exec"
 	"strings"
 )
@@ -83,6 +84,22 @@ func (g *Git) DeleteRemoteBranch(ctx context.Context, name string) error {
 // Push pushes a branch to origin.
 func (g *Git) Push(ctx context.Context, branch string) error {
 	_, err := g.run(ctx, "push", "-u", "origin", branch)
+	return err
+}
+
+// MergeBranch merges a branch into the current branch (typically main).
+// It performs a checkout to main, then merges the specified branch.
+func (g *Git) MergeBranch(ctx context.Context, branch string) error {
+	// Checkout main first
+	if _, err := g.run(ctx, "checkout", "main"); err != nil {
+		// Try master if main doesn't exist
+		if _, err := g.run(ctx, "checkout", "master"); err != nil {
+			return fmt.Errorf("failed to checkout main/master: %w", err)
+		}
+	}
+
+	// Merge the branch
+	_, err := g.run(ctx, "merge", branch, "--no-edit")
 	return err
 }
 
