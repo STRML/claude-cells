@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/STRML/claude-cells/internal/docker"
@@ -163,22 +164,13 @@ func DeleteAndRestartContainerCmd(ws *workstream.Workstream) tea.Cmd {
 
 		gitRepo := git.New(repoPath)
 
-		// First checkout main/master so we can delete the branch
-		// (can't delete a branch that's currently checked out)
-		currentBranch, _ := gitRepo.CurrentBranch(ctx)
-		if currentBranch == ws.BranchName {
-			// Try main first, then master
-			if err := gitRepo.Checkout(ctx, "main"); err != nil {
-				if err := gitRepo.Checkout(ctx, "master"); err != nil {
-					return ContainerErrorMsg{
-						WorkstreamID: ws.ID,
-						Error:        fmt.Errorf("failed to checkout main/master before deleting branch: %w", err),
-					}
-				}
-			}
-		}
+		// With worktrees, the branch may be checked out in a worktree
+		// First remove any worktree using this branch
+		worktreePath := getWorktreePath(ws.BranchName)
+		_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+		_ = os.RemoveAll(worktreePath)
 
-		// Delete the existing branch
+		// Now we can delete the branch (it's no longer checked out anywhere)
 		if err := gitRepo.DeleteBranch(ctx, ws.BranchName); err != nil {
 			return ContainerErrorMsg{
 				WorkstreamID: ws.ID,
@@ -191,7 +183,16 @@ func DeleteAndRestartContainerCmd(ws *workstream.Workstream) tea.Cmd {
 	}
 }
 
+// getWorktreePath returns the path for a workstream's worktree.
+func getWorktreePath(branchName string) string {
+	// Sanitize branch name for filesystem
+	safeName := strings.ReplaceAll(branchName, "/", "-")
+	safeName = strings.ReplaceAll(safeName, " ", "-")
+	return fmt.Sprintf("/tmp/ccells/worktrees/%s", safeName)
+}
+
 // startContainerWithOptions is the internal implementation for starting containers.
+// It uses git worktrees to avoid modifying the host repo's checked out branch.
 func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -208,12 +209,27 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 
 		gitRepo := git.New(repoPath)
 
+		// Determine worktree path for this container
+		worktreePath := getWorktreePath(ws.BranchName)
+
+		// Ensure the worktrees directory exists
+		if err := os.MkdirAll("/tmp/ccells/worktrees", 0755); err != nil {
+			return ContainerErrorMsg{
+				WorkstreamID: ws.ID,
+				Error:        fmt.Errorf("failed to create worktrees directory: %w", err),
+			}
+		}
+
+		// Clean up any existing worktree at this path (in case of previous crash)
+		_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+		_ = os.RemoveAll(worktreePath)
+
 		if useExistingBranch {
-			// Just checkout the existing branch
-			if err := gitRepo.Checkout(ctx, ws.BranchName); err != nil {
+			// Create worktree from existing branch (don't create new branch)
+			if err := gitRepo.CreateWorktreeFromExisting(ctx, worktreePath, ws.BranchName); err != nil {
 				return ContainerErrorMsg{
 					WorkstreamID: ws.ID,
-					Error:        fmt.Errorf("failed to checkout branch %s: %w", ws.BranchName, err),
+					Error:        fmt.Errorf("failed to create worktree for branch %s: %w", ws.BranchName, err),
 				}
 			}
 		} else {
@@ -232,18 +248,23 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 				}
 			}
 
-			// Create and checkout feature branch before starting container
-			if err := gitRepo.CreateAndCheckout(ctx, ws.BranchName); err != nil {
+			// Create worktree with new branch (git worktree add -b <branch> <path>)
+			if err := gitRepo.CreateWorktree(ctx, worktreePath, ws.BranchName); err != nil {
 				return ContainerErrorMsg{
 					WorkstreamID: ws.ID,
-					Error:        fmt.Errorf("failed to create branch %s: %w", ws.BranchName, err),
+					Error:        fmt.Errorf("failed to create worktree for branch %s: %w", ws.BranchName, err),
 				}
 			}
 		}
 
+		// Store worktree path in workstream for later cleanup
+		ws.WorktreePath = worktreePath
+
 		// Create Docker client
 		dockerClient, err := docker.NewClient()
 		if err != nil {
+			// Clean up worktree on failure
+			_ = gitRepo.RemoveWorktree(ctx, worktreePath)
 			return ContainerErrorMsg{
 				WorkstreamID: ws.ID,
 				Error:        err,
@@ -251,14 +272,16 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 		}
 		defer dockerClient.Close()
 
-		// Create container config with unique name
-		cfg := docker.NewContainerConfig(ws.BranchName, repoPath)
+		// Create container config - mount the WORKTREE, not the main repo
+		cfg := docker.NewContainerConfig(ws.BranchName, worktreePath)
 		cfg.Image = docker.RequiredImage
 
 		// Create per-container isolated config directory
 		// This prevents race conditions when multiple containers modify credentials
 		configPaths, err := docker.CreateContainerConfig(cfg.Name)
 		if err != nil {
+			// Clean up worktree on failure
+			_ = gitRepo.RemoveWorktree(ctx, worktreePath)
 			return ContainerErrorMsg{
 				WorkstreamID: ws.ID,
 				Error:        fmt.Errorf("failed to create container config: %w", err),
@@ -272,6 +295,8 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 		// Create container
 		containerID, err := dockerClient.CreateContainer(ctx, cfg)
 		if err != nil {
+			// Clean up worktree on failure
+			_ = gitRepo.RemoveWorktree(ctx, worktreePath)
 			return ContainerErrorMsg{
 				WorkstreamID: ws.ID,
 				Error:        err,
@@ -281,8 +306,9 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 		// Start container
 		err = dockerClient.StartContainer(ctx, containerID)
 		if err != nil {
-			// Clean up created container on start failure
+			// Clean up created container and worktree on start failure
 			_ = dockerClient.RemoveContainer(ctx, containerID)
+			_ = gitRepo.RemoveWorktree(ctx, worktreePath)
 			return ContainerErrorMsg{
 				WorkstreamID: ws.ID,
 				Error:        err,
@@ -290,7 +316,7 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 		}
 
 		// Track the container for crash recovery
-		trackContainer(containerID, ws.ID, ws.BranchName, repoPath)
+		trackContainer(containerID, ws.ID, ws.BranchName, worktreePath)
 
 		return ContainerStartedMsg{
 			WorkstreamID: ws.ID,
@@ -358,28 +384,29 @@ func StartPTYCmd(ws *workstream.Workstream, initialPrompt string, width, height 
 // StopContainerCmd returns a command that stops and removes a container.
 func StopContainerCmd(ws *workstream.Workstream) tea.Cmd {
 	return func() tea.Msg {
-		if ws.ContainerID == "" {
-			return ContainerStoppedMsg{WorkstreamID: ws.ID}
-		}
-
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		client, err := docker.NewClient()
-		if err != nil {
-			return ContainerErrorMsg{
-				WorkstreamID: ws.ID,
-				Error:        err,
+		// Stop and remove container if it exists
+		if ws.ContainerID != "" {
+			client, err := docker.NewClient()
+			if err == nil {
+				_ = client.StopContainer(ctx, ws.ContainerID)
+				_ = client.RemoveContainer(ctx, ws.ContainerID)
+				client.Close()
+			}
+			// Untrack the container since it's been removed
+			untrackContainer(ws.ContainerID)
+		}
+
+		// Clean up the worktree
+		if ws.WorktreePath != "" {
+			repoPath, err := os.Getwd()
+			if err == nil {
+				gitRepo := git.New(repoPath)
+				_ = gitRepo.RemoveWorktree(ctx, ws.WorktreePath)
 			}
 		}
-		defer client.Close()
-
-		// Stop and remove container
-		_ = client.StopContainer(ctx, ws.ContainerID)
-		_ = client.RemoveContainer(ctx, ws.ContainerID)
-
-		// Untrack the container since it's been removed
-		untrackContainer(ws.ContainerID)
 
 		return ContainerStoppedMsg{WorkstreamID: ws.ID}
 	}

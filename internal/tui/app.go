@@ -11,6 +11,7 @@ import (
 	"github.com/STRML/claude-cells/internal/workstream"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/charmbracelet/x/ansi"
 )
 
 const escapeTimeout = 300 * time.Millisecond
@@ -213,6 +214,28 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							m.panes[m.focusedPane].SetFocused(false)
 							m.focusedPane = neighbor
 							m.panes[m.focusedPane].SetFocused(true)
+						}
+					}
+					return m, nil
+				}
+				// Not a tmux sequence - pass to pane
+				m.tmuxPrefix = false
+				var cmd tea.Cmd
+				m.panes[m.focusedPane], cmd = m.panes[m.focusedPane].Update(msg)
+				return m, cmd
+			case "1", "2", "3", "4", "5", "6", "7", "8", "9":
+				// Check for tmux-style prefix (ctrl-b + number) - switch panes by number
+				if m.tmuxPrefix && time.Since(m.tmuxPrefixTime) < tmuxPrefixTimeout {
+					m.tmuxPrefix = false
+					targetIndex := int(msg.String()[0] - '0') // Convert to 1-based index
+					for i, pane := range m.panes {
+						if pane.Index() == targetIndex {
+							if m.focusedPane < len(m.panes) {
+								m.panes[m.focusedPane].SetFocused(false)
+							}
+							m.focusedPane = i
+							m.panes[i].SetFocused(true)
+							break
 						}
 					}
 					return m, nil
@@ -500,6 +523,7 @@ Input Mode:
   Esc Esc     Exit to nav mode
   Ctrl+B Esc  Exit to nav mode
   Ctrl+B ←→   Switch pane (without exiting input mode)
+  Ctrl+B 1-9  Switch pane by number
   All other keys sent to Claude Code`
 			dialog := NewLogDialog("Help", helpText)
 			dialog.SetSize(60, 27)
@@ -1284,32 +1308,42 @@ func (m AppModel) overlayDialog(background string) string {
 			dLine := dialogLines[dialogRow]
 			dLineWidth := lipgloss.Width(dLine)
 
-			// Get visible width of background line (for ANSI content, we need plain width)
-			bgRunes := []rune(stripANSI(bgLine))
-
-			// Build the composite line:
+			// Build the composite line using ANSI-aware truncation:
 			// 1. Left part of background (up to x)
 			// 2. Dialog content
 			// 3. Right part of background (after dialog)
 
-			// Left portion - just use spaces since background may have complex ANSI
+			// Left portion - use ANSI-aware truncation to preserve styled background
 			if x > 0 {
-				result.WriteString(strings.Repeat(" ", x))
+				leftPart := ansi.Truncate(bgLine, x, "")
+				result.WriteString(leftPart)
+				// Pad if the left part was shorter than expected
+				leftWidth := ansi.StringWidth(leftPart)
+				if leftWidth < x {
+					result.WriteString(strings.Repeat(" ", x-leftWidth))
+				}
 			}
 
 			// Dialog content
 			result.WriteString(dLine)
 
-			// Right portion - fill remaining width with spaces
+			// Right portion - extract from background using ANSI-aware functions
 			rightStart := x + dLineWidth
 			if rightStart < m.width {
-				remaining := m.width - rightStart
-				// Try to preserve some background on the right if possible
-				if rightStart < len(bgRunes) {
-					// Use spaces since background has complex ANSI that could corrupt
-					result.WriteString(strings.Repeat(" ", remaining))
+				bgWidth := ansi.StringWidth(bgLine)
+				if rightStart < bgWidth {
+					// Use TruncateLeft to skip the first rightStart characters
+					rightPart := ansi.TruncateLeft(bgLine, rightStart, "")
+					result.WriteString(rightPart)
+					// Pad if the right part was shorter than expected
+					rightWidth := ansi.StringWidth(rightPart)
+					remaining := m.width - rightStart
+					if rightWidth < remaining {
+						result.WriteString(strings.Repeat(" ", remaining-rightWidth))
+					}
 				} else {
-					result.WriteString(strings.Repeat(" ", remaining))
+					// Background is shorter than dialog position - just pad
+					result.WriteString(strings.Repeat(" ", m.width-rightStart))
 				}
 			}
 		} else {

@@ -101,7 +101,8 @@ func itoa(i int) string {
 // - Hyphens instead of spaces
 // - Max 50 chars
 // - Strip common words
-// - Keep it readable
+// - Keep first ~5 meaningful words for readability
+// - Truncate at word boundaries
 func GenerateBranchName(prompt string) string {
 	// Convert to lowercase
 	name := strings.ToLower(prompt)
@@ -125,15 +126,28 @@ func GenerateBranchName(prompt string) string {
 		return defaultBranchName
 	}
 
+	// Limit to first 5 meaningful words to keep names concise
+	maxWords := 5
+	if len(filtered) > maxWords {
+		filtered = filtered[:maxWords]
+	}
+
 	// Join with hyphens
 	name = strings.Join(filtered, "-")
 
-	// Truncate to max length
+	// Truncate at word boundary if still too long
 	if len(name) > maxBranchLength {
-		name = name[:maxBranchLength]
+		// Find last hyphen within the limit
+		lastHyphen := strings.LastIndex(name[:maxBranchLength], "-")
+		if lastHyphen > 0 {
+			name = name[:lastHyphen]
+		} else {
+			// No hyphen found, just truncate (single long word)
+			name = name[:maxBranchLength]
+		}
 	}
 
-	// Remove trailing hyphen if truncation left one
+	// Remove trailing hyphen if any
 	name = strings.TrimRight(name, "-")
 
 	return name

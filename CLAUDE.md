@@ -22,11 +22,22 @@ internal/
     pane.go                # Individual workstream pane with vterm
     pty.go                 # Docker exec PTY session management
     dialog.go              # Modal dialogs
+    container.go           # Container lifecycle & git worktree management
   workstream/              # Workstream state & lifecycle
   docker/                  # Docker SDK wrapper
   sync/                    # Mutagen/pairing mode
-  git/                     # Branch & PR operations
+  git/                     # Branch, worktree & PR operations
 ```
+
+### Git Worktree Isolation
+
+Each container gets its own **git worktree** at `/tmp/ccells/worktrees/<branch-name>`. This keeps the host repository's working directory untouched while still sharing git objects. Benefits:
+
+- Host repo stays on its current branch (never changes)
+- No `.git/index.lock` conflicts
+- Each container has isolated working directory
+- Changes are still part of the main repo's git history (can push/PR)
+- Worktrees are cleaned up when containers are destroyed
 
 ## Development Rules
 
@@ -37,6 +48,7 @@ internal/
 
 ### Completed Technical Improvements
 
+- **Git Worktree Isolation**: Each container gets its own git worktree, avoiding host repo conflicts
 - **Shell Escaping**: `escapeShellArg()` handles newlines (`\n`, `\r`), null bytes, and other special characters
 - **Resource Limits**: Manager limits workstreams to 12 (MaxWorkstreams constant)
 - **Atomic State Persistence**: `SaveState` writes to temp file then renames for crash safety

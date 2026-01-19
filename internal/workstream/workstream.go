@@ -39,6 +39,9 @@ type Workstream struct {
 	// Docker
 	ContainerID string // Docker container ID
 
+	// Git worktree (container has isolated working directory)
+	WorktreePath string // Path to git worktree on host
+
 	// State
 	State        State     // Current lifecycle state
 	ErrorMessage string    // Error details if State == StateError

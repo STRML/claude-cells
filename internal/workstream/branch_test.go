@@ -39,9 +39,9 @@ func TestGenerateBranchName(t *testing.T) {
 			expected: "fix-multiple-spaces",
 		},
 		{
-			name:     "truncates to 50 chars",
+			name:     "limits to 5 meaningful words",
 			prompt:   "implement a very long feature that has way too many words to fit in a branch name",
-			expected: "implement-very-long-feature-has-way-too-many-words",
+			expected: "implement-very-long-feature-has",
 		},
 		{
 			name:     "handles special characters",
@@ -154,16 +154,16 @@ func TestGenerateUniqueBranchName(t *testing.T) {
 }
 
 func TestGenerateUniqueBranchName_MaxLength(t *testing.T) {
-	// Long branch name that's near the limit
+	// Long branch name that's near the limit (with 5-word limit)
 	prompt := "implement a very long feature that has way too many words"
 	existing := []string{
-		"implement-very-long-feature-has-way-too-many-words",
+		"implement-very-long-feature-has", // First 5 words after stripping stop words
 	}
 	got := GenerateUniqueBranchName(prompt, existing)
 	if len(got) > 50 {
 		t.Errorf("GenerateUniqueBranchName() returned %d chars, want <= 50: %q", len(got), got)
 	}
-	// Should still be unique (different from existing)
+	// Should still be unique (different from existing) - will get -2 suffix
 	if got == existing[0] {
 		t.Errorf("GenerateUniqueBranchName() returned same as existing: %q", got)
 	}

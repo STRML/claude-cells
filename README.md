@@ -29,6 +29,7 @@ Claude Cells is a terminal multiplexer specifically designed for AI-assisted dev
 | **Parallel Workstreams** | Run multiple Claude Code sessions simultaneously, each working on different tasks |
 | **Isolated Containers** | Each workstream runs in its own Docker container, preventing interference |
 | **Automatic Branch Management** | Each workstream gets its own git branch, automatically named from your prompt |
+| **Git Worktree Isolation** | Host repo stays untouched - each container uses its own worktree |
 | **Session Persistence** | Quit and resume later - containers are paused and state is saved |
 | **Push & PR** | Push branches and create pull requests directly from the TUI |
 | **Pairing Mode** | Sync your local filesystem with a container using Mutagen for real-time collaboration |
@@ -96,7 +97,7 @@ go install github.com/STRML/claude-cells/cmd/ccells@latest
    ```
 
 4. **Watch Claude work** - the workstream will automatically:
-   - Create a branch named `add-user-authentication-with-jwt-tokens`
+   - Create a branch named `add-user-authentication-jwt-tokens`
    - Start a Docker container with your project mounted
    - Launch Claude Code with your prompt
 
@@ -142,12 +143,14 @@ go install github.com/STRML/claude-cells/cmd/ccells@latest
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │  1. Create Workstream                                           │
-│     • Generate branch name from prompt                          │
-│     • Create Docker container with project mounted              │
+│     • Generate branch name from prompt (max 5 words)            │
+│     • Create git worktree at /tmp/ccells/worktrees/<branch>     │
+│     • Mount worktree into Docker container                      │
 │     • Start Claude Code with your prompt                        │
 ├─────────────────────────────────────────────────────────────────┤
 │  2. Isolation                                                   │
-│     • Each container has its own git branch                     │
+│     • Each container has its own git worktree                   │
+│     • Host repo stays on its current branch (never changes!)    │
 │     • Claude credentials mounted read-only                      │
 │     • Changes isolated from other workstreams                   │
 ├─────────────────────────────────────────────────────────────────┤
@@ -161,6 +164,16 @@ go install github.com/STRML/claude-cells/cmd/ccells@latest
 │     • Create pull request with one keypress                     │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+### Git Worktree Isolation
+
+Claude Cells uses **git worktrees** to achieve true isolation without modifying your host repository:
+
+- Each container mounts a **separate worktree** (at `/tmp/ccells/worktrees/<branch>`)
+- Your host repo stays on its current branch - never touched!
+- No `.git/index.lock` conflicts when running multiple containers
+- All worktrees share the same git objects (no disk bloat)
+- Changes are part of the main repo's history (can push, create PRs)
 
 ### Session Persistence
 
@@ -213,6 +226,7 @@ Claude Cells stores data in:
 |----------|---------|
 | `~/.claude-cells/` | Global config and Claude credential copies |
 | `.claude-cells/state.json` | Session state for resume (in project directory) |
+| `/tmp/ccells/worktrees/` | Git worktrees for container isolation |
 
 ## Troubleshooting
 
@@ -227,7 +241,7 @@ docker build -t ccells-base -f configs/base.Dockerfile .
 
 Press `l` to view container logs. The startup process includes:
 1. Container creation
-2. Branch checkout
+2. Worktree creation
 3. Claude Code initialization
 
 If startup times out (default: 60s), check your Docker resources.
