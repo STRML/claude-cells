@@ -897,9 +897,10 @@ Scroll Mode:
 		// Output from PTY - write to virtual terminal
 		for i := range m.panes {
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				outputStr := string(msg.Output)
+
 				// Check if Claude Code is ready (bypass permissions accepted)
 				if m.panes[i].IsInitializing() {
-					outputStr := string(msg.Output)
 					if strings.Contains(outputStr, "bypass permissions on") ||
 						strings.Contains(outputStr, "What would you like to do?") {
 						m.panes[i].SetInitializing(false)
@@ -910,8 +911,21 @@ Scroll Mode:
 							m.inputMode = true
 							return m, tea.ShowCursor
 						}
+						break
 					}
-					// Don't write output while initializing - discard it
+					// Show installation output (Claude Code being installed)
+					if strings.Contains(outputStr, "Claude Code not found") ||
+						strings.Contains(outputStr, "installing") ||
+						strings.Contains(outputStr, "npm") ||
+						strings.Contains(outputStr, "Downloading") {
+						m.panes[i].WritePTYOutput(msg.Output)
+						break
+					}
+					// Show any other significant output during init
+					// (discard only permissions dialog spinner/progress)
+					if len(outputStr) > 10 && !strings.Contains(outputStr, "Bypass Permissions") {
+						m.panes[i].WritePTYOutput(msg.Output)
+					}
 				} else {
 					m.panes[i].WritePTYOutput(msg.Output)
 				}
