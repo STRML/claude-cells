@@ -94,7 +94,7 @@ func NewWorkstreamDialog() DialogModel {
 	ta.ShowLineNumbers = false
 
 	// Style the textarea - remove default border, minimal chrome
-	ta.Prompt = "" // No per-line prompt
+	ta.Prompt = ""                             // No per-line prompt
 	ta.FocusedStyle.Base = lipgloss.NewStyle() // No border
 	ta.FocusedStyle.Text = DialogInputText
 	ta.FocusedStyle.Placeholder = DialogInputPlaceholder
@@ -148,10 +148,10 @@ const (
 type MergeAction string
 
 const (
-	MergeActionCreatePR   MergeAction = "create_pr"
-	MergeActionMergeMain  MergeAction = "merge_main"
-	MergeActionPush       MergeAction = "push"
-	MergeActionCancel     MergeAction = "cancel"
+	MergeActionCreatePR  MergeAction = "create_pr"
+	MergeActionMergeMain MergeAction = "merge_main"
+	MergeActionPush      MergeAction = "push"
+	MergeActionCancel    MergeAction = "cancel"
 )
 
 // CommitBeforeMergeAction represents a commit-before-merge dialog action
@@ -580,14 +580,15 @@ func (d DialogModel) View() string {
 		}
 		content.WriteString("\n\n")
 
-		// Scroll indicator
+		// Bottom bar with scroll indicator integrated
+		var lineInfo string
 		if d.scrollMax > 0 {
 			scrollPct := 100 * d.scrollOffset / d.scrollMax
-			content.WriteString(fmt.Sprintf("Line %d-%d/%d (%d%%)\n", d.scrollOffset+1, endLine, len(lines), scrollPct))
+			lineInfo = fmt.Sprintf("Line %d-%d/%d (%d%%)", d.scrollOffset+1, endLine, len(lines), scrollPct)
 		} else {
-			content.WriteString(fmt.Sprintf("Lines: %d\n", len(lines)))
+			lineInfo = fmt.Sprintf("Lines: %d", len(lines))
 		}
-		content.WriteString(KeyHint("↑↓", " scroll") + "  " + KeyHint("PgUp/Dn", " page") + "  " + KeyHint("g/G", " top/bottom") + "  " + KeyHint("Enter/Esc", " close"))
+		content.WriteString(KeyHint("↑↓", " scroll") + "  " + KeyHint("PgUp/Dn", " page") + "  " + KeyHint("g/G", " top/bottom") + "  " + KeyHint("Enter/Esc", " close") + "  " + KeyHintStyle.Render(lineInfo))
 		return DialogBox.Width(d.width).Render(content.String())
 	}
 

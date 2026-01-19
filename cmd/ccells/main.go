@@ -103,6 +103,18 @@ func validatePrerequisites() error {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
+	// Check for devcontainer CLI - warn if not present
+	cliStatus := docker.CheckDevcontainerCLI()
+	if !cliStatus.Available {
+		if docker.HasDevcontainerConfig(projectPath) {
+			fmt.Fprintln(os.Stderr, "\033[33mWarning: devcontainer CLI not found.\033[0m")
+			fmt.Fprintln(os.Stderr, "Devcontainer features won't be installed. Containers may have issues.")
+			fmt.Fprintln(os.Stderr, "")
+			fmt.Fprintln(os.Stderr, docker.DevcontainerCLIInstallInstructions())
+			fmt.Fprintln(os.Stderr, "")
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
@@ -117,16 +129,26 @@ func validatePrerequisites() error {
 			// Build from devcontainer.json
 			fmt.Printf("Project image '%s' not found. Building from devcontainer.json...\n\n", result.ImageName)
 
-			devCfg, err := docker.LoadDevcontainerConfig(projectPath)
-			if err != nil {
-				return fmt.Errorf("failed to load devcontainer config: %w", err)
-			}
-
 			buildCtx, buildCancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer buildCancel()
 
-			if err := docker.BuildProjectImage(buildCtx, projectPath, devCfg, os.Stdout); err != nil {
-				return fmt.Errorf("failed to build project image: %w", err)
+			// Use devcontainer CLI if available for proper feature support
+			if cliStatus.Available {
+				fmt.Println("Using devcontainer CLI for full feature support...")
+				_, err := docker.BuildWithDevcontainerCLI(buildCtx, projectPath, os.Stdout)
+				if err != nil {
+					return fmt.Errorf("failed to build with devcontainer CLI: %w", err)
+				}
+			} else {
+				// Fall back to simple docker build
+				devCfg, err := docker.LoadDevcontainerConfig(projectPath)
+				if err != nil {
+					return fmt.Errorf("failed to load devcontainer config: %w", err)
+				}
+
+				if err := docker.BuildProjectImage(buildCtx, projectPath, devCfg, os.Stdout); err != nil {
+					return fmt.Errorf("failed to build project image: %w", err)
+				}
 			}
 
 			fmt.Println("\nImage built successfully!")

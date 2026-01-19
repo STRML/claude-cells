@@ -102,13 +102,22 @@ func NewPTYSession(ctx context.Context, dockerClient *client.Client, containerID
 	// Setup steps:
 	// 1. Copy credentials file to expected location
 	// 2. Create ~/.local/bin and symlink claude if needed (suppresses "native install" warning)
-	// 3. Run claude with --dangerously-skip-permissions since we're in an isolated container
+	// 3. If claude is not installed, install it via npm (for devcontainer images without claude)
+	// 4. Run claude with --dangerously-skip-permissions since we're in an isolated container
 	//    - If resuming, use --continue to resume the previous session
 	//    - If new session with prompt, pass the prompt as argument
 	setupScript := `
 test -f /home/claude/.claude-credentials && cp /home/claude/.claude-credentials /home/claude/.claude/.credentials.json 2>/dev/null
 mkdir -p /home/claude/.local/bin 2>/dev/null
 test ! -f /home/claude/.local/bin/claude && which claude >/dev/null 2>&1 && ln -sf "$(which claude)" /home/claude/.local/bin/claude 2>/dev/null
+
+# Install Claude Code if not available
+if ! which claude >/dev/null 2>&1; then
+  echo "Claude Code not found in container, installing..."
+  curl -fsSL https://claude.ai/install.sh | bash 2>&1
+  # Add to PATH for this session
+  export PATH="$HOME/.claude/local/bin:$PATH"
+fi
 `
 	var setupCmd string
 	if opts != nil && opts.IsResume {

@@ -404,13 +404,24 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 			buildCtx, buildCancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer buildCancel()
 
-			// Build to a discard writer for now (no output streaming in tea.Cmd)
-			// TODO: Stream build output to pane
-			if err := docker.BuildProjectImage(buildCtx, repoPath, devCfg, io.Discard); err != nil {
-				_ = gitRepo.RemoveWorktree(ctx, worktreePath)
-				return ContainerErrorMsg{
-					WorkstreamID: ws.ID,
-					Error:        fmt.Errorf("failed to build project image: %w", err),
+			// Use devcontainer CLI if available for proper feature support
+			cliStatus := docker.CheckDevcontainerCLI()
+			if cliStatus.Available {
+				if _, err := docker.BuildWithDevcontainerCLI(buildCtx, repoPath, io.Discard); err != nil {
+					_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+					return ContainerErrorMsg{
+						WorkstreamID: ws.ID,
+						Error:        fmt.Errorf("failed to build with devcontainer CLI: %w", err),
+					}
+				}
+			} else {
+				// Fall back to simple docker build (features won't be installed)
+				if err := docker.BuildProjectImage(buildCtx, repoPath, devCfg, io.Discard); err != nil {
+					_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+					return ContainerErrorMsg{
+						WorkstreamID: ws.ID,
+						Error:        fmt.Errorf("failed to build project image: %w", err),
+					}
 				}
 			}
 		} else if !imageExists && !needsBuild {
