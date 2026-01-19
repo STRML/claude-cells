@@ -168,6 +168,44 @@ func (g *Git) BranchHasCommits(ctx context.Context, branchName string) (bool, er
 	return count != "0", nil
 }
 
+// CreateWorktree creates a new worktree at the given path with a new branch.
+// This allows each container to have its own working directory with its own branch
+// without affecting the main repository's checkout.
+func (g *Git) CreateWorktree(ctx context.Context, worktreePath, branchName string) error {
+	_, err := g.run(ctx, "worktree", "add", "-b", branchName, worktreePath)
+	return err
+}
+
+// CreateWorktreeFromExisting creates a new worktree from an existing branch.
+func (g *Git) CreateWorktreeFromExisting(ctx context.Context, worktreePath, branchName string) error {
+	_, err := g.run(ctx, "worktree", "add", worktreePath, branchName)
+	return err
+}
+
+// RemoveWorktree removes a worktree and optionally its branch.
+func (g *Git) RemoveWorktree(ctx context.Context, worktreePath string) error {
+	// First prune any stale worktrees
+	_, _ = g.run(ctx, "worktree", "prune")
+	// Then remove the specific worktree
+	_, err := g.run(ctx, "worktree", "remove", "--force", worktreePath)
+	return err
+}
+
+// WorktreeList returns a list of worktree paths.
+func (g *Git) WorktreeList(ctx context.Context) ([]string, error) {
+	out, err := g.run(ctx, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, err
+	}
+	var paths []string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "worktree ") {
+			paths = append(paths, strings.TrimPrefix(line, "worktree "))
+		}
+	}
+	return paths, nil
+}
+
 // GetBranchInfo returns a summary of commits and diff stats for a branch.
 func (g *Git) GetBranchInfo(ctx context.Context, branchName string) (string, error) {
 	baseBranch, err := g.GetBaseBranch(ctx)
