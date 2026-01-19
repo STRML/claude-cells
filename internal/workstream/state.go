@@ -28,6 +28,7 @@ type AppState struct {
 	Version      int               `json:"version"`
 	Workstreams  []SavedWorkstream `json:"workstreams"`
 	FocusedIndex int               `json:"focused_index"`
+	Layout       int               `json:"layout"` // LayoutType as int for JSON
 	SavedAt      time.Time         `json:"saved_at"`
 }
 
@@ -39,13 +40,14 @@ func StateFilePath(dir string) string {
 // SaveState saves the application state to a file.
 // Uses atomic write (write to temp file, then rename) to prevent corruption.
 // Thread-safe: protected by mutex to prevent concurrent write races.
-func SaveState(dir string, workstreams []*Workstream, focusedIndex int) error {
+func SaveState(dir string, workstreams []*Workstream, focusedIndex int, layout int) error {
 	stateMu.Lock()
 	defer stateMu.Unlock()
 
 	state := AppState{
 		Version:      1,
 		FocusedIndex: focusedIndex,
+		Layout:       layout,
 		SavedAt:      time.Now(),
 	}
 

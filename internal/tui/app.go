@@ -42,6 +42,8 @@ type AppModel struct {
 	pairingWorkstreamID string // ID of workstream in pairing mode (empty if none)
 	pairingPrevBranch   string // Branch to restore when pairing ends
 	pairingStashed      bool   // True if we stashed changes when enabling pairing
+	// Pane swap state
+	lastSwapPosition int // Position to swap back to when pressing Space at main (0 = none)
 }
 
 const tmuxPrefixTimeout = 2 * time.Second
@@ -91,16 +93,16 @@ func LoadStateCmd(dir string) tea.Cmd {
 }
 
 // SaveStateAndQuitCmd pauses containers, saves state, and quits
-func SaveStateAndQuitCmd(dir string, workstreams []*workstream.Workstream, focusedIndex int) tea.Cmd {
+func SaveStateAndQuitCmd(dir string, workstreams []*workstream.Workstream, focusedIndex int, layout int) tea.Cmd {
 	return func() tea.Msg {
 		// Save state synchronously before returning
-		err := workstream.SaveState(dir, workstreams, focusedIndex)
+		err := workstream.SaveState(dir, workstreams, focusedIndex, layout)
 		return StateSavedMsg{Error: err}
 	}
 }
 
 // PauseAllAndSaveCmd gracefully stops claude processes, pauses containers, then saves state
-func PauseAllAndSaveCmd(dir string, workstreams []*workstream.Workstream, focusedIndex int) tea.Cmd {
+func PauseAllAndSaveCmd(dir string, workstreams []*workstream.Workstream, focusedIndex int, layout int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -128,7 +130,7 @@ func PauseAllAndSaveCmd(dir string, workstreams []*workstream.Workstream, focuse
 		}
 
 		// Then save state
-		saveErr := workstream.SaveState(dir, workstreams, focusedIndex)
+		saveErr := workstream.SaveState(dir, workstreams, focusedIndex, layout)
 		return StateSavedMsg{Error: saveErr}
 	}
 }
@@ -241,7 +243,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						}
 					}
 					m.quitting = true
-					return m, PauseAllAndSaveCmd(m.workingDir, workstreams, m.focusedPane)
+					return m, PauseAllAndSaveCmd(m.workingDir, workstreams, m.focusedPane, int(m.layout))
 				}
 				m.quitting = true
 				_ = workstream.DeleteState(m.workingDir)
@@ -267,7 +269,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				m.quitting = true
 				// Use synchronous pause+save command
-				return m, PauseAllAndSaveCmd(m.workingDir, workstreams, m.focusedPane)
+				return m, PauseAllAndSaveCmd(m.workingDir, workstreams, m.focusedPane, int(m.layout))
 			}
 			m.quitting = true
 			// Delete state file if no panes (clean exit)
@@ -398,17 +400,31 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case " ":
-			// Swap focused pane with main pane (position 0)
-			if len(m.panes) > 1 && m.focusedPane > 0 {
-				// Swap panes
-				m.panes[0], m.panes[m.focusedPane] = m.panes[m.focusedPane], m.panes[0]
-				// Move focus to position 0 (where the previously focused pane now is)
-				m.panes[m.focusedPane].SetFocused(false)
-				m.focusedPane = 0
-				m.panes[0].SetFocused(true)
-				m.updateLayout()
-				m.toast = "Moved to main pane"
-				m.toastExpiry = time.Now().Add(toastDuration)
+			// Toggle focused pane with main pane (position 0)
+			if len(m.panes) > 1 {
+				if m.focusedPane > 0 {
+					// Swap focused pane to main position
+					swapPos := m.focusedPane
+					m.panes[0], m.panes[swapPos] = m.panes[swapPos], m.panes[0]
+					m.panes[swapPos].SetFocused(false)
+					m.focusedPane = 0
+					m.panes[0].SetFocused(true)
+					m.lastSwapPosition = swapPos // Remember for toggle back
+					m.updateLayout()
+					m.toast = "Moved to main pane"
+					m.toastExpiry = time.Now().Add(toastDuration)
+				} else if m.lastSwapPosition > 0 && m.lastSwapPosition < len(m.panes) {
+					// At main position - swap back to previous position
+					swapPos := m.lastSwapPosition
+					m.panes[0], m.panes[swapPos] = m.panes[swapPos], m.panes[0]
+					m.panes[0].SetFocused(false)
+					m.focusedPane = swapPos
+					m.panes[swapPos].SetFocused(true)
+					m.lastSwapPosition = 0 // Clear after swap back
+					m.updateLayout()
+					m.toast = "Moved back"
+					m.toastExpiry = time.Now().Add(toastDuration)
+				}
 			}
 			return m, nil
 
@@ -924,6 +940,8 @@ Input Mode:
 			m.panes[m.focusedPane].SetFocused(true)
 		}
 
+		// Restore layout
+		m.layout = LayoutType(msg.State.Layout)
 		m.updateLayout()
 		m.toast = fmt.Sprintf("Resumed %d workstream(s)", len(msg.State.Workstreams))
 		m.toastExpiry = time.Now().Add(toastDuration)

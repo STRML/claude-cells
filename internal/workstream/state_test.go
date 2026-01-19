@@ -36,7 +36,7 @@ func TestSaveAndLoadState(t *testing.T) {
 	focusedIndex := 1
 
 	// Save state
-	err = SaveState(tmpDir, workstreams, focusedIndex)
+	err = SaveState(tmpDir, workstreams, focusedIndex, 0)
 	if err != nil {
 		t.Fatalf("SaveState() error = %v", err)
 	}
@@ -86,7 +86,7 @@ func TestDeleteState(t *testing.T) {
 	// Save state first
 	ws := New("test")
 	ws.ContainerID = "test-container"
-	err = SaveState(tmpDir, []*Workstream{ws}, 0)
+	err = SaveState(tmpDir, []*Workstream{ws}, 0, 0)
 	if err != nil {
 		t.Fatalf("SaveState() error = %v", err)
 	}
@@ -129,7 +129,7 @@ func TestStateExists(t *testing.T) {
 
 	// Create state file
 	ws := New("test")
-	err = SaveState(tmpDir, []*Workstream{ws}, 0)
+	err = SaveState(tmpDir, []*Workstream{ws}, 0, 0)
 	if err != nil {
 		t.Fatalf("SaveState() error = %v", err)
 	}
@@ -167,7 +167,7 @@ func TestStateSavedAtTimestamp(t *testing.T) {
 
 	// Save state
 	ws := New("test")
-	err = SaveState(tmpDir, []*Workstream{ws}, 0)
+	err = SaveState(tmpDir, []*Workstream{ws}, 0, 0)
 	if err != nil {
 		t.Fatalf("SaveState() error = %v", err)
 	}
@@ -193,7 +193,7 @@ func TestSaveStateEmptyWorkstreams(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// Save with empty workstreams list
-	err = SaveState(tmpDir, []*Workstream{}, 0)
+	err = SaveState(tmpDir, []*Workstream{}, 0, 0)
 	if err != nil {
 		t.Fatalf("SaveState() with empty list error = %v", err)
 	}
@@ -219,7 +219,7 @@ func TestSaveStateOverwrite(t *testing.T) {
 	// Save first state
 	ws1 := New("first")
 	ws1.ContainerID = "container-first"
-	err = SaveState(tmpDir, []*Workstream{ws1}, 0)
+	err = SaveState(tmpDir, []*Workstream{ws1}, 0, 0)
 	if err != nil {
 		t.Fatalf("First SaveState() error = %v", err)
 	}
@@ -229,7 +229,7 @@ func TestSaveStateOverwrite(t *testing.T) {
 	ws2.ContainerID = "container-second"
 	ws3 := New("third")
 	ws3.ContainerID = "container-third"
-	err = SaveState(tmpDir, []*Workstream{ws2, ws3}, 1)
+	err = SaveState(tmpDir, []*Workstream{ws2, ws3}, 1, 0)
 	if err != nil {
 		t.Fatalf("Second SaveState() error = %v", err)
 	}
@@ -263,7 +263,7 @@ func TestSaveStatePreservesAllFields(t *testing.T) {
 	ws.ContainerID = "abc123def456"
 	originalCreatedAt := ws.CreatedAt
 
-	err = SaveState(tmpDir, []*Workstream{ws}, 0)
+	err = SaveState(tmpDir, []*Workstream{ws}, 0, 0)
 	if err != nil {
 		t.Fatalf("SaveState() error = %v", err)
 	}
@@ -320,7 +320,7 @@ func TestSaveStateNilWorkstreams(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// Save with nil slice
-	err = SaveState(tmpDir, nil, 0)
+	err = SaveState(tmpDir, nil, 0, 0)
 	if err != nil {
 		t.Fatalf("SaveState() with nil slice error = %v", err)
 	}
@@ -368,7 +368,7 @@ func TestSaveStateAtomic(t *testing.T) {
 
 	// Save state
 	ws := New("test")
-	err = SaveState(tmpDir, []*Workstream{ws}, 0)
+	err = SaveState(tmpDir, []*Workstream{ws}, 0, 0)
 	if err != nil {
 		t.Fatalf("SaveState() error = %v", err)
 	}
@@ -405,7 +405,7 @@ func TestSaveStateConcurrent(t *testing.T) {
 			defer wg.Done()
 			ws := New("concurrent test")
 			ws.ContainerID = "container-" + itoa(idx)
-			if err := SaveState(tmpDir, []*Workstream{ws}, 0); err != nil {
+			if err := SaveState(tmpDir, []*Workstream{ws}, 0, 0); err != nil {
 				errors <- err
 			}
 		}(i)
