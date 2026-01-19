@@ -628,7 +628,7 @@ func TestWorkstreamDialog_TextAreaWidthMinimum(t *testing.T) {
 
 func TestWorkstreamDialog_TextAreaWidthVarious(t *testing.T) {
 	testCases := []struct {
-		dialogWidth    int
+		dialogWidth      int
 		expectedMinWidth int
 	}{
 		{50, 38},  // 50 - 12 = 38
