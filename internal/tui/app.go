@@ -554,7 +554,19 @@ Input Mode:
 			}
 
 		case DialogPruneAllConfirm:
-			// User typed "destroy" - prune all containers and empty branches
+			// User typed "destroy" - close all panes, prune containers and branches
+			// Close all PTY sessions first
+			for _, pane := range m.panes {
+				if pty := pane.PTY(); pty != nil {
+					pty.Close()
+				}
+				m.manager.Remove(pane.Workstream().ID)
+			}
+			// Clear all panes
+			m.panes = nil
+			m.focusedPane = 0
+			m.updateLayout()
+			// Prune all containers and empty branches
 			return m, PruneAllContainersAndBranchesCmd()
 		}
 		return m, nil

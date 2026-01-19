@@ -104,3 +104,66 @@ func (g *Git) BranchExists(ctx context.Context, name string) (bool, error) {
 	}
 	return true, nil
 }
+
+// ListCCellsBranches returns all local branches matching the ccells pattern.
+func (g *Git) ListCCellsBranches(ctx context.Context) ([]string, error) {
+	out, err := g.run(ctx, "branch", "--list", "ccells/*")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+
+	lines := strings.Split(out, "\n")
+	var branches []string
+	for _, line := range lines {
+		// Remove leading * and whitespace
+		branch := strings.TrimSpace(strings.TrimPrefix(line, "*"))
+		if branch != "" {
+			branches = append(branches, branch)
+		}
+	}
+	return branches, nil
+}
+
+// GetBaseBranch returns the main/master branch name.
+func (g *Git) GetBaseBranch(ctx context.Context) (string, error) {
+	// Try common base branch names
+	for _, name := range []string{"main", "master"} {
+		exists, err := g.BranchExists(ctx, name)
+		if err != nil {
+			continue
+		}
+		if exists {
+			return name, nil
+		}
+	}
+	// Fall back to trying to get from remote HEAD
+	out, err := g.run(ctx, "symbolic-ref", "refs/remotes/origin/HEAD")
+	if err == nil && out != "" {
+		// Output is like refs/remotes/origin/main
+		parts := strings.Split(out, "/")
+		if len(parts) > 0 {
+			return parts[len(parts)-1], nil
+		}
+	}
+	return "main", nil // Default to main
+}
+
+// BranchHasCommits returns true if the branch has commits not in the base branch.
+func (g *Git) BranchHasCommits(ctx context.Context, branchName string) (bool, error) {
+	baseBranch, err := g.GetBaseBranch(ctx)
+	if err != nil {
+		return true, err // Assume has commits on error to be safe
+	}
+
+	// Count commits in branch that aren't in base
+	out, err := g.run(ctx, "rev-list", "--count", baseBranch+".."+branchName)
+	if err != nil {
+		return true, err // Assume has commits on error to be safe
+	}
+
+	count := strings.TrimSpace(out)
+	return count != "0", nil
+}

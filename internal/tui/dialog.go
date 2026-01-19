@@ -21,6 +21,7 @@ const (
 	DialogLog
 	DialogProgress
 	DialogBranchConflict
+	DialogPruneAllConfirm
 )
 
 // DialogModel represents a modal dialog
@@ -174,10 +175,33 @@ func NewSettingsDialog(containerCount int) DialogModel {
 		Body:  body,
 		MenuItems: []string{
 			"Prune stopped ccells containers",
-			"Prune ALL ccells containers (stops running)",
+			"Prune ALL ccells containers (destructive)",
 			"Cancel",
 		},
 		MenuSelection: 0,
+	}
+}
+
+// NewPruneAllConfirmDialog creates a confirmation dialog for pruning all containers
+func NewPruneAllConfirmDialog() DialogModel {
+	ti := textinput.New()
+	ti.Placeholder = "type 'destroy' to confirm"
+	ti.Width = 40
+	ti.Focus()
+	ti.CharLimit = 20
+
+	body := `This will:
+  • Stop and remove ALL ccells containers
+  • Delete any local branches with no commits
+
+Type "destroy" to confirm:`
+
+	return DialogModel{
+		Type:        DialogPruneAllConfirm,
+		Title:       "Destroy All Workstreams?",
+		Body:        body,
+		Input:       ti,
+		ConfirmWord: "destroy",
 	}
 }
 
@@ -303,7 +327,7 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				}
 			}
 
-			if d.Type == DialogDestroy {
+			if d.Type == DialogDestroy || d.Type == DialogPruneAllConfirm {
 				if strings.ToLower(d.Input.Value()) == d.ConfirmWord {
 					return d, func() tea.Msg {
 						return DialogConfirmMsg{

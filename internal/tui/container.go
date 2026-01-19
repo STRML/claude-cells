@@ -422,6 +422,78 @@ func PruneAllContainersCmd() tea.Cmd {
 	}
 }
 
+// PruneAllResultMsg is sent when the full prune all operation completes.
+type PruneAllResultMsg struct {
+	ContainersPruned int
+	BranchesPruned   int
+	Error            error
+}
+
+// PruneAllContainersAndBranchesCmd returns a command that prunes ALL ccells containers
+// and deletes any ccells branches with no commits.
+func PruneAllContainersAndBranchesCmd() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
+		var containersPruned int
+		var branchesPruned int
+
+		// First, prune all containers
+		client, err := docker.NewClient()
+		if err != nil {
+			return PruneAllResultMsg{Error: err}
+		}
+		defer client.Close()
+
+		containersPruned, err = client.PruneAllDockerTUIContainers(ctx)
+		if err != nil {
+			return PruneAllResultMsg{
+				ContainersPruned: containersPruned,
+				Error:            err,
+			}
+		}
+
+		// Get current working directory for git operations
+		cwd, err := os.Getwd()
+		if err != nil {
+			return PruneAllResultMsg{
+				ContainersPruned: containersPruned,
+				Error:            err,
+			}
+		}
+
+		// Now prune empty branches
+		g := git.New(cwd)
+		branches, err := g.ListCCellsBranches(ctx)
+		if err != nil {
+			// Not fatal - still report container cleanup
+			return PruneAllResultMsg{
+				ContainersPruned: containersPruned,
+				BranchesPruned:   0,
+				Error:            nil, // Don't fail on branch listing error
+			}
+		}
+
+		for _, branch := range branches {
+			hasCommits, err := g.BranchHasCommits(ctx, branch)
+			if err != nil {
+				continue // Skip on error
+			}
+			if !hasCommits {
+				if err := g.DeleteBranch(ctx, branch); err == nil {
+					branchesPruned++
+				}
+			}
+		}
+
+		return PruneAllResultMsg{
+			ContainersPruned: containersPruned,
+			BranchesPruned:   branchesPruned,
+		}
+	}
+}
+
 // ListContainersCmd returns a command that counts ccells containers.
 func ListContainersCmd() tea.Cmd {
 	return func() tea.Msg {
