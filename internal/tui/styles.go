@@ -84,6 +84,26 @@ var (
 			Border(lipgloss.NormalBorder()).
 			BorderForeground(ColorBorder).
 			Padding(0, 1)
+
+	// Enhanced input styling for text inputs
+	DialogInputFocused = lipgloss.NewStyle().
+				Border(lipgloss.RoundedBorder()).
+				BorderForeground(ColorAccent).
+				Padding(0, 1)
+
+	DialogInputPrompt = lipgloss.NewStyle().
+				Foreground(ColorAccent).
+				Bold(true)
+
+	DialogInputCursor = lipgloss.NewStyle().
+				Foreground(ColorAccent)
+
+	DialogInputText = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#FFFFFF"))
+
+	DialogInputPlaceholder = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#666666")).
+				Italic(true)
 )
 
 // KeyHint renders a key hint like "[n]ew"
