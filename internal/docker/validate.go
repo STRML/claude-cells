@@ -13,8 +13,12 @@ import (
 	"github.com/docker/docker/client"
 )
 
-// RequiredImage is the Docker image required for workstreams
-const RequiredImage = "claude-code-base:latest"
+// DefaultImage is the fallback Docker image when no devcontainer.json is found
+const DefaultImage = "claude-code-base:latest"
+
+// RequiredImage is kept for backward compatibility
+// Deprecated: Use DefaultImage or GetProjectImage instead
+const RequiredImage = DefaultImage
 
 // ValidationError represents a Docker validation failure
 type ValidationError struct {
@@ -30,6 +34,8 @@ func (e *ValidationError) Error() string {
 type ValidationResult struct {
 	DockerAvailable bool
 	ImageExists     bool
+	ImageName       string // The image that should be used (from devcontainer.json or default)
+	NeedsBuild      bool   // True if image needs to be built from devcontainer.json Dockerfile
 	Errors          []ValidationError
 }
 
@@ -38,8 +44,10 @@ func (v *ValidationResult) IsValid() bool {
 	return v.DockerAvailable && v.ImageExists && len(v.Errors) == 0
 }
 
-// ValidatePrerequisites checks all Docker prerequisites
-func ValidatePrerequisites(ctx context.Context) (*ValidationResult, error) {
+// ValidatePrerequisites checks all Docker prerequisites.
+// If projectPath is non-empty, it checks for a project-specific image from devcontainer.json.
+// If projectPath is empty, it checks for the DefaultImage.
+func ValidatePrerequisites(ctx context.Context, projectPath string) (*ValidationResult, error) {
 	result := &ValidationResult{}
 
 	// Check Docker daemon
@@ -66,8 +74,22 @@ func ValidatePrerequisites(ctx context.Context) (*ValidationResult, error) {
 	}
 	result.DockerAvailable = true
 
-	// Check required image exists
-	exists, err := client.ImageExists(ctx, RequiredImage)
+	// Determine which image to check
+	imageName, needsBuild, err := GetProjectImage(projectPath)
+	if err != nil {
+		result.Errors = append(result.Errors, ValidationError{
+			Check:   "devcontainer_config",
+			Message: fmt.Sprintf("failed to load devcontainer config: %v", err),
+		})
+		return result, nil
+	}
+
+	// Store image info in result
+	result.ImageName = imageName
+	result.NeedsBuild = needsBuild
+
+	// Check if the image already exists
+	exists, err := client.ImageExists(ctx, imageName)
 	if err != nil {
 		result.Errors = append(result.Errors, ValidationError{
 			Check:   "image_check",
@@ -77,10 +99,25 @@ func ValidatePrerequisites(ctx context.Context) (*ValidationResult, error) {
 	}
 
 	if !exists {
-		result.Errors = append(result.Errors, ValidationError{
-			Check:   "required_image",
-			Message: fmt.Sprintf("required image '%s' not found. Run: docker build -t %s -f configs/base.Dockerfile .", RequiredImage, RequiredImage),
-		})
+		if needsBuild {
+			// Image needs to be built from devcontainer.json
+			result.Errors = append(result.Errors, ValidationError{
+				Check:   "project_image",
+				Message: fmt.Sprintf("project image '%s' not found and needs to be built from devcontainer.json", imageName),
+			})
+		} else if imageName == DefaultImage {
+			// Default image needs to be built
+			result.Errors = append(result.Errors, ValidationError{
+				Check:   "required_image",
+				Message: fmt.Sprintf("required image '%s' not found. Run: docker build -t %s -f configs/base.Dockerfile .", DefaultImage, DefaultImage),
+			})
+		} else {
+			// Direct image reference from devcontainer.json
+			result.Errors = append(result.Errors, ValidationError{
+				Check:   "project_image",
+				Message: fmt.Sprintf("image '%s' from devcontainer.json not found. Run: docker pull %s", imageName, imageName),
+			})
+		}
 	} else {
 		result.ImageExists = true
 	}

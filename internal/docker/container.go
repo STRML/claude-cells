@@ -28,6 +28,8 @@ type ContainerConfig struct {
 	ClaudeJSON  string // Path to ~/.claude.json file on host (session state)
 	GitConfig   string // Path to ~/.gitconfig file on host (git identity)
 	Credentials string // Path to credentials file (OAuth tokens from keychain)
+	ExtraEnv    map[string]string // Additional environment variables from devcontainer.json
+	ExtraMounts []mount.Mount     // Additional mounts from devcontainer.json
 }
 
 // NewContainerConfig creates a container config for a workstream.
@@ -54,10 +56,17 @@ func NewContainerConfig(branchName, repoPath string) *ContainerConfig {
 
 // CreateContainer creates a new container but doesn't start it.
 func (c *Client) CreateContainer(ctx context.Context, cfg *ContainerConfig) (string, error) {
+	// Build environment variables from ExtraEnv
+	var env []string
+	for k, v := range cfg.ExtraEnv {
+		env = append(env, fmt.Sprintf("%s=%s", k, v))
+	}
+
 	containerCfg := &container.Config{
 		Image: cfg.Image,
 		Cmd:   []string{"sleep", "infinity"},
 		Tty:   true,
+		Env:   env,
 	}
 
 	var mounts []mount.Mount
@@ -112,6 +121,9 @@ func (c *Client) CreateContainer(ctx context.Context, cfg *ContainerConfig) (str
 			ReadOnly: true, // Credentials should not be modified by container
 		})
 	}
+
+	// Add extra mounts from devcontainer.json
+	mounts = append(mounts, cfg.ExtraMounts...)
 
 	hostCfg := &container.HostConfig{
 		Mounts: mounts,
