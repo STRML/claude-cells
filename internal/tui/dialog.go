@@ -52,6 +52,13 @@ func NewDestroyDialog(branchName, workstreamID string) DialogModel {
 	ti.Focus()
 	ti.CharLimit = 20
 
+	// Style the textinput
+	ti.Prompt = "› "
+	ti.PromptStyle = DialogInputPrompt
+	ti.TextStyle = DialogInputText
+	ti.PlaceholderStyle = DialogInputPlaceholder
+	ti.Cursor.Style = DialogInputCursor
+
 	body := `This will:
   • Stop and remove the container
   • End any active Mutagen sync
@@ -74,8 +81,15 @@ func NewWorkstreamDialog() DialogModel {
 	ti := textinput.New()
 	ti.Placeholder = "describe the task..."
 	ti.CharLimit = 200
-	ti.Width = 40
+	ti.Width = 50
 	ti.Focus()
+
+	// Style the textinput for a polished look
+	ti.Prompt = "› "
+	ti.PromptStyle = DialogInputPrompt
+	ti.TextStyle = DialogInputText
+	ti.PlaceholderStyle = DialogInputPlaceholder
+	ti.Cursor.Style = DialogInputCursor
 
 	return DialogModel{
 		Type:  DialogNewWorkstream,
@@ -89,10 +103,17 @@ func NewWorkstreamDialog() DialogModel {
 func NewPRDialog(branchName, title, body string) DialogModel {
 	ti := textinput.New()
 	ti.Placeholder = "PR title..."
-	ti.Width = 40
+	ti.Width = 50
 	ti.SetValue(title)
 	ti.Focus()
 	ti.CharLimit = 100
+
+	// Style the textinput
+	ti.Prompt = "› "
+	ti.PromptStyle = DialogInputPrompt
+	ti.TextStyle = DialogInputText
+	ti.PlaceholderStyle = DialogInputPlaceholder
+	ti.Cursor.Style = DialogInputCursor
 
 	return DialogModel{
 		Type:  DialogPRPreview,
@@ -195,6 +216,13 @@ func NewPruneAllConfirmDialog() DialogModel {
 	ti.Width = 40
 	ti.Focus()
 	ti.CharLimit = 20
+
+	// Style the textinput
+	ti.Prompt = "› "
+	ti.PromptStyle = DialogInputPrompt
+	ti.TextStyle = DialogInputText
+	ti.PlaceholderStyle = DialogInputPlaceholder
+	ti.Cursor.Style = DialogInputCursor
 
 	body := `This will:
   • Stop and remove ALL ccells containers
@@ -390,6 +418,44 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				}
 				return d, nil
 			}
+		case "pgup", "ctrl+u":
+			// Page up for log dialog
+			if d.Type == DialogLog {
+				visibleLines := d.height - 8
+				if visibleLines < 5 {
+					visibleLines = 5
+				}
+				d.scrollOffset -= visibleLines
+				if d.scrollOffset < 0 {
+					d.scrollOffset = 0
+				}
+				return d, nil
+			}
+		case "pgdown", "ctrl+d":
+			// Page down for log dialog
+			if d.Type == DialogLog {
+				visibleLines := d.height - 8
+				if visibleLines < 5 {
+					visibleLines = 5
+				}
+				d.scrollOffset += visibleLines
+				if d.scrollOffset > d.scrollMax {
+					d.scrollOffset = d.scrollMax
+				}
+				return d, nil
+			}
+		case "home", "g":
+			// Go to top for log dialog
+			if d.Type == DialogLog {
+				d.scrollOffset = 0
+				return d, nil
+			}
+		case "end", "G":
+			// Go to bottom for log dialog
+			if d.Type == DialogLog {
+				d.scrollOffset = d.scrollMax
+				return d, nil
+			}
 		}
 	}
 
@@ -407,7 +473,7 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 // View renders the dialog
 func (d DialogModel) View() string {
 	titleStyle := DialogTitle
-	inputStyle := DialogInput.Width(d.width - 10)
+	inputStyle := DialogInputFocused.Width(d.width - 10)
 
 	var content strings.Builder
 	content.WriteString(titleStyle.Render(d.Title))
@@ -435,9 +501,11 @@ func (d DialogModel) View() string {
 		// Scroll indicator
 		if d.scrollMax > 0 {
 			scrollPct := 100 * d.scrollOffset / d.scrollMax
-			content.WriteString(fmt.Sprintf("Line %d/%d (%d%%)\n", d.scrollOffset+1, len(lines), scrollPct))
+			content.WriteString(fmt.Sprintf("Line %d-%d/%d (%d%%)\n", d.scrollOffset+1, endLine, len(lines), scrollPct))
+		} else {
+			content.WriteString(fmt.Sprintf("Lines: %d\n", len(lines)))
 		}
-		content.WriteString(KeyHint("↑/↓", " scroll") + "  " + KeyHint("Enter", " close") + "  " + KeyHintStyle.Render("[Esc] Cancel"))
+		content.WriteString(KeyHint("↑↓", " scroll") + "  " + KeyHint("PgUp/Dn", " page") + "  " + KeyHint("g/G", " top/bottom") + "  " + KeyHint("Enter/Esc", " close"))
 		return DialogBox.Width(d.width).Render(content.String())
 	}
 
@@ -494,6 +562,20 @@ func (d DialogModel) View() string {
 func (d *DialogModel) SetSize(width, height int) {
 	d.width = width
 	d.height = height
+
+	// Recalculate scrollMax for log dialogs based on actual visible lines
+	if d.Type == DialogLog {
+		lines := strings.Split(d.Body, "\n")
+		visibleLines := height - 8 // Account for title, padding, hints
+		if visibleLines < 5 {
+			visibleLines = 5
+		}
+		if len(lines) > visibleLines {
+			d.scrollMax = len(lines) - visibleLines
+		} else {
+			d.scrollMax = 0
+		}
+	}
 }
 
 // DialogConfirmMsg is sent when dialog is confirmed
