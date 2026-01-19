@@ -1,3 +1,5 @@
+//go:build integration
+
 package docker
 
 import (
@@ -8,6 +10,8 @@ import (
 	"testing"
 	"time"
 )
+
+// These tests require Docker and are only run with: go test -tags=integration
 
 // TestClaudeCodeContainer tests the full container lifecycle with the actual
 // claude-code-base image and verifies Claude Code can start without errors.
