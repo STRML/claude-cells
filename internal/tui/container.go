@@ -402,11 +402,30 @@ func StopContainerCmd(ws *workstream.Workstream) tea.Cmd {
 		}
 
 		// Clean up the worktree
-		if ws.WorktreePath != "" {
+		// Compute path from branch name if not set (e.g., restored from state)
+		worktreePath := ws.WorktreePath
+		if worktreePath == "" && ws.BranchName != "" {
+			worktreePath = getWorktreePath(ws.BranchName)
+		}
+		if worktreePath != "" {
 			repoPath, err := os.Getwd()
 			if err == nil {
 				gitRepo := git.New(repoPath)
-				_ = gitRepo.RemoveWorktree(ctx, ws.WorktreePath)
+				_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+				_ = os.RemoveAll(worktreePath) // Also remove the directory
+			}
+		}
+
+		// Delete branch if it has no commits or is merged
+		if ws.BranchName != "" {
+			repoPath, err := os.Getwd()
+			if err == nil {
+				gitRepo := git.New(repoPath)
+				// Check if branch has commits
+				hasCommits, _ := gitRepo.BranchHasCommits(ctx, ws.BranchName)
+				if !hasCommits {
+					_ = gitRepo.DeleteBranch(ctx, ws.BranchName)
+				}
 			}
 		}
 
