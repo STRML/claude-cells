@@ -33,6 +33,7 @@ type AppModel struct {
 	quitting       bool
 	inputMode      bool      // True when input is being routed to focused pane
 	lastEscapeTime time.Time // For double-escape detection
+	pendingEscape  bool      // True when first Esc pressed, waiting to see if double-tap
 	toast          string    // Temporary notification message
 	toastExpiry    time.Time // When toast should disappear
 	workingDir     string    // Current working directory for state file
@@ -74,6 +75,11 @@ type StateSavedMsg struct {
 
 // spinnerTickMsg is sent to animate the spinner
 type spinnerTickMsg struct{}
+
+// escapeTimeoutMsg is sent when the escape timeout expires (first Esc should be forwarded)
+type escapeTimeoutMsg struct {
+	timestamp time.Time // The timestamp of the Esc that started this timeout
+}
 
 // spinnerTickCmd returns a command that sends a spinner tick after a delay
 func spinnerTickCmd() tea.Cmd {
@@ -167,21 +173,27 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Check for Ctrl+B prefix (exit to nav mode)
 				if m.tmuxPrefix && time.Since(m.tmuxPrefixTime) < tmuxPrefixTimeout {
 					m.tmuxPrefix = false
+					m.pendingEscape = false
 					m.inputMode = false
 					return m, tea.HideCursor
 				}
 				m.tmuxPrefix = false
 				// Check for double-escape (exit to nav mode)
-				if time.Since(m.lastEscapeTime) < escapeTimeout {
+				// Only triggers if we have a pending escape waiting
+				if m.pendingEscape && time.Since(m.lastEscapeTime) < escapeTimeout {
 					m.lastEscapeTime = time.Time{} // Reset
+					m.pendingEscape = false
 					m.inputMode = false
 					return m, tea.HideCursor
 				}
-				// Single escape - send to pane (for vim, etc.) but remember time for potential double-tap
+				// First escape - defer sending to pane, wait to see if it's a double-tap
 				m.lastEscapeTime = time.Now()
-				var cmd tea.Cmd
-				m.panes[m.focusedPane], cmd = m.panes[m.focusedPane].Update(msg)
-				return m, cmd
+				m.pendingEscape = true
+				// Start timer - if it fires, we'll send the Esc to the pane
+				escTime := m.lastEscapeTime
+				return m, tea.Tick(escapeTimeout, func(t time.Time) tea.Msg {
+					return escapeTimeoutMsg{timestamp: escTime}
+				})
 			case "ctrl+c":
 				// Send ctrl+c to the pane (for interrupting processes)
 				var cmd tea.Cmd
@@ -1101,6 +1113,21 @@ Input Mode:
 			m.toastExpiry = time.Now().Add(toastDuration * 2)
 		}
 		return m, tea.Quit
+
+	case escapeTimeoutMsg:
+		// Escape timeout fired - if we still have a pending escape from the same timestamp,
+		// forward it to the pane now. If pendingEscape was cleared (double-tap happened),
+		// or if we're no longer in input mode, ignore this message.
+		if m.pendingEscape && m.inputMode && msg.timestamp.Equal(m.lastEscapeTime) {
+			m.pendingEscape = false
+			// Send the deferred Esc to the focused pane
+			if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
+				var cmd tea.Cmd
+				m.panes[m.focusedPane], cmd = m.panes[m.focusedPane].Update(tea.KeyMsg{Type: tea.KeyEscape})
+				return m, cmd
+			}
+		}
+		return m, nil
 	}
 
 	return m, nil

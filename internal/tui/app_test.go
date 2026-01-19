@@ -994,6 +994,108 @@ func TestAppModel_InputMode_EscapeToNavMode(t *testing.T) {
 	}
 }
 
+func TestAppModel_InputMode_DeferredEscape(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Enter input mode
+	app.inputMode = true
+
+	// Single escape should set pendingEscape but NOT immediately send to pane
+	model, cmd := app.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	app = model.(AppModel)
+
+	if !app.inputMode {
+		t.Error("Single escape should NOT exit input mode")
+	}
+	if !app.pendingEscape {
+		t.Error("Single escape should set pendingEscape")
+	}
+	if cmd == nil {
+		t.Error("Single escape should return a timer command")
+	}
+
+	// Double escape should exit WITHOUT triggering the deferred escape
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	app = model.(AppModel)
+
+	if app.inputMode {
+		t.Error("Double escape should exit input mode")
+	}
+	if app.pendingEscape {
+		t.Error("Double escape should clear pendingEscape")
+	}
+}
+
+func TestAppModel_InputMode_EscapeTimeoutSendsToPane(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Enter input mode
+	app.inputMode = true
+
+	// Single escape - sets pending
+	escTime := time.Now()
+	app.lastEscapeTime = escTime
+	app.pendingEscape = true
+
+	// Simulate timeout firing with matching timestamp
+	model, _ = app.Update(escapeTimeoutMsg{timestamp: escTime})
+	app = model.(AppModel)
+
+	// Should still be in input mode (Esc was forwarded to pane, not used for exit)
+	if !app.inputMode {
+		t.Error("Escape timeout should NOT exit input mode")
+	}
+	if app.pendingEscape {
+		t.Error("Escape timeout should clear pendingEscape")
+	}
+}
+
+func TestAppModel_InputMode_EscapeTimeoutIgnoredAfterDoubleTap(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Enter input mode
+	app.inputMode = true
+
+	// Press Esc twice to exit (double tap)
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	app = model.(AppModel)
+	escTime := app.lastEscapeTime
+
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	app = model.(AppModel)
+
+	if app.inputMode {
+		t.Error("Double escape should exit input mode")
+	}
+
+	// Now simulate the stale timeout arriving (should be ignored)
+	model, _ = app.Update(escapeTimeoutMsg{timestamp: escTime})
+	app = model.(AppModel)
+
+	// Should still be in nav mode (timeout was ignored)
+	if app.inputMode {
+		t.Error("Stale escape timeout should not re-enter input mode")
+	}
+}
+
 func TestAppModel_InputMode_ArrowWithoutTmuxPrefix(t *testing.T) {
 	app := NewAppModel(context.Background())
 	app.width = 100
