@@ -513,6 +513,11 @@ func (p *PaneModel) SetIndex(idx int) {
 	p.index = idx
 }
 
+// Index returns the pane's permanent index (1-based)
+func (p *PaneModel) Index() int {
+	return p.index
+}
+
 // AppendOutput adds text to the output buffer (for non-PTY output like status messages)
 func (p *PaneModel) AppendOutput(text string) {
 	p.output.WriteString(text)

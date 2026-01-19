@@ -270,20 +270,22 @@ func TestAppModel_Update_NumberKeyFocus(t *testing.T) {
 	app.width = 100
 	app.height = 40
 
-	// Create three workstreams
+	// Create three workstreams (they get permanent indices 1, 2, 3)
 	for _, name := range []string{"first", "second", "third"} {
 		model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: name})
 		app = model.(AppModel)
 	}
 
+	// Number keys focus by permanent pane index, which maps to slice position
+	// when panes haven't been destroyed
 	tests := []struct {
-		key      string
-		expected int
+		key              string
+		expectedPosition int // slice position
 	}{
-		{"1", 0},
-		{"2", 1},
-		{"3", 2},
-		{"1", 0},
+		{"1", 0}, // index 1 -> slice position 0
+		{"2", 1}, // index 2 -> slice position 1
+		{"3", 2}, // index 3 -> slice position 2
+		{"1", 0}, // back to index 1
 	}
 
 	for _, tt := range tests {
@@ -291,8 +293,8 @@ func TestAppModel_Update_NumberKeyFocus(t *testing.T) {
 			model, _ := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tt.key)})
 			app = model.(AppModel)
 
-			if app.focusedPane != tt.expected {
-				t.Errorf("After pressing '%s', focus should be %d, got %d", tt.key, tt.expected, app.focusedPane)
+			if app.focusedPane != tt.expectedPosition {
+				t.Errorf("After pressing '%s', focusedPane (slice position) should be %d, got %d", tt.key, tt.expectedPosition, app.focusedPane)
 			}
 		})
 	}
@@ -668,6 +670,9 @@ func TestAppModel_TmuxPrefix_InputMode(t *testing.T) {
 	model, _ = app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test2"})
 	app = model.(AppModel)
 
+	// Use LayoutColumns which wraps on left/right
+	app.layout = LayoutColumns
+
 	// Enter input mode
 	app.inputMode = true
 	app.focusedPane = 1
@@ -686,7 +691,7 @@ func TestAppModel_TmuxPrefix_InputMode(t *testing.T) {
 	model, _ = app.Update(msg)
 	app = model.(AppModel)
 
-	// Focus should wrap to pane 0
+	// Focus should wrap to pane 0 (LayoutColumns wraps on right)
 	if app.focusedPane != 0 {
 		t.Errorf("ctrl+b + right should move focus to pane 0 (wrapped), got %d", app.focusedPane)
 	}
@@ -773,6 +778,9 @@ func TestAppModel_TmuxPrefix_UpDown(t *testing.T) {
 		app = model.(AppModel)
 	}
 
+	// Use LayoutRows which stacks panes vertically and wraps on up/down
+	app.layout = LayoutRows
+
 	// Focus is on pane 2 (last created)
 	if app.focusedPane != 2 {
 		t.Fatalf("Expected focusedPane=2, got %d", app.focusedPane)
@@ -784,7 +792,7 @@ func TestAppModel_TmuxPrefix_UpDown(t *testing.T) {
 	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyUp})
 	app = model.(AppModel)
 
-	// Should move to pane 1
+	// Should move to pane 1 (spatially above in LayoutRows)
 	if app.focusedPane != 1 {
 		t.Errorf("ctrl+b + up should move focus to pane 1, got %d", app.focusedPane)
 	}
@@ -812,12 +820,15 @@ func TestAppModel_TmuxPrefix_Wrapping(t *testing.T) {
 	model, _ = app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test2"})
 	app = model.(AppModel)
 
+	// Use LayoutColumns which wraps on left/right
+	app.layout = LayoutColumns
+
 	// Focus is on pane 1
 	app.focusedPane = 1
 	app.panes[0].SetFocused(false)
 	app.panes[1].SetFocused(true)
 
-	// Press ctrl+b then right - should wrap to pane 0
+	// Press ctrl+b then right - should wrap to pane 0 (LayoutColumns wraps)
 	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
 	app = model.(AppModel)
 	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRight})
@@ -1267,5 +1278,139 @@ func TestPaneModel_Dimensions(t *testing.T) {
 	}
 	if pane.Height() != 50 {
 		t.Errorf("Height should be 50, got %d", pane.Height())
+	}
+}
+
+func TestAppModel_PermanentPaneIndices(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create three workstreams - they should get indices 1, 2, 3
+	for _, name := range []string{"first", "second", "third"} {
+		model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: name})
+		app = model.(AppModel)
+	}
+
+	// Verify permanent indices
+	if app.panes[0].Index() != 1 {
+		t.Errorf("First pane should have index 1, got %d", app.panes[0].Index())
+	}
+	if app.panes[1].Index() != 2 {
+		t.Errorf("Second pane should have index 2, got %d", app.panes[1].Index())
+	}
+	if app.panes[2].Index() != 3 {
+		t.Errorf("Third pane should have index 3, got %d", app.panes[2].Index())
+	}
+}
+
+func TestAppModel_NumberKeyFocusByPermanentIndex(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create three workstreams (indices 1, 2, 3)
+	for _, name := range []string{"first", "second", "third"} {
+		model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: name})
+		app = model.(AppModel)
+	}
+
+	// Destroy the first workstream (index 1)
+	wsID := app.panes[0].Workstream().ID
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogDestroy, WorkstreamID: wsID})
+	app = model.(AppModel)
+
+	// Now we have 2 panes with indices 2 and 3 (at slice positions 0 and 1)
+	if len(app.panes) != 2 {
+		t.Fatalf("Expected 2 panes, got %d", len(app.panes))
+	}
+	if app.panes[0].Index() != 2 {
+		t.Errorf("First remaining pane should have index 2, got %d", app.panes[0].Index())
+	}
+	if app.panes[1].Index() != 3 {
+		t.Errorf("Second remaining pane should have index 3, got %d", app.panes[1].Index())
+	}
+
+	// Press '2' - should focus the pane with index 2 (slice position 0)
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	app = model.(AppModel)
+
+	if app.focusedPane != 0 {
+		t.Errorf("Pressing '2' should focus slice position 0 (pane index 2), got focusedPane=%d", app.focusedPane)
+	}
+
+	// Press '3' - should focus the pane with index 3 (slice position 1)
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	app = model.(AppModel)
+
+	if app.focusedPane != 1 {
+		t.Errorf("Pressing '3' should focus slice position 1 (pane index 3), got focusedPane=%d", app.focusedPane)
+	}
+
+	// Press '1' - should do nothing (no pane with index 1 exists anymore)
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	app = model.(AppModel)
+
+	if app.focusedPane != 1 {
+		t.Errorf("Pressing '1' (non-existent index) should not change focus, got focusedPane=%d", app.focusedPane)
+	}
+}
+
+func TestAppModel_PaneIndexGetter(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+
+	// Default index is 0
+	if pane.Index() != 0 {
+		t.Errorf("Default Index() should return 0, got %d", pane.Index())
+	}
+
+	// Set index and verify getter
+	pane.SetIndex(5)
+	if pane.Index() != 5 {
+		t.Errorf("Index() should return 5, got %d", pane.Index())
+	}
+}
+
+func TestAppModel_SpaceSwapPreservesIndices(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create two workstreams (indices 1, 2)
+	for _, name := range []string{"first", "second"} {
+		model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: name})
+		app = model.(AppModel)
+	}
+
+	// Focus pane at slice position 1 (index 2)
+	app.panes[0].SetFocused(false)
+	app.panes[1].SetFocused(true)
+	app.focusedPane = 1
+
+	// Verify indices before swap
+	if app.panes[0].Index() != 1 {
+		t.Errorf("Before swap: pane at position 0 should have index 1, got %d", app.panes[0].Index())
+	}
+	if app.panes[1].Index() != 2 {
+		t.Errorf("Before swap: pane at position 1 should have index 2, got %d", app.panes[1].Index())
+	}
+
+	// Press Space to swap focused pane (index 2) to main position
+	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	app = model.(AppModel)
+
+	// After swap, pane indices should be preserved but positions swapped
+	// Pane at position 0 should now have index 2, position 1 should have index 1
+	if app.panes[0].Index() != 2 {
+		t.Errorf("After swap: pane at position 0 should have index 2, got %d", app.panes[0].Index())
+	}
+	if app.panes[1].Index() != 1 {
+		t.Errorf("After swap: pane at position 1 should have index 1, got %d", app.panes[1].Index())
+	}
+
+	// Focus should be at position 0 now
+	if app.focusedPane != 0 {
+		t.Errorf("After swap, focus should be at position 0, got %d", app.focusedPane)
 	}
 }

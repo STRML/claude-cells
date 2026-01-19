@@ -196,20 +196,24 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.tmuxPrefix && time.Since(m.tmuxPrefixTime) < tmuxPrefixTimeout {
 					m.tmuxPrefix = false
 					if len(m.panes) > 1 {
-						m.panes[m.focusedPane].SetFocused(false)
+						var dir Direction
 						switch msg.String() {
-						case "left", "up":
-							m.focusedPane--
-							if m.focusedPane < 0 {
-								m.focusedPane = len(m.panes) - 1
-							}
-						case "right", "down":
-							m.focusedPane++
-							if m.focusedPane >= len(m.panes) {
-								m.focusedPane = 0
-							}
+						case "left":
+							dir = DirLeft
+						case "right":
+							dir = DirRight
+						case "up":
+							dir = DirUp
+						case "down":
+							dir = DirDown
 						}
-						m.panes[m.focusedPane].SetFocused(true)
+
+						neighbor := FindNeighbor(m.layout, len(m.panes), m.focusedPane, dir)
+						if neighbor >= 0 {
+							m.panes[m.focusedPane].SetFocused(false)
+							m.focusedPane = neighbor
+							m.panes[m.focusedPane].SetFocused(true)
+						}
 					}
 					return m, nil
 				}
@@ -283,23 +287,27 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "left", "right", "up", "down":
-			// Arrow keys switch panes in nav mode (also works with Ctrl+B prefix)
+			// Arrow keys use spatial navigation based on layout
 			m.tmuxPrefix = false
 			if len(m.panes) > 1 {
-				m.panes[m.focusedPane].SetFocused(false)
+				var dir Direction
 				switch msg.String() {
-				case "left", "up":
-					m.focusedPane--
-					if m.focusedPane < 0 {
-						m.focusedPane = len(m.panes) - 1
-					}
-				case "right", "down":
-					m.focusedPane++
-					if m.focusedPane >= len(m.panes) {
-						m.focusedPane = 0
-					}
+				case "left":
+					dir = DirLeft
+				case "right":
+					dir = DirRight
+				case "up":
+					dir = DirUp
+				case "down":
+					dir = DirDown
 				}
-				m.panes[m.focusedPane].SetFocused(true)
+
+				neighbor := FindNeighbor(m.layout, len(m.panes), m.focusedPane, dir)
+				if neighbor >= 0 {
+					m.panes[m.focusedPane].SetFocused(false)
+					m.focusedPane = neighbor
+					m.panes[m.focusedPane].SetFocused(true)
+				}
 			}
 			return m, nil
 
@@ -438,14 +446,17 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "1", "2", "3", "4", "5", "6", "7", "8", "9":
-			// Direct focus by number (stay in nav mode)
-			idx := int(msg.String()[0] - '1')
-			if idx < len(m.panes) {
-				if m.focusedPane < len(m.panes) {
-					m.panes[m.focusedPane].SetFocused(false)
+			// Direct focus by pane number (searches by permanent index, not position)
+			targetIndex := int(msg.String()[0] - '0') // Convert to 1-based index
+			for i, pane := range m.panes {
+				if pane.Index() == targetIndex {
+					if m.focusedPane < len(m.panes) {
+						m.panes[m.focusedPane].SetFocused(false)
+					}
+					m.focusedPane = i
+					m.panes[i].SetFocused(true)
+					break
 				}
-				m.focusedPane = idx
-				m.panes[m.focusedPane].SetFocused(true)
 			}
 			return m, nil
 
@@ -541,6 +552,10 @@ Input Mode:
 					return m, StopContainerCmd(ws)
 				}
 			}
+
+		case DialogPruneAllConfirm:
+			// User typed "destroy" - prune all containers and empty branches
+			return m, PruneAllContainersAndBranchesCmd()
 		}
 		return m, nil
 
@@ -725,7 +740,11 @@ Input Mode:
 		case SettingsActionPruneStopped:
 			return m, PruneStoppedContainersCmd()
 		case SettingsActionPruneAll:
-			return m, PruneAllContainersCmd()
+			// Show destroy confirmation dialog instead of directly pruning
+			dialog := NewPruneAllConfirmDialog()
+			dialog.SetSize(50, 15)
+			m.dialog = &dialog
+			return m, nil
 		}
 		return m, nil
 
@@ -879,6 +898,23 @@ Input Mode:
 			m.toastExpiry = time.Now().Add(toastDuration)
 			if len(m.panes) > 0 {
 				m.panes[0].AppendOutput(fmt.Sprintf("\n[Settings] Pruned %d container(s)\n", msg.PrunedCount))
+			}
+		}
+		return m, nil
+
+	case PruneAllResultMsg:
+		// Show result for full prune all operation (containers + branches)
+		if msg.Error != nil {
+			m.toast = fmt.Sprintf("Prune error: %v", msg.Error)
+			m.toastExpiry = time.Now().Add(toastDuration * 2)
+			if len(m.panes) > 0 {
+				m.panes[0].AppendOutput(fmt.Sprintf("\n[Settings] Prune error: %v\n", msg.Error))
+			}
+		} else {
+			m.toast = fmt.Sprintf("Destroyed %d container(s), %d empty branch(es)", msg.ContainersPruned, msg.BranchesPruned)
+			m.toastExpiry = time.Now().Add(toastDuration * 2)
+			if len(m.panes) > 0 {
+				m.panes[0].AppendOutput(fmt.Sprintf("\n[Settings] Destroyed %d container(s), %d empty branch(es)\n", msg.ContainersPruned, msg.BranchesPruned))
 			}
 		}
 		return m, nil
