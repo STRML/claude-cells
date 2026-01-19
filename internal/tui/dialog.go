@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -30,7 +31,9 @@ type DialogModel struct {
 	Title        string
 	Body         string
 	Input        textinput.Model
-	ConfirmWord  string // Word required to confirm (e.g., "destroy")
+	TextArea     textarea.Model // For multi-line input (new workstream)
+	useTextArea  bool           // Whether to use textarea instead of textinput
+	ConfirmWord  string         // Word required to confirm (e.g., "destroy")
 	WorkstreamID string
 	width        int
 	height       int
@@ -78,24 +81,28 @@ Type "destroy" to confirm:`
 
 // NewWorkstreamDialog creates a new workstream prompt dialog
 func NewWorkstreamDialog() DialogModel {
-	ti := textinput.New()
-	ti.Placeholder = "describe the task..."
-	ti.CharLimit = 200
-	ti.Width = 50
-	ti.Focus()
+	ta := textarea.New()
+	ta.Placeholder = "describe the task..."
+	ta.CharLimit = 500
+	ta.SetWidth(50)
+	ta.SetHeight(3) // Start with 3 lines, will grow
+	ta.Focus()
+	ta.ShowLineNumbers = false
 
-	// Style the textinput for a polished look
-	ti.Prompt = "› "
-	ti.PromptStyle = DialogInputPrompt
-	ti.TextStyle = DialogInputText
-	ti.PlaceholderStyle = DialogInputPlaceholder
-	ti.Cursor.Style = DialogInputCursor
+	// Style the textarea for a polished look
+	ta.Prompt = "› "
+	ta.FocusedStyle.Prompt = DialogInputPrompt
+	ta.FocusedStyle.Text = DialogInputText
+	ta.FocusedStyle.Placeholder = DialogInputPlaceholder
+	ta.FocusedStyle.CursorLine = DialogInputText // No special cursor line highlight
+	ta.BlurredStyle = ta.FocusedStyle
 
 	return DialogModel{
-		Type:  DialogNewWorkstream,
-		Title: "New Workstream",
-		Body:  "Enter a prompt for Claude:",
-		Input: ti,
+		Type:        DialogNewWorkstream,
+		Title:       "New Workstream",
+		Body:        "Enter a prompt for Claude:",
+		TextArea:    ta,
+		useTextArea: true,
 	}
 }
 
@@ -280,6 +287,9 @@ func (d *DialogModel) AppendBody(text string) {
 
 // Init initializes the dialog
 func (d DialogModel) Init() tea.Cmd {
+	if d.useTextArea {
+		return textarea.Blink
+	}
 	return textinput.Blink
 }
 
@@ -375,6 +385,20 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				}
 				// Enter pressed but confirm word doesn't match - ignore
 				return d, nil
+			} else if d.useTextArea {
+				// For textarea dialogs, get value from textarea
+				value := strings.TrimSpace(d.TextArea.Value())
+				if value != "" {
+					return d, func() tea.Msg {
+						return DialogConfirmMsg{
+							Type:         d.Type,
+							WorkstreamID: d.WorkstreamID,
+							Value:        value,
+						}
+					}
+				}
+				// Enter pressed but input is empty - ignore
+				return d, nil
 			} else {
 				if d.Input.Value() != "" {
 					return d, func() tea.Msg {
@@ -464,9 +488,13 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 		return d, nil
 	}
 
-	// Pass to text input for text-based dialogs
+	// Pass to text input or textarea for text-based dialogs
 	var cmd tea.Cmd
-	d.Input, cmd = d.Input.Update(msg)
+	if d.useTextArea {
+		d.TextArea, cmd = d.TextArea.Update(msg)
+	} else {
+		d.Input, cmd = d.Input.Update(msg)
+	}
 	return d, cmd
 }
 
@@ -538,6 +566,10 @@ func (d DialogModel) View() string {
 		}
 		content.WriteString("\n")
 		content.WriteString(KeyHint("↑/↓", " navigate") + "  " + KeyHint("Enter", " select") + "  " + KeyHintStyle.Render("[Esc] Cancel"))
+	} else if d.useTextArea {
+		content.WriteString(inputStyle.Render(d.TextArea.View()))
+		content.WriteString("\n\n")
+		content.WriteString(KeyHint("Enter", " create") + "  " + KeyHintStyle.Render("[Esc] Cancel"))
 	} else {
 		content.WriteString(inputStyle.Render(d.Input.View()))
 		content.WriteString("\n\n")

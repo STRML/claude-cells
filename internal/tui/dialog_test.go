@@ -33,9 +33,13 @@ func TestNewWorkstreamDialog(t *testing.T) {
 	if !strings.Contains(d.Title, "New Workstream") {
 		t.Error("Title should contain 'New Workstream'")
 	}
-	// Verify input starts empty
-	if d.Input.Value() != "" {
-		t.Errorf("Input should start empty, got %q", d.Input.Value())
+	// Verify useTextArea is set
+	if !d.useTextArea {
+		t.Error("useTextArea should be true for workstream dialog")
+	}
+	// Verify textarea starts empty
+	if d.TextArea.Value() != "" {
+		t.Errorf("TextArea should start empty, got %q", d.TextArea.Value())
 	}
 }
 
@@ -81,7 +85,7 @@ func TestDialogModel_Update_Enter_Empty(t *testing.T) {
 
 func TestDialogModel_Update_Enter_WithValue(t *testing.T) {
 	d := NewWorkstreamDialog()
-	d.Input.SetValue("implement login feature")
+	d.TextArea.SetValue("implement login feature")
 	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	if cmd == nil {

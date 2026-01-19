@@ -22,7 +22,8 @@ const ContainerPrefix = "ccells-"
 type ContainerConfig struct {
 	Name        string // Container name (ccells-<project>-<timestamp>)
 	Image       string // Docker image to use
-	RepoPath    string // Path to repo on host
+	RepoPath    string // Path to worktree on host (mounted at /workspace)
+	HostGitDir  string // Path to host repo's .git directory (mounted at same path for worktree support)
 	ClaudeCfg   string // Path to ~/.claude directory on host
 	ClaudeJSON  string // Path to ~/.claude.json file on host (session state)
 	GitConfig   string // Path to ~/.gitconfig file on host (git identity)
@@ -65,6 +66,18 @@ func (c *Client) CreateContainer(ctx context.Context, cfg *ContainerConfig) (str
 			Type:   mount.TypeBind,
 			Source: cfg.RepoPath,
 			Target: "/workspace",
+		})
+	}
+	// Mount host repo's .git directory at the same path for worktree support
+	// Worktrees have a .git file that points to the main repo's .git/worktrees/<name>
+	// By mounting .git at the same host path, those references resolve correctly
+	// NOT read-only: commits need to write objects to .git/objects/
+	// Each worktree has its own index in .git/worktrees/<name>/, so no locking conflicts
+	if cfg.HostGitDir != "" {
+		mounts = append(mounts, mount.Mount{
+			Type:   mount.TypeBind,
+			Source: cfg.HostGitDir,
+			Target: cfg.HostGitDir, // Same path as on host
 		})
 	}
 	if cfg.ClaudeCfg != "" {
