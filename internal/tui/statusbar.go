@@ -14,6 +14,7 @@ type StatusBarModel struct {
 	pairingBranch   string
 	showHelp        bool
 	inputMode       bool
+	layoutName      string
 }
 
 // NewStatusBarModel creates a new status bar
@@ -53,6 +54,12 @@ func (s StatusBarModel) View() string {
 
 	// Left section: mode + app name and count
 	left := fmt.Sprintf("%s ccells: %d workstreams", modeIndicator, s.workstreamCount)
+
+	// Layout indicator (only show if more than 1 workstream)
+	if s.layoutName != "" && s.workstreamCount > 1 {
+		layoutStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+		left += layoutStyle.Render(fmt.Sprintf(" [%s]", s.layoutName))
+	}
 
 	// Center section: pairing indicator
 	var center string
@@ -117,4 +124,9 @@ func (s *StatusBarModel) SetShowHelp(show bool) {
 // SetInputMode sets whether the app is in input mode
 func (s *StatusBarModel) SetInputMode(inputMode bool) {
 	s.inputMode = inputMode
+}
+
+// SetLayoutName sets the current layout name for display
+func (s *StatusBarModel) SetLayoutName(name string) {
+	s.layoutName = name
 }

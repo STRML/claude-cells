@@ -23,6 +23,7 @@ type AppModel struct {
 	manager        *workstream.Manager
 	panes          []PaneModel
 	focusedPane    int
+	layout         LayoutType // Current pane layout
 	statusBar      StatusBarModel
 	dialog         *DialogModel
 	width          int
@@ -386,6 +387,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case "L":
+			// Cycle through layout types
+			m.layout = m.layout.Next()
+			m.updateLayout()
+			m.toast = fmt.Sprintf("Layout: %s", m.layout.String())
+			m.toastExpiry = time.Now().Add(toastDuration)
+			return m, nil
+
 		case "tab":
 			// Cycle focus (stay in nav mode)
 			if len(m.panes) > 0 {
@@ -422,6 +431,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
   p           Toggle pairing mode
   s           Settings
   l           Show logs
+  L           Cycle layout (Grid/Main+Stack/Main+Row/Rows/Columns)
   1-9         Focus pane by number
   Tab         Cycle focus
   q           Quit (pauses containers)
@@ -433,7 +443,7 @@ Input Mode:
   Ctrl+B ←→   Switch pane (without exiting input mode)
   All other keys sent to Claude Code`
 			dialog := NewLogDialog("Help", helpText)
-			dialog.SetSize(60, 25)
+			dialog.SetSize(60, 26)
 			m.dialog = &dialog
 			return m, nil
 
@@ -943,6 +953,7 @@ func (m AppModel) View() string {
 	m.statusBar.SetWidth(m.width)
 	m.statusBar.SetWorkstreamCount(m.manager.Count())
 	m.statusBar.SetInputMode(m.inputMode)
+	m.statusBar.SetLayoutName(m.layout.String())
 	if pairing := m.manager.GetPairing(); pairing != nil {
 		m.statusBar.SetPairingBranch(pairing.BranchName)
 	} else {
@@ -1064,7 +1075,7 @@ func (m AppModel) overlayToast(background string) string {
 	return strings.Join(lines, "\n")
 }
 
-// renderPanes renders all panes in a grid layout
+// renderPanes renders all panes according to the current layout
 func (m AppModel) renderPanes() string {
 	if len(m.panes) == 0 {
 		return ""
@@ -1081,31 +1092,13 @@ func (m AppModel) renderPanes() string {
 		}
 	}
 
-	// Simple horizontal split for up to 2 panes
-	// More complex layouts can be added later
-	if len(m.panes) == 1 {
-		return m.panes[0].View()
-	}
+	// Calculate available height for layout rendering
+	titleBarHeight := 1
+	statusBarHeight := 1
+	availableHeight := m.height - titleBarHeight - statusBarHeight
 
-	// Two panes side by side
-	if len(m.panes) == 2 {
-		left := m.panes[0].View()
-		right := m.panes[1].View()
-		return lipgloss.JoinHorizontal(lipgloss.Top, left, right)
-	}
-
-	// More than 2: first two side by side, rest below
-	left := m.panes[0].View()
-	right := m.panes[1].View()
-	top := lipgloss.JoinHorizontal(lipgloss.Top, left, right)
-
-	var bottomPanes []string
-	for i := 2; i < len(m.panes); i++ {
-		bottomPanes = append(bottomPanes, m.panes[i].View())
-	}
-	bottom := lipgloss.JoinVertical(lipgloss.Left, bottomPanes...)
-
-	return lipgloss.JoinVertical(lipgloss.Left, top, bottom)
+	// Use the layout system to render panes
+	return RenderPanesWithLayout(m.panes, m.layout, m.width, availableHeight)
 }
 
 // overlayDialog overlays the dialog on top of the view
@@ -1189,7 +1182,7 @@ func (m AppModel) overlayDialog(background string) string {
 	return result.String()
 }
 
-// updateLayout recalculates pane sizes
+// updateLayout recalculates pane sizes based on the current layout type
 func (m *AppModel) updateLayout() {
 	titleBarHeight := 1
 	statusBarHeight := 1
@@ -1199,25 +1192,13 @@ func (m *AppModel) updateLayout() {
 		return
 	}
 
-	if len(m.panes) == 1 {
-		m.panes[0].SetSize(m.width, availableHeight)
-		return
-	}
+	// Calculate sizes using the layout system
+	sizes := CalculateLayout(m.layout, len(m.panes), m.width, availableHeight)
 
-	// Two or more: split horizontally
-	paneWidth := m.width / 2
-	paneHeight := availableHeight
-
-	if len(m.panes) > 2 {
-		// Reserve space for additional panes below
-		paneHeight = availableHeight * 2 / 3
-	}
-
+	// Apply sizes to panes
 	for i := range m.panes {
-		if i < 2 {
-			m.panes[i].SetSize(paneWidth, paneHeight)
-		} else {
-			m.panes[i].SetSize(m.width, (availableHeight-paneHeight)/(len(m.panes)-2))
+		if i < len(sizes) {
+			m.panes[i].SetSize(sizes[i].Width, sizes[i].Height)
 		}
 	}
 }
