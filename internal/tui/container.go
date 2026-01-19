@@ -1121,3 +1121,57 @@ func DisablePairingCmd(ws *workstream.Workstream, previousBranch string, stashed
 		}
 	}
 }
+
+// ResourceStatsMsg is sent when resource stats are fetched.
+type ResourceStatsMsg struct {
+	Stats       []docker.ContainerStats
+	TotalCPU    float64
+	TotalMemory uint64
+	DiskUsage   *docker.DiskUsage
+	IsGlobal    bool
+	Error       error
+}
+
+// FetchResourceStatsCmd returns a command that fetches resource usage statistics.
+func FetchResourceStatsCmd(global bool, projectContainerIDs []string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := docker.NewClient()
+		if err != nil {
+			return ResourceStatsMsg{IsGlobal: global, Error: err}
+		}
+		defer client.Close()
+
+		var stats []docker.ContainerStats
+		if global {
+			stats, err = client.GetAllCCellsStats(ctx)
+		} else {
+			stats, err = client.GetProjectCCellsStats(ctx, projectContainerIDs)
+		}
+
+		if err != nil {
+			return ResourceStatsMsg{IsGlobal: global, Error: err}
+		}
+
+		// Calculate totals
+		var totalCPU float64
+		var totalMemory uint64
+		for _, s := range stats {
+			totalCPU += s.CPUPercent
+			totalMemory += s.MemoryUsage
+		}
+
+		// Get disk usage (don't fail if this errors)
+		diskUsage, _ := client.GetDiskUsage(ctx)
+
+		return ResourceStatsMsg{
+			Stats:       stats,
+			TotalCPU:    totalCPU,
+			TotalMemory: totalMemory,
+			DiskUsage:   diskUsage,
+			IsGlobal:    global,
+		}
+	}
+}
