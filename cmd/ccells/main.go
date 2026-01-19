@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"os"
@@ -13,6 +14,47 @@ import (
 	"github.com/STRML/claude-cells/internal/workstream"
 	tea "github.com/charmbracelet/bubbletea"
 )
+
+// spinner displays a progress spinner while a function runs
+type spinner struct {
+	frames  []string
+	current int
+	done    chan struct{}
+	message string
+}
+
+func newSpinner(message string) *spinner {
+	return &spinner{
+		frames:  []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"},
+		message: message,
+		done:    make(chan struct{}),
+	}
+}
+
+func (s *spinner) Start() {
+	go func() {
+		ticker := time.NewTicker(80 * time.Millisecond)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-s.done:
+				// Clear the spinner line
+				fmt.Print("\r\033[K")
+				return
+			case <-ticker.C:
+				fmt.Printf("\r%s %s", s.frames[s.current], s.message)
+				s.current = (s.current + 1) % len(s.frames)
+			}
+		}
+	}()
+}
+
+func (s *spinner) Stop() {
+	close(s.done)
+	// Small delay to ensure spinner is cleared
+	time.Sleep(100 * time.Millisecond)
+}
 
 func main() {
 	// Create a cancellable context for the entire application.
@@ -127,16 +169,18 @@ func validatePrerequisites() error {
 	if result.DockerAvailable && !result.ImageExists {
 		if result.NeedsBuild {
 			// Build from devcontainer.json
-			fmt.Printf("Project image '%s' not found. Building from devcontainer.json...\n\n", result.ImageName)
-
+			var buildOutput bytes.Buffer
 			buildCtx, buildCancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer buildCancel()
 
 			// Use devcontainer CLI if available for proper feature support
 			if cliStatus.Available {
-				fmt.Println("Using devcontainer CLI for full feature support...")
-				_, err := docker.BuildWithDevcontainerCLI(buildCtx, projectPath, os.Stdout)
+				spin := newSpinner(fmt.Sprintf("Building image '%s' with devcontainer CLI...", result.ImageName))
+				spin.Start()
+				_, err := docker.BuildWithDevcontainerCLI(buildCtx, projectPath, &buildOutput)
+				spin.Stop()
 				if err != nil {
+					fmt.Println(buildOutput.String()) // Show output on error
 					return fmt.Errorf("failed to build with devcontainer CLI: %w", err)
 				}
 			} else {
@@ -146,24 +190,33 @@ func validatePrerequisites() error {
 					return fmt.Errorf("failed to load devcontainer config: %w", err)
 				}
 
-				if err := docker.BuildProjectImage(buildCtx, projectPath, devCfg, os.Stdout); err != nil {
+				spin := newSpinner(fmt.Sprintf("Building image '%s'...", result.ImageName))
+				spin.Start()
+				err = docker.BuildProjectImage(buildCtx, projectPath, devCfg, &buildOutput)
+				spin.Stop()
+				if err != nil {
+					fmt.Println(buildOutput.String()) // Show output on error
 					return fmt.Errorf("failed to build project image: %w", err)
 				}
 			}
 
-			fmt.Println("\nImage built successfully!")
+			fmt.Printf("✓ Image '%s' built successfully\n", result.ImageName)
 		} else if result.ImageName == docker.DefaultImage {
 			// Build the default ccells image
-			fmt.Printf("Required image '%s' not found. Building automatically...\n\n", docker.DefaultImage)
-
+			var buildOutput bytes.Buffer
 			buildCtx, buildCancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer buildCancel()
 
-			if err := docker.BuildImage(buildCtx, os.Stdout); err != nil {
+			spin := newSpinner(fmt.Sprintf("Building image '%s'...", docker.DefaultImage))
+			spin.Start()
+			err := docker.BuildImage(buildCtx, &buildOutput)
+			spin.Stop()
+			if err != nil {
+				fmt.Println(buildOutput.String()) // Show output on error
 				return fmt.Errorf("failed to build image: %w", err)
 			}
 
-			fmt.Println("\nImage built successfully!")
+			fmt.Printf("✓ Image '%s' built successfully\n", docker.DefaultImage)
 		} else {
 			// External image from devcontainer.json - prompt to pull
 			return fmt.Errorf("image '%s' from devcontainer.json not found. Run: docker pull %s", result.ImageName, result.ImageName)
