@@ -275,6 +275,8 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 		// Create container config - mount the WORKTREE, not the main repo
 		cfg := docker.NewContainerConfig(ws.BranchName, worktreePath)
 		cfg.Image = docker.RequiredImage
+		// Mount host repo's .git directory so worktree references resolve correctly
+		cfg.HostGitDir = repoPath + "/.git"
 
 		// Create per-container isolated config directory
 		// This prevents race conditions when multiple containers modify credentials

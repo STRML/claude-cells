@@ -10,7 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/docker/docker/api/types/image"
+	"github.com/docker/docker/client"
 )
 
 // RequiredImage is the Docker image required for workstreams
@@ -90,19 +90,16 @@ func ValidatePrerequisites(ctx context.Context) (*ValidationResult, error) {
 
 // ImageExists checks if a Docker image exists locally
 func (c *Client) ImageExists(ctx context.Context, imageName string) (bool, error) {
-	images, err := c.cli.ImageList(ctx, image.ListOptions{})
+	// Use ImageInspect instead of listing all images - much faster
+	_, _, err := c.cli.ImageInspectWithRaw(ctx, imageName)
 	if err != nil {
+		// Check if it's a "not found" error
+		if client.IsErrNotFound(err) {
+			return false, nil
+		}
 		return false, err
 	}
-
-	for _, img := range images {
-		for _, tag := range img.RepoTags {
-			if tag == imageName {
-				return true, nil
-			}
-		}
-	}
-	return false, nil
+	return true, nil
 }
 
 // BuildImage builds the required Docker image from the Dockerfile.
