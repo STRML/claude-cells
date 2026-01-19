@@ -632,12 +632,13 @@ Input Mode:
 		return m, nil
 
 	case ContainerErrorMsg:
-		// Container failed to start
+		// Container failed to start or resume
 		for i := range m.panes {
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
 				ws := m.panes[i].Workstream()
 				ws.SetError(msg.Error)
-				m.panes[i].AppendOutput(fmt.Sprintf("Error: %v\n", msg.Error))
+				m.panes[i].SetInitializing(false) // Stop the spinner
+				m.panes[i].AppendOutput(fmt.Sprintf("\nError: %v\n", msg.Error))
 				break
 			}
 		}
