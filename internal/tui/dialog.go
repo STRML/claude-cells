@@ -85,8 +85,10 @@ func NewWorkstreamDialog() DialogModel {
 	ta := textarea.New()
 	ta.Placeholder = "describe the task..."
 	ta.CharLimit = 500
-	ta.SetWidth(48)
-	ta.SetHeight(3)
+	// Width will be set properly when SetSize is called
+	// Start with a reasonable default
+	ta.SetWidth(60)
+	ta.SetHeight(4)
 	ta.Focus()
 	ta.ShowLineNumbers = false
 
@@ -596,6 +598,16 @@ func (d DialogModel) View() string {
 func (d *DialogModel) SetSize(width, height int) {
 	d.width = width
 	d.height = height
+
+	// Update textarea width to match dialog content area
+	// Account for dialog box padding (4 on each side = 8) and input style padding (2)
+	if d.useTextArea {
+		textareaWidth := width - 12
+		if textareaWidth < 20 {
+			textareaWidth = 20
+		}
+		d.TextArea.SetWidth(textareaWidth)
+	}
 
 	// Recalculate scrollMax for log dialogs based on actual visible lines
 	if d.Type == DialogLog {

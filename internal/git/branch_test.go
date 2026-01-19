@@ -2,9 +2,11 @@ package git
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -166,5 +168,450 @@ func TestGit_DeleteBranch(t *testing.T) {
 	out, _ := cmd.Output()
 	if len(out) > 0 {
 		t.Error("Branch was not deleted")
+	}
+}
+
+// resolvePath resolves symlinks to handle macOS /var -> /private/var symlink
+func resolvePath(path string) string {
+	resolved, err := filepath.EvalSymlinks(path)
+	if err != nil {
+		return path
+	}
+	return resolved
+}
+
+func TestGit_CreateWorktree(t *testing.T) {
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// Create a worktree directory
+	worktreePath := filepath.Join(os.TempDir(), "git-worktree-test-"+filepath.Base(dir))
+	defer os.RemoveAll(worktreePath)
+
+	// Create worktree with new branch
+	err := g.CreateWorktree(ctx, worktreePath, "feature-branch")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+
+	// Verify worktree directory exists
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		t.Error("Worktree directory was not created")
+	}
+
+	// Verify .git file exists in worktree (not a directory for worktrees)
+	gitPath := filepath.Join(worktreePath, ".git")
+	info, err := os.Stat(gitPath)
+	if err != nil {
+		t.Fatalf("Worktree .git not found: %v", err)
+	}
+	if info.IsDir() {
+		t.Error("Worktree .git should be a file, not a directory")
+	}
+
+	// Verify branch was created
+	exists, err := g.BranchExists(ctx, "feature-branch")
+	if err != nil {
+		t.Fatalf("BranchExists() error = %v", err)
+	}
+	if !exists {
+		t.Error("Branch was not created with worktree")
+	}
+
+	// Verify worktree is listed
+	worktrees, err := g.WorktreeList(ctx)
+	if err != nil {
+		t.Fatalf("WorktreeList() error = %v", err)
+	}
+	found := false
+	resolvedWorktreePath := resolvePath(worktreePath)
+	for _, wt := range worktrees {
+		if wt == resolvedWorktreePath {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("WorktreeList() does not contain %s, got %v", resolvedWorktreePath, worktrees)
+	}
+}
+
+func TestGit_CreateWorktreeFromExisting(t *testing.T) {
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// First create a branch
+	err := g.CreateBranch(ctx, "existing-branch")
+	if err != nil {
+		t.Fatalf("CreateBranch() error = %v", err)
+	}
+
+	// Create a worktree directory
+	worktreePath := filepath.Join(os.TempDir(), "git-worktree-existing-test-"+filepath.Base(dir))
+	defer os.RemoveAll(worktreePath)
+
+	// Create worktree from existing branch
+	err = g.CreateWorktreeFromExisting(ctx, worktreePath, "existing-branch")
+	if err != nil {
+		t.Fatalf("CreateWorktreeFromExisting() error = %v", err)
+	}
+
+	// Verify worktree directory exists
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		t.Error("Worktree directory was not created")
+	}
+}
+
+func TestGit_RemoveWorktree(t *testing.T) {
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// Create a worktree
+	worktreePath := filepath.Join(os.TempDir(), "git-worktree-remove-test-"+filepath.Base(dir))
+	defer os.RemoveAll(worktreePath) // cleanup in case test fails
+
+	err := g.CreateWorktree(ctx, worktreePath, "remove-branch")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+
+	// Verify it exists
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		t.Fatal("Worktree was not created")
+	}
+
+	// Remove the worktree
+	err = g.RemoveWorktree(ctx, worktreePath)
+	if err != nil {
+		t.Fatalf("RemoveWorktree() error = %v", err)
+	}
+
+	// Verify worktree is no longer listed
+	worktrees, err := g.WorktreeList(ctx)
+	if err != nil {
+		t.Fatalf("WorktreeList() error = %v", err)
+	}
+	for _, wt := range worktrees {
+		if wt == worktreePath {
+			t.Error("Worktree still appears in list after removal")
+		}
+	}
+
+	// Note: git worktree remove does NOT delete the directory itself
+	// The directory may still exist - this is expected git behavior
+	// The cleanup code in StopContainerCmd calls os.RemoveAll separately
+}
+
+func TestGit_RemoveWorktree_AndDirectory(t *testing.T) {
+	// This test mimics the cleanup behavior in StopContainerCmd
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// Create a worktree
+	worktreePath := filepath.Join(os.TempDir(), "git-worktree-full-cleanup-"+filepath.Base(dir))
+	defer os.RemoveAll(worktreePath) // cleanup in case test fails
+
+	err := g.CreateWorktree(ctx, worktreePath, "cleanup-branch")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+
+	// Verify it exists
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		t.Fatal("Worktree was not created")
+	}
+
+	// This is what StopContainerCmd does:
+	// 1. Remove worktree from git
+	err = g.RemoveWorktree(ctx, worktreePath)
+	if err != nil {
+		t.Fatalf("RemoveWorktree() error = %v", err)
+	}
+
+	// 2. Remove the directory
+	err = os.RemoveAll(worktreePath)
+	if err != nil {
+		t.Fatalf("os.RemoveAll() error = %v", err)
+	}
+
+	// Verify directory is gone
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Error("Worktree directory still exists after os.RemoveAll")
+	}
+
+	// Verify worktree is no longer in git's list
+	worktrees, err := g.WorktreeList(ctx)
+	if err != nil {
+		t.Fatalf("WorktreeList() error = %v", err)
+	}
+	for _, wt := range worktrees {
+		if wt == worktreePath {
+			t.Error("Worktree still in git list after removal")
+		}
+	}
+}
+
+func TestGit_WorktreeList(t *testing.T) {
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// Initial list should contain at least the main worktree
+	worktrees, err := g.WorktreeList(ctx)
+	if err != nil {
+		t.Fatalf("WorktreeList() error = %v", err)
+	}
+	if len(worktrees) == 0 {
+		t.Error("WorktreeList() should return at least the main worktree")
+	}
+
+	// The main repo should be in the list (resolve symlinks for macOS)
+	resolvedDir := resolvePath(dir)
+	found := false
+	for _, wt := range worktrees {
+		if wt == resolvedDir {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("WorktreeList() should contain main repo %s, got %v", resolvedDir, worktrees)
+	}
+
+	// Create additional worktrees
+	wt1 := filepath.Join(os.TempDir(), "git-worktree-list-1-"+filepath.Base(dir))
+	wt2 := filepath.Join(os.TempDir(), "git-worktree-list-2-"+filepath.Base(dir))
+	defer os.RemoveAll(wt1)
+	defer os.RemoveAll(wt2)
+
+	_ = g.CreateWorktree(ctx, wt1, "list-branch-1")
+	_ = g.CreateWorktree(ctx, wt2, "list-branch-2")
+
+	// Now list should have 3 worktrees
+	worktrees, err = g.WorktreeList(ctx)
+	if err != nil {
+		t.Fatalf("WorktreeList() error = %v", err)
+	}
+	if len(worktrees) != 3 {
+		t.Errorf("WorktreeList() = %d worktrees, want 3", len(worktrees))
+	}
+}
+
+func TestGit_RemoveWorktree_SymlinkPath(t *testing.T) {
+	// This test verifies that worktree removal works when the path
+	// contains symlinks (e.g., /tmp -> /private/tmp on macOS)
+	// This is the exact scenario that happens in production.
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// Use /tmp which is symlinked to /private/tmp on macOS
+	// This mimics the actual path used in production: /tmp/ccells/worktrees/<branch>
+	worktreePath := "/tmp/ccells-test-worktree-" + filepath.Base(dir)
+	defer os.RemoveAll(worktreePath)
+
+	// Create worktree using the /tmp path (not resolved)
+	err := g.CreateWorktree(ctx, worktreePath, "symlink-test-branch")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+
+	// Verify it exists
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		t.Fatal("Worktree was not created")
+	}
+
+	// Now try to remove using the same /tmp path
+	// This is what StopContainerCmd does
+	err = g.RemoveWorktree(ctx, worktreePath)
+	if err != nil {
+		t.Fatalf("RemoveWorktree() error = %v", err)
+	}
+
+	// Verify worktree is no longer in git's list
+	worktrees, err := g.WorktreeList(ctx)
+	if err != nil {
+		t.Fatalf("WorktreeList() error = %v", err)
+	}
+
+	// Check both resolved and unresolved paths
+	resolvedPath := resolvePath(worktreePath)
+	for _, wt := range worktrees {
+		if wt == worktreePath || wt == resolvedPath {
+			t.Errorf("Worktree still in git list after removal: %s", wt)
+		}
+	}
+
+	// Clean up directory
+	_ = os.RemoveAll(worktreePath)
+}
+
+// getWorktreePathForTest mimics the getWorktreePath function from tui/container.go
+func getWorktreePathForTest(branchName string) string {
+	safeName := strings.ReplaceAll(branchName, "/", "-")
+	safeName = strings.ReplaceAll(safeName, " ", "-")
+	return fmt.Sprintf("/tmp/ccells/worktrees/%s", safeName)
+}
+
+func TestGit_CleanupFlow_MimicsStopContainerCmd(t *testing.T) {
+	// This test mimics the exact cleanup flow in StopContainerCmd
+	// to verify the worktree gets properly cleaned up
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	branchName := "ccells/test-cleanup-branch"
+
+	// Ensure worktrees directory exists (as done in startContainerWithOptions)
+	if err := os.MkdirAll("/tmp/ccells/worktrees", 0755); err != nil {
+		t.Fatalf("Failed to create worktrees directory: %v", err)
+	}
+
+	// Compute worktree path the same way the TUI does
+	worktreePath := getWorktreePathForTest(branchName)
+	defer os.RemoveAll(worktreePath)
+
+	t.Logf("Creating worktree at: %s", worktreePath)
+
+	// Create worktree (as done in startContainerWithOptions)
+	err := g.CreateWorktree(ctx, worktreePath, branchName)
+	if err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+
+	// Verify worktree exists
+	if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
+		t.Fatal("Worktree was not created")
+	}
+
+	// Verify branch exists
+	exists, _ := g.BranchExists(ctx, branchName)
+	if !exists {
+		t.Fatal("Branch was not created")
+	}
+
+	t.Logf("Worktree and branch created successfully")
+
+	// Now simulate StopContainerCmd cleanup:
+	// 1. Compute path from branch name (as if WorktreePath was empty)
+	cleanupPath := getWorktreePathForTest(branchName)
+	t.Logf("Computed cleanup path: %s", cleanupPath)
+
+	// 2. Remove worktree from git
+	err = g.RemoveWorktree(ctx, cleanupPath)
+	if err != nil {
+		t.Logf("RemoveWorktree() error (ignored in prod): %v", err)
+	}
+
+	// 3. Remove the directory
+	err = os.RemoveAll(cleanupPath)
+	if err != nil {
+		t.Logf("os.RemoveAll() error (ignored in prod): %v", err)
+	}
+
+	// 4. Check if branch has commits (it shouldn't)
+	hasCommits, _ := g.BranchHasCommits(ctx, branchName)
+	if !hasCommits {
+		// 5. Delete the branch
+		err = g.DeleteBranch(ctx, branchName)
+		if err != nil {
+			t.Logf("DeleteBranch() error: %v", err)
+		}
+	}
+
+	// VERIFY CLEANUP WORKED:
+
+	// Worktree directory should be gone
+	if _, err := os.Stat(worktreePath); !os.IsNotExist(err) {
+		t.Errorf("Worktree directory still exists at %s", worktreePath)
+	}
+
+	// Worktree should not be in git's list
+	worktrees, err := g.WorktreeList(ctx)
+	if err != nil {
+		t.Fatalf("WorktreeList() error = %v", err)
+	}
+	resolvedPath := resolvePath(worktreePath)
+	for _, wt := range worktrees {
+		if wt == worktreePath || wt == resolvedPath {
+			t.Errorf("Worktree still in git list: %s", wt)
+		}
+	}
+
+	// Branch should be deleted (since it had no commits)
+	exists, _ = g.BranchExists(ctx, branchName)
+	if exists {
+		t.Errorf("Branch %s still exists after cleanup", branchName)
+	}
+
+	t.Log("Cleanup completed successfully")
+}
+
+func TestGit_BranchHasCommits_NoCommits(t *testing.T) {
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// Create a new branch without any commits
+	err := g.CreateBranch(ctx, "empty-branch")
+	if err != nil {
+		t.Fatalf("CreateBranch() error = %v", err)
+	}
+
+	// Should have no commits ahead of main
+	hasCommits, err := g.BranchHasCommits(ctx, "empty-branch")
+	if err != nil {
+		t.Fatalf("BranchHasCommits() error = %v", err)
+	}
+	if hasCommits {
+		t.Error("BranchHasCommits() = true for new branch with no commits")
+	}
+}
+
+func TestGit_BranchHasCommits_WithCommits(t *testing.T) {
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// Create and checkout a new branch
+	err := g.CreateAndCheckout(ctx, "branch-with-commits")
+	if err != nil {
+		t.Fatalf("CreateAndCheckout() error = %v", err)
+	}
+
+	// Make a commit
+	_ = os.WriteFile(filepath.Join(dir, "newfile.txt"), []byte("content"), 0644)
+	exec.Command("git", "-C", dir, "add", "newfile.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "add file").Run()
+
+	// Should have commits ahead of main
+	hasCommits, err := g.BranchHasCommits(ctx, "branch-with-commits")
+	if err != nil {
+		t.Fatalf("BranchHasCommits() error = %v", err)
+	}
+	if !hasCommits {
+		t.Error("BranchHasCommits() = false for branch with commits")
 	}
 }
