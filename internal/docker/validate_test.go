@@ -20,7 +20,9 @@ func TestValidatePrerequisites(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	result, err := ValidatePrerequisites(ctx)
+	// Get project path (test directory should work)
+	projectPath, _ := os.Getwd()
+	result, err := ValidatePrerequisites(ctx, projectPath)
 	if err != nil {
 		t.Fatalf("ValidatePrerequisites() error = %v", err)
 	}

@@ -1,4 +1,13 @@
 {
-  "name": "dev",
-  "image": "golang:latest"
+  "name": "Claude Cells Dev",
+  "image": "golang:1.23",
+  "features": {
+    "ghcr.io/devcontainers/features/git:1": {}
+  },
+  "customizations": {
+    "vscode": {
+      "extensions": ["golang.go"]
+    }
+  },
+  "postCreateCommand": "go version"
 }

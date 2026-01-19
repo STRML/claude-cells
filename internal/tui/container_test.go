@@ -18,7 +18,8 @@ func skipIfDockerUnavailable(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	result, err := docker.ValidatePrerequisites(ctx)
+	// Pass empty path to use default image
+	result, err := docker.ValidatePrerequisites(ctx, "")
 	if err != nil {
 		t.Skipf("Docker validation failed: %v", err)
 	}
@@ -27,7 +28,7 @@ func skipIfDockerUnavailable(t *testing.T) {
 	}
 	if !result.ImageExists {
 		t.Skipf("Required image %s not found. Run: docker build -t %s -f configs/base.Dockerfile .",
-			docker.RequiredImage, docker.RequiredImage)
+			docker.DefaultImage, docker.DefaultImage)
 	}
 }
 
