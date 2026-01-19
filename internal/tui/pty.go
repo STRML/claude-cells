@@ -78,9 +78,10 @@ type PTYClosedMsg struct {
 
 // PTYOptions holds options for creating a PTY session.
 type PTYOptions struct {
-	Width   int
-	Height  int
-	EnvVars []string // Additional environment variables in "KEY=value" format
+	Width    int
+	Height   int
+	EnvVars  []string // Additional environment variables in "KEY=value" format
+	IsResume bool     // If true, use 'claude --continue' instead of starting new session
 }
 
 // NewPTYSession creates a new PTY session for running Claude Code in a container.
@@ -102,14 +103,23 @@ func NewPTYSession(ctx context.Context, dockerClient *client.Client, containerID
 	// 1. Copy credentials file to expected location
 	// 2. Create ~/.local/bin and symlink claude if needed (suppresses "native install" warning)
 	// 3. Run claude with --dangerously-skip-permissions since we're in an isolated container
+	//    - If resuming, use --continue to resume the previous session
+	//    - If new session with prompt, pass the prompt as argument
 	setupScript := `
 test -f /home/claude/.claude-credentials && cp /home/claude/.claude-credentials /home/claude/.claude/.credentials.json 2>/dev/null
 mkdir -p /home/claude/.local/bin 2>/dev/null
 test ! -f /home/claude/.local/bin/claude && which claude >/dev/null 2>&1 && ln -sf "$(which claude)" /home/claude/.local/bin/claude 2>/dev/null
 `
-	setupCmd := setupScript + `exec claude --dangerously-skip-permissions`
-	if initialPrompt != "" {
+	var setupCmd string
+	if opts != nil && opts.IsResume {
+		// Resume existing session with --continue
+		setupCmd = setupScript + `exec claude --dangerously-skip-permissions --continue`
+	} else if initialPrompt != "" {
+		// New session with initial prompt
 		setupCmd = setupScript + `exec claude --dangerously-skip-permissions "` + escapeShellArg(initialPrompt) + `"`
+	} else {
+		// New session without prompt
+		setupCmd = setupScript + `exec claude --dangerously-skip-permissions`
 	}
 	cmd := []string{"/bin/bash", "-c", setupCmd}
 

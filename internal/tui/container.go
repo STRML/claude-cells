@@ -45,6 +45,7 @@ func untrackContainer(containerID string) {
 type ContainerStartedMsg struct {
 	WorkstreamID string
 	ContainerID  string
+	IsResume     bool // True when resuming a saved session (use --continue)
 }
 
 // ContainerErrorMsg is sent when container creation/start fails.
@@ -478,7 +479,8 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 }
 
 // StartPTYCmd returns a command that starts a PTY session in a container.
-func StartPTYCmd(ws *workstream.Workstream, initialPrompt string, width, height int) tea.Cmd {
+// If isResume is true, uses 'claude --continue' to resume the previous session.
+func StartPTYCmd(ws *workstream.Workstream, initialPrompt string, width, height int, isResume bool) tea.Cmd {
 	return func() tea.Msg {
 		// Use a timeout for PTY session creation
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -494,8 +496,9 @@ func StartPTYCmd(ws *workstream.Workstream, initialPrompt string, width, height 
 
 		// Build PTY options with terminal size
 		opts := &PTYOptions{
-			Width:  width,
-			Height: height,
+			Width:    width,
+			Height:   height,
+			IsResume: isResume,
 		}
 
 		// Pass through ANTHROPIC_API_KEY if set (fallback for non-OAuth auth)
@@ -896,10 +899,11 @@ func ResumeContainerCmd(ws *workstream.Workstream, width, height int) tea.Cmd {
 		repoPath, _ := os.Getwd()
 		trackContainer(ws.ContainerID, ws.ID, ws.BranchName, repoPath)
 
-		// Container is running, notify success
+		// Container is running, notify success (resuming existing session)
 		return ContainerStartedMsg{
 			WorkstreamID: ws.ID,
 			ContainerID:  ws.ContainerID,
+			IsResume:     true,
 		}
 	}
 }
