@@ -606,12 +606,17 @@ Input Mode:
 		return m, nil
 
 	case BranchConflictMsg:
-		// Branch already exists - show conflict resolution dialog
+		// Branch already exists - show conflict resolution dialog with branch info
 		for i := range m.panes {
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
 				m.panes[i].AppendOutput(fmt.Sprintf("Branch '%s' already exists.\n", msg.BranchName))
-				dialog := NewBranchConflictDialog(msg.BranchName, msg.WorkstreamID)
-				dialog.SetSize(50, 15)
+				dialog := NewBranchConflictDialog(msg.BranchName, msg.WorkstreamID, msg.BranchInfo)
+				// Make dialog taller to show branch info
+				height := 18
+				if msg.BranchInfo != "" {
+					height = 25
+				}
+				dialog.SetSize(60, height)
 				m.dialog = &dialog
 				break
 			}
@@ -627,6 +632,14 @@ Input Mode:
 				case BranchConflictUseExisting:
 					m.panes[i].AppendOutput("Using existing branch...\n")
 					return m, StartContainerWithExistingBranchCmd(ws)
+				case BranchConflictCreateNew:
+					// Collect existing branch names for uniqueness check
+					var existingBranches []string
+					for _, pane := range m.panes {
+						existingBranches = append(existingBranches, pane.Workstream().BranchName)
+					}
+					m.panes[i].AppendOutput("Creating new branch with unique name...\n")
+					return m, StartContainerWithNewBranchCmd(ws, existingBranches)
 				case BranchConflictDelete:
 					m.panes[i].AppendOutput("Deleting and recreating branch...\n")
 					return m, DeleteAndRestartContainerCmd(ws)

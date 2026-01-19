@@ -79,6 +79,7 @@ type BranchConflictMsg struct {
 	WorkstreamID string
 	BranchName   string
 	RepoPath     string
+	BranchInfo   string // Summary of commits and diff on the existing branch
 }
 
 // StartContainerCmd returns a command that creates and starts a container.
@@ -90,6 +91,60 @@ func StartContainerCmd(ws *workstream.Workstream) tea.Cmd {
 // StartContainerWithExistingBranchCmd starts a container using an existing branch.
 func StartContainerWithExistingBranchCmd(ws *workstream.Workstream) tea.Cmd {
 	return startContainerWithOptions(ws, true)
+}
+
+// StartContainerWithNewBranchCmd creates a new branch with a unique name and starts the container.
+func StartContainerWithNewBranchCmd(ws *workstream.Workstream, existingBranches []string) tea.Cmd {
+	return func() tea.Msg {
+		// Generate a unique branch name by appending a suffix
+		originalName := ws.BranchName
+		newName := originalName
+		suffix := 2
+
+		// Check if the generated name conflicts with existing branches
+		for {
+			conflict := false
+			for _, existing := range existingBranches {
+				if existing == newName {
+					conflict = true
+					break
+				}
+			}
+			if !conflict {
+				break
+			}
+			newName = fmt.Sprintf("%s-%d", originalName, suffix)
+			suffix++
+		}
+
+		// Also check git in case there are branches not in our list
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
+		repoPath, err := os.Getwd()
+		if err != nil {
+			return ContainerErrorMsg{
+				WorkstreamID: ws.ID,
+				Error:        err,
+			}
+		}
+
+		gitRepo := git.New(repoPath)
+		for {
+			exists, _ := gitRepo.BranchExists(ctx, newName)
+			if !exists {
+				break
+			}
+			newName = fmt.Sprintf("%s-%d", originalName, suffix)
+			suffix++
+		}
+
+		// Update workstream with new branch name
+		ws.BranchName = newName
+
+		// Now start with the new branch name
+		return startContainerWithOptions(ws, false)()
+	}
 }
 
 // DeleteAndRestartContainerCmd deletes the existing branch and creates a new one.
@@ -165,11 +220,15 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 			// Check if branch already exists
 			exists, _ := gitRepo.BranchExists(ctx, ws.BranchName)
 			if exists {
+				// Get branch info (commits and diff stats)
+				branchInfo, _ := gitRepo.GetBranchInfo(ctx, ws.BranchName)
+
 				// Branch already exists - ask user what to do
 				return BranchConflictMsg{
 					WorkstreamID: ws.ID,
 					BranchName:   ws.BranchName,
 					RepoPath:     repoPath,
+					BranchInfo:   branchInfo,
 				}
 			}
 

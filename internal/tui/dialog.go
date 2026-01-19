@@ -125,13 +125,18 @@ type BranchConflictAction string
 
 const (
 	BranchConflictUseExisting BranchConflictAction = "use_existing"
+	BranchConflictCreateNew   BranchConflictAction = "create_new"
 	BranchConflictDelete      BranchConflictAction = "delete"
 	BranchConflictCancel      BranchConflictAction = "cancel"
 )
 
 // NewBranchConflictDialog creates a dialog for handling branch conflicts
-func NewBranchConflictDialog(branchName, workstreamID string) DialogModel {
-	body := fmt.Sprintf("Branch '%s' already exists.\n\nWhat would you like to do?", branchName)
+func NewBranchConflictDialog(branchName, workstreamID, branchInfo string) DialogModel {
+	body := fmt.Sprintf("Branch '%s' already exists.", branchName)
+	if branchInfo != "" {
+		body += "\n\n" + branchInfo
+	}
+	body += "\n\nWhat would you like to do?"
 
 	return DialogModel{
 		Type:         DialogBranchConflict,
@@ -140,6 +145,7 @@ func NewBranchConflictDialog(branchName, workstreamID string) DialogModel {
 		WorkstreamID: workstreamID,
 		MenuItems: []string{
 			"Use existing branch",
+			"Create new branch with unique name",
 			"Delete branch and recreate",
 			"Cancel",
 		},
@@ -315,6 +321,8 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				case 0:
 					action = BranchConflictUseExisting
 				case 1:
+					action = BranchConflictCreateNew
+				case 2:
 					action = BranchConflictDelete
 				default:
 					action = BranchConflictCancel

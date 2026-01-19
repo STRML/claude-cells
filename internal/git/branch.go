@@ -167,3 +167,58 @@ func (g *Git) BranchHasCommits(ctx context.Context, branchName string) (bool, er
 	count := strings.TrimSpace(out)
 	return count != "0", nil
 }
+
+// GetBranchInfo returns a summary of commits and diff stats for a branch.
+func (g *Git) GetBranchInfo(ctx context.Context, branchName string) (string, error) {
+	baseBranch, err := g.GetBaseBranch(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	var info strings.Builder
+
+	// Get commit count
+	countOut, err := g.run(ctx, "rev-list", "--count", baseBranch+".."+branchName)
+	if err != nil {
+		return "", err
+	}
+	commitCount := strings.TrimSpace(countOut)
+
+	if commitCount == "0" {
+		info.WriteString("No commits ahead of " + baseBranch)
+		return info.String(), nil
+	}
+
+	// Get commit log (short format, max 5 commits)
+	logOut, err := g.run(ctx, "log", "--oneline", "-5", baseBranch+".."+branchName)
+	if err != nil {
+		return "", err
+	}
+
+	info.WriteString("Commits (" + commitCount + "):\n")
+	lines := strings.Split(logOut, "\n")
+	for _, line := range lines {
+		if line != "" {
+			info.WriteString("  " + line + "\n")
+		}
+	}
+	if len(lines) > 5 {
+		info.WriteString("  ...\n")
+	}
+
+	// Get diff stats (files changed, insertions, deletions)
+	diffOut, err := g.run(ctx, "diff", "--stat", "--stat-width=50", baseBranch+"..."+branchName)
+	if err == nil && diffOut != "" {
+		// Just get the summary line (last line)
+		diffLines := strings.Split(diffOut, "\n")
+		for i := len(diffLines) - 1; i >= 0; i-- {
+			line := strings.TrimSpace(diffLines[i])
+			if line != "" && (strings.Contains(line, "changed") || strings.Contains(line, "insertion") || strings.Contains(line, "deletion")) {
+				info.WriteString("\n" + line)
+				break
+			}
+		}
+	}
+
+	return info.String(), nil
+}
