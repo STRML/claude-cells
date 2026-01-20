@@ -1518,15 +1518,18 @@ func (m AppModel) renderTitleBar() string {
 	// Mode indicator
 	var mode string
 	if m.inputMode {
-		mode = titleStyle.Copy().Background(lipgloss.Color("#059669")).Render(" INPUT ")
+		inputStyle := titleStyle.Background(lipgloss.Color("#059669"))
+		mode = inputStyle.Render(" INPUT ")
 	} else {
-		mode = titleStyle.Copy().Background(lipgloss.Color("#7C3AED")).Render(" NAV ")
+		navStyle := titleStyle.Background(lipgloss.Color("#7C3AED"))
+		mode = navStyle.Render(" NAV ")
 	}
 
 	// Scroll mode indicator
 	var scrollIndicator string
 	if len(m.panes) > 0 && m.focusedPane < len(m.panes) && m.panes[m.focusedPane].IsScrollMode() {
-		scrollIndicator = titleStyle.Copy().Background(lipgloss.Color("#D97706")).Render(" SCROLL ")
+		scrollStyle := titleStyle.Background(lipgloss.Color("#D97706"))
+		scrollIndicator = scrollStyle.Render(" SCROLL ")
 	}
 
 	// App title

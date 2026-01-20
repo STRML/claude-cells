@@ -690,12 +690,12 @@ func (p *PaneModel) GetFullOutput() string {
 // ScrollPageUp scrolls the viewport up by one page
 func (p *PaneModel) ScrollPageUp() {
 	p.scrollMode = true
-	p.viewport.ViewUp()
+	p.viewport.PageUp()
 }
 
 // ScrollPageDown scrolls the viewport down by one page
 func (p *PaneModel) ScrollPageDown() {
-	p.viewport.ViewDown()
+	p.viewport.PageDown()
 	// Exit scroll mode if at bottom
 	if p.viewport.AtBottom() {
 		p.scrollMode = false
