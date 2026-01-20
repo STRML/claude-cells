@@ -413,6 +413,9 @@ func (p *PTYSession) StartReadLoop() {
 					content := accumulated.String()
 
 					// Check for bypass permissions prompt during startup (first 10 seconds)
+					// Claude Code may show different prompts:
+					// 1. "Bypass Permissions mode" - the full bypass dialog (needs down arrow + enter)
+					// 2. "Enter to confirm" - a simple confirmation prompt (just needs enter)
 					if !bypassHandled && time.Since(startTime) < bypassTimeout {
 						if strings.Contains(content, "Bypass Permissions mode") {
 							// Wait a moment for the full prompt to render
@@ -421,6 +424,11 @@ func (p *PTYSession) StartReadLoop() {
 							p.Write([]byte{27, '[', 'B'})
 							time.Sleep(50 * time.Millisecond)
 							// Send enter to confirm
+							p.Write([]byte{'\r'})
+							bypassHandled = true
+						} else if strings.Contains(content, "Enter to confirm") {
+							// Simple confirmation prompt - just send enter
+							time.Sleep(100 * time.Millisecond)
 							p.Write([]byte{'\r'})
 							bypassHandled = true
 						}

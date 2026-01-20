@@ -601,27 +601,52 @@ func TestPTYSession_Fields(t *testing.T) {
 
 // Test the bypass permissions prompt detection logic (without actual PTY)
 func TestBypassPromptDetection(t *testing.T) {
-	// The StartReadLoop checks for "Bypass Permissions mode" in output
+	// The StartReadLoop checks for "Bypass Permissions mode" and "Enter to confirm" in output
 	// We can't easily test this without a real PTY, but we can test the string matching
-	testCases := []struct {
-		content  string
-		expected bool
-	}{
-		{"Normal output", false},
-		{"Bypass Permissions mode", true},
-		{"Some text before Bypass Permissions mode and after", true},
-		{"bypass permissions mode", false}, // Case sensitive
-		{"BypassPermissionsmode", false},   // No spaces
-	}
+	t.Run("Bypass Permissions mode", func(t *testing.T) {
+		testCases := []struct {
+			content  string
+			expected bool
+		}{
+			{"Normal output", false},
+			{"Bypass Permissions mode", true},
+			{"Some text before Bypass Permissions mode and after", true},
+			{"bypass permissions mode", false}, // Case sensitive
+			{"BypassPermissionsmode", false},   // No spaces
+		}
 
-	for _, tc := range testCases {
-		t.Run(tc.content, func(t *testing.T) {
-			contains := bytes.Contains([]byte(tc.content), []byte("Bypass Permissions mode"))
-			if contains != tc.expected {
-				t.Errorf("Detection for %q = %v, want %v", tc.content, contains, tc.expected)
-			}
-		})
-	}
+		for _, tc := range testCases {
+			t.Run(tc.content, func(t *testing.T) {
+				contains := bytes.Contains([]byte(tc.content), []byte("Bypass Permissions mode"))
+				if contains != tc.expected {
+					t.Errorf("Detection for %q = %v, want %v", tc.content, contains, tc.expected)
+				}
+			})
+		}
+	})
+
+	t.Run("Enter to confirm", func(t *testing.T) {
+		testCases := []struct {
+			content  string
+			expected bool
+		}{
+			{"Normal output", false},
+			{"Enter to confirm", true},
+			{"Enter to confirm · Esc to cancel", true},
+			{"   Enter to confirm · Esc to cancel", true},
+			{"Some text Enter to confirm more text", true},
+			{"enter to confirm", false}, // Case sensitive
+		}
+
+		for _, tc := range testCases {
+			t.Run(tc.content, func(t *testing.T) {
+				contains := bytes.Contains([]byte(tc.content), []byte("Enter to confirm"))
+				if contains != tc.expected {
+					t.Errorf("Detection for %q = %v, want %v", tc.content, contains, tc.expected)
+				}
+			})
+		}
+	})
 }
 
 // Test timeout behavior conceptually
