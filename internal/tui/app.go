@@ -98,6 +98,9 @@ type StateSavedMsg struct {
 // spinnerTickMsg is sent to animate the spinner
 type spinnerTickMsg struct{}
 
+// fadeTickMsg is sent to animate the fade transition
+type fadeTickMsg struct{}
+
 // escapeTimeoutMsg is sent when the escape timeout expires (first Esc should be forwarded)
 type escapeTimeoutMsg struct {
 	timestamp time.Time // The timestamp of the Esc that started this timeout
@@ -107,6 +110,13 @@ type escapeTimeoutMsg struct {
 func spinnerTickCmd() tea.Cmd {
 	return tea.Tick(250*time.Millisecond, func(t time.Time) tea.Msg {
 		return spinnerTickMsg{}
+	})
+}
+
+// fadeTickCmd returns a command that sends a fade tick after a short delay (60fps)
+func fadeTickCmd() tea.Cmd {
+	return tea.Tick(16*time.Millisecond, func(t time.Time) tea.Msg {
+		return fadeTickMsg{}
 	})
 }
 
@@ -954,6 +964,7 @@ Scroll Mode:
 	case spinnerTickMsg:
 		// Animate spinner for any initializing panes and check for timeout
 		anyInitializing := false
+		var cmds []tea.Cmd
 		for i := range m.panes {
 			if m.panes[i].IsInitializing() {
 				m.panes[i].TickSpinner()
@@ -967,12 +978,35 @@ Scroll Mode:
 					m.panes[i].AppendOutput(fmt.Sprintf("\n[Error] Startup timed out after %v\n", elapsed))
 					m.panes[i].AppendOutput("Press 'l' to view container logs, or 'd' to destroy and retry.\n")
 					ws.SetError(fmt.Errorf("startup timed out after %v", elapsed))
+					// Start fade animation
+					if m.panes[i].IsFading() {
+						cmds = append(cmds, fadeTickCmd())
+					}
 				}
 			}
 		}
 		// Continue ticking if any pane is still initializing
 		if anyInitializing {
-			return m, spinnerTickCmd()
+			cmds = append(cmds, spinnerTickCmd())
+		}
+		if len(cmds) > 0 {
+			return m, tea.Batch(cmds...)
+		}
+		return m, nil
+
+	case fadeTickMsg:
+		// Animate fade transition for any fading panes
+		anyFading := false
+		for i := range m.panes {
+			if m.panes[i].IsFading() {
+				if m.panes[i].TickFade() {
+					anyFading = true
+				}
+			}
+		}
+		// Continue ticking if any pane is still fading
+		if anyFading {
+			return m, fadeTickCmd()
 		}
 		return m, nil
 
@@ -998,10 +1032,17 @@ Scroll Mode:
 						strings.Contains(outputStr, "\r> ")
 					if claudeReady {
 						m.panes[i].SetInitializing(false)
-						// Auto-enter input mode if this is the focused pane
+						// Start fade animation and auto-enter input mode if focused
+						var cmds []tea.Cmd
+						if m.panes[i].IsFading() {
+							cmds = append(cmds, fadeTickCmd())
+						}
 						if i == m.focusedPane {
 							m.inputMode = true
-							return m, tea.ShowCursor
+							cmds = append(cmds, tea.ShowCursor)
+						}
+						if len(cmds) > 0 {
+							return m, tea.Batch(cmds...)
 						}
 					}
 					// Show ALL output during initialization for debugging
@@ -1028,6 +1069,10 @@ Scroll Mode:
 					m.panes[i].AppendOutput(fmt.Sprintf("\nSession ended: %v\n", msg.Error))
 				} else {
 					m.panes[i].AppendOutput("\nSession ended.\n")
+				}
+				// Start fade animation if needed
+				if m.panes[i].IsFading() {
+					return m, fadeTickCmd()
 				}
 				break
 			}
