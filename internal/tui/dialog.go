@@ -263,7 +263,7 @@ func NewPostMergeDestroyDialog(branchName, workstreamID string) DialogModel {
 		Body:         body,
 		WorkstreamID: workstreamID,
 		MenuItems: []string{
-			"Yes, destroy container",
+			"Yes, destroy container (recommended)",
 			"No, keep container",
 		},
 		MenuSelection: 0,
