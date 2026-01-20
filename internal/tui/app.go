@@ -904,8 +904,6 @@ Scroll Mode:
 					if strings.Contains(outputStr, "bypass permissions on") ||
 						strings.Contains(outputStr, "What would you like to do?") {
 						m.panes[i].SetInitializing(false)
-						// Discard this chunk - it may contain permissions dialog remnants
-						// Start fresh from next output
 						// Auto-enter input mode if this is the focused pane
 						if i == m.focusedPane {
 							m.inputMode = true
@@ -913,17 +911,9 @@ Scroll Mode:
 						}
 						break
 					}
-					// Show installation output (Claude Code being installed)
-					if strings.Contains(outputStr, "Claude Code not found") ||
-						strings.Contains(outputStr, "installing") ||
-						strings.Contains(outputStr, "npm") ||
-						strings.Contains(outputStr, "Downloading") {
-						m.panes[i].WritePTYOutput(msg.Output)
-						break
-					}
-					// Show any other significant output during init
-					// (discard only permissions dialog spinner/progress)
-					if len(outputStr) > 10 && !strings.Contains(outputStr, "Bypass Permissions") {
+					// Show ALL output during initialization for debugging
+					// Only filter out the permissions dialog spinner
+					if !strings.Contains(outputStr, "Bypass Permissions") {
 						m.panes[i].WritePTYOutput(msg.Output)
 					}
 				} else {
