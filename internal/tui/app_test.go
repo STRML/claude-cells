@@ -28,7 +28,7 @@ func TestNewAppModel(t *testing.T) {
 	}
 }
 
-func TestAppModel_Update_Quit(t *testing.T) {
+func TestAppModel_Update_QuitDialog(t *testing.T) {
 	tests := []struct {
 		name string
 		key  string
@@ -46,16 +46,39 @@ func TestAppModel_Update_Quit(t *testing.T) {
 			} else {
 				msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tt.key)}
 			}
-			model, cmd := app.Update(msg)
+			model, _ := app.Update(msg)
 
 			appModel := model.(AppModel)
-			if !appModel.quitting {
-				t.Errorf("Should be quitting after '%s'", tt.key)
+			// Should show quit confirmation dialog, not quit immediately
+			if appModel.quitting {
+				t.Errorf("Should not be quitting immediately after '%s'", tt.key)
 			}
-			if cmd == nil {
-				t.Error("Should return quit command")
+			if appModel.dialog == nil {
+				t.Errorf("Dialog should be open after '%s'", tt.key)
+			}
+			if appModel.dialog.Type != DialogQuitConfirm {
+				t.Errorf("Dialog should be DialogQuitConfirm type after '%s'", tt.key)
 			}
 		})
+	}
+}
+
+func TestAppModel_Update_QuitDialogConfirm(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Confirm quit via DialogConfirmMsg
+	model, cmd := app.Update(DialogConfirmMsg{
+		Type: DialogQuitConfirm,
+	})
+	appModel := model.(AppModel)
+
+	if !appModel.quitting {
+		t.Error("Should be quitting after DialogQuitConfirm")
+	}
+	if cmd == nil {
+		t.Error("Should return quit command")
 	}
 }
 

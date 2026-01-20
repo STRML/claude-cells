@@ -30,6 +30,7 @@ const (
 	DialogPostMergeDestroy     // Confirmation to destroy container after successful merge
 	DialogMergeConflict        // Merge failed due to conflicts - offer rebase
 	DialogFirstRunIntroduction // First-run introduction modal
+	DialogQuitConfirm          // Confirm quit with y/n
 )
 
 // DialogModel represents a modal dialog
@@ -328,6 +329,20 @@ For more details: https://github.com/STRML/claude-cells`
 	}
 }
 
+// NewQuitConfirmDialog creates a quit confirmation dialog
+func NewQuitConfirmDialog() DialogModel {
+	return DialogModel{
+		Type:  DialogQuitConfirm,
+		Title: "Quit ccells?",
+		Body:  "Active containers will be paused and can resume later.\n\nAre you sure you want to quit?",
+		MenuItems: []string{
+			"Yes",
+			"No",
+		},
+		MenuSelection: 1, // Default to "No" for safety
+	}
+}
+
 // NewSettingsDialog creates a settings menu dialog
 func NewSettingsDialog(containerCount int, projectName string) DialogModel {
 	body := fmt.Sprintf("Containers managed by ccells: %d\n", containerCount)
@@ -524,6 +539,18 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				d.Body = "Loading..."
 				return d, func() tea.Msg { return ResourceStatsRefreshMsg{IsGlobal: d.isGlobalView} }
 			}
+		case "y", "Y":
+			// 'y' confirms quit dialog
+			if d.Type == DialogQuitConfirm {
+				return d, func() tea.Msg {
+					return DialogConfirmMsg{Type: d.Type}
+				}
+			}
+		case "n", "N":
+			// 'n' cancels quit dialog
+			if d.Type == DialogQuitConfirm {
+				return d, func() tea.Msg { return DialogCancelMsg{} }
+			}
 		case "shift+enter":
 			// Insert newline in textarea dialogs
 			if d.useTextArea {
@@ -662,6 +689,16 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				}
 			}
 
+			if d.Type == DialogQuitConfirm {
+				// Selection 0 = "Yes", 1 = "No"
+				if d.MenuSelection == 1 {
+					return d, func() tea.Msg { return DialogCancelMsg{} }
+				}
+				return d, func() tea.Msg {
+					return DialogConfirmMsg{Type: d.Type}
+				}
+			}
+
 			if d.Type == DialogDestroy || d.Type == DialogPruneAllConfirm || d.Type == DialogPruneProjectConfirm {
 				if strings.ToLower(d.Input.Value()) == d.ConfirmWord {
 					return d, func() tea.Msg {
@@ -710,7 +747,7 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				return d, nil
 			}
 			// Only handle for menu dialogs, otherwise pass to input
-			if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict {
+			if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogQuitConfirm {
 				if d.MenuSelection > 0 {
 					d.MenuSelection--
 				}
@@ -725,7 +762,7 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				return d, nil
 			}
 			// Only handle for menu dialogs, otherwise pass to input
-			if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict {
+			if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogQuitConfirm {
 				if d.MenuSelection < len(d.MenuItems)-1 {
 					d.MenuSelection++
 				}
@@ -773,7 +810,7 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 	}
 
 	// For menu-style, log, progress, resource, and introduction dialogs, don't pass keys to input
-	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogLog || d.Type == DialogProgress || d.Type == DialogResourceUsage || d.Type == DialogFirstRunIntroduction {
+	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogQuitConfirm || d.Type == DialogLog || d.Type == DialogProgress || d.Type == DialogResourceUsage || d.Type == DialogFirstRunIntroduction {
 		return d, nil
 	}
 
@@ -908,7 +945,7 @@ func (d DialogModel) View() string {
 	content.WriteString("\n\n")
 
 	// Menu-style dialogs render a selection list
-	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict {
+	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogQuitConfirm {
 		for i, item := range d.MenuItems {
 			if i == d.MenuSelection {
 				content.WriteString("→ ")
@@ -920,7 +957,11 @@ func (d DialogModel) View() string {
 			content.WriteString("\n")
 		}
 		content.WriteString("\n")
-		content.WriteString(KeyHint("↑/↓", " navigate") + "  " + KeyHint("Enter", " select") + "  " + KeyHintStyle.Render("[Esc] Cancel"))
+		if d.Type == DialogQuitConfirm {
+			content.WriteString(KeyHint("y", " yes") + "  " + KeyHint("n", " no") + "  " + KeyHint("↑/↓", " navigate") + "  " + KeyHint("Enter", " select"))
+		} else {
+			content.WriteString(KeyHint("↑/↓", " navigate") + "  " + KeyHint("Enter", " select") + "  " + KeyHintStyle.Render("[Esc] Cancel"))
+		}
 	} else if d.useTextArea {
 		content.WriteString(inputStyle.Render(d.TextArea.View()))
 		content.WriteString("\n\n")
