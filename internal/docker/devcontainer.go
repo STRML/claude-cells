@@ -3,6 +3,8 @@ package docker
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -235,7 +237,58 @@ func GetBaseImage(projectPath string) (string, error) {
 	return cfg.Image, nil
 }
 
+// computeConfigHash computes a hash of the devcontainer.json content.
+// This is used to detect when the config has changed and the image needs rebuilding.
+// Returns empty string if no devcontainer.json exists.
+func computeConfigHash(projectPath string) string {
+	candidates := []string{
+		filepath.Join(projectPath, ".devcontainer", "devcontainer.json"),
+		filepath.Join(projectPath, ".devcontainer.json"),
+	}
+
+	var configPath string
+	for _, path := range candidates {
+		if _, err := os.Stat(path); err == nil {
+			configPath = path
+			break
+		}
+	}
+
+	if configPath == "" {
+		return ""
+	}
+
+	content, err := os.ReadFile(configPath)
+	if err != nil {
+		return ""
+	}
+
+	// Strip comments and whitespace for consistent hashing
+	// (so formatting changes don't trigger rebuilds)
+	cleaned := stripJSONC(content)
+
+	// Parse and re-marshal to normalize the JSON
+	var cfg map[string]interface{}
+	if err := json.Unmarshal(cleaned, &cfg); err != nil {
+		// Fall back to hashing the cleaned content directly
+		hash := sha256.Sum256(cleaned)
+		return hex.EncodeToString(hash[:])[:12]
+	}
+
+	// Re-marshal with sorted keys for deterministic output
+	normalized, err := json.Marshal(cfg)
+	if err != nil {
+		hash := sha256.Sum256(cleaned)
+		return hex.EncodeToString(hash[:])[:12]
+	}
+
+	hash := sha256.Sum256(normalized)
+	return hex.EncodeToString(hash[:])[:12]
+}
+
 // generateProjectImageName creates a unique image name for a project's custom build.
+// The image tag includes a hash of the devcontainer.json content so that config
+// changes automatically trigger a rebuild.
 func generateProjectImageName(projectPath string) string {
 	projectName := filepath.Base(projectPath)
 	if projectName == "" || projectName == "." {
@@ -244,7 +297,16 @@ func generateProjectImageName(projectPath string) string {
 	// Sanitize for docker tag
 	projectName = strings.ToLower(projectName)
 	projectName = strings.ReplaceAll(projectName, " ", "-")
-	return fmt.Sprintf("ccells-devcontainer-%s:latest", projectName)
+
+	// Include config hash in tag to detect changes
+	configHash := computeConfigHash(projectPath)
+	if configHash == "" {
+		// No devcontainer.json, use latest (shouldn't normally happen
+		// since we only call this when devcontainer.json exists)
+		return fmt.Sprintf("ccells-devcontainer-%s:latest", projectName)
+	}
+
+	return fmt.Sprintf("ccells-devcontainer-%s:%s", projectName, configHash)
 }
 
 // ResolveDockerfilePath resolves the full path to the Dockerfile based on the build config.
