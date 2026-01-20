@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"io"
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -241,7 +240,6 @@ echo "[ccells] Starting Claude Code..."
 	// Start the read loop immediately - it will handle both:
 	// 1. Forwarding output to the pane
 	// 2. Auto-accepting the bypass permissions prompt if it appears
-	log.Printf("[PTY %s] Starting read loop", workstreamID)
 	go session.StartReadLoop()
 
 	return session, nil
@@ -274,7 +272,6 @@ func (p *PTYSession) Resize(width, height int) error {
 // to avoid race conditions with Close().
 // It also handles auto-accepting the bypass permissions prompt if it appears.
 func (p *PTYSession) StartReadLoop() {
-	log.Printf("[PTY %s] StartReadLoop started, program=%v", p.workstreamID, program != nil)
 	buf := make([]byte, 4096)
 
 	// For detecting the bypass permissions prompt during startup
@@ -327,7 +324,6 @@ func (p *PTYSession) StartReadLoop() {
 			return
 		case result := <-readCh:
 			if result.err != nil {
-				log.Printf("[PTY %s] Read error: %v", p.workstreamID, result.err)
 				// Check context before sending error message
 				// This prevents sending spurious error messages during shutdown
 				select {
@@ -346,14 +342,11 @@ func (p *PTYSession) StartReadLoop() {
 			}
 
 			if result.n > 0 {
-				log.Printf("[PTY %s] Read %d bytes, program=%v", p.workstreamID, result.n, program != nil)
-
 				// Check for bypass permissions prompt during startup (first 10 seconds)
 				if !bypassHandled && time.Since(startTime) < bypassTimeout {
 					accumulated.Write(buf[:result.n])
 					content := accumulated.String()
 					if strings.Contains(content, "Bypass Permissions mode") {
-						log.Printf("[PTY %s] Detected bypass permissions prompt, auto-accepting", p.workstreamID)
 						// Wait a moment for the full prompt to render
 						time.Sleep(100 * time.Millisecond)
 						// Send down arrow to select "Yes, I accept"
