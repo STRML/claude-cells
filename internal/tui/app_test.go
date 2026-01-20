@@ -1223,15 +1223,26 @@ func TestAppModel_StateSavedMsg_WithError(t *testing.T) {
 	app.quitting = true
 
 	// Simulate state saved with error
-	model, cmd := app.Update(StateSavedMsg{Error: fmt.Errorf("save error")})
-	app = model.(AppModel)
+	// Error message is printed to stderr, not shown as toast
+	_, cmd := app.Update(StateSavedMsg{Error: fmt.Errorf("save error")})
 
-	// Should show toast with error but still quit
-	if app.toast == "" {
-		t.Error("Should show toast on save error")
-	}
+	// Should still quit even with save error
 	if cmd == nil {
 		t.Error("Should still quit even with save error")
+	}
+}
+
+func TestAppModel_StateSavedMsg_WithRepairMessage(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.quitting = true
+
+	// Simulate state saved with repair message
+	// Repair message is printed to stderr
+	_, cmd := app.Update(StateSavedMsg{RepairMessage: "2 session ID(s) repaired"})
+
+	// Should quit after saving
+	if cmd == nil {
+		t.Error("Should quit after saving state")
 	}
 }
 

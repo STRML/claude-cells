@@ -15,9 +15,11 @@ import (
 )
 
 // sessionIDRegex matches Claude Code session IDs in output.
-// Claude outputs session ID at startup like: "Resuming session: 01HXXXXXX..."
-// Session IDs are ULIDs (26 characters, alphanumeric).
-var sessionIDRegex = regexp.MustCompile(`(?:session(?:_id)?[:\s]+|Resuming session[:\s]+)([0-9A-Za-z]{26})`)
+// Claude outputs session ID at startup like: "Resuming session: xxxxxxxx-xxxx-..."
+// Session IDs can be UUIDs (36 chars with dashes) or ULIDs (26 alphanumeric chars).
+// UUID format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+// ULID format: 26 alphanumeric characters
+var sessionIDRegex = regexp.MustCompile(`(?:session(?:[_\s]?id)?[:\s]+|Resuming session[:\s]+)([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9A-Za-z]{26})`)
 
 // escapeShellArg escapes a string for safe use in a shell command.
 // It handles special characters that could break out of double-quoted strings

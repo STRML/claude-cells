@@ -25,7 +25,7 @@ type DockerClient interface {
 	ListDockerTUIContainers(ctx context.Context) ([]ContainerInfo, error)
 	PruneDockerTUIContainers(ctx context.Context) (int, error)
 	PruneAllDockerTUIContainers(ctx context.Context) (int, error)
-	CleanupOrphanedContainers(ctx context.Context, knownContainerIDs []string) (int, error)
+	CleanupOrphanedContainers(ctx context.Context, projectName string, knownContainerIDs []string, existingWorktrees []string) (int, error)
 
 	// Image operations
 	ImageExists(ctx context.Context, imageName string) (bool, error)

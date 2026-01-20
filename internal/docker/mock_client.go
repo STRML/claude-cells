@@ -183,7 +183,7 @@ func (m *MockClient) PruneAllDockerTUIContainers(ctx context.Context) (int, erro
 	return count, nil
 }
 
-func (m *MockClient) CleanupOrphanedContainers(ctx context.Context, knownContainerIDs []string) (int, error) {
+func (m *MockClient) CleanupOrphanedContainers(ctx context.Context, projectName string, knownContainerIDs []string, existingWorktrees []string) (int, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
@@ -192,6 +192,8 @@ func (m *MockClient) CleanupOrphanedContainers(ctx context.Context, knownContain
 		known[id] = true
 	}
 
+	// In the mock, we don't filter by project name or worktrees
+	// Just check if container ID is in the known list
 	count := 0
 	for id := range m.containers {
 		if !known[id] {

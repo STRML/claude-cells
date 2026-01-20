@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -63,9 +64,59 @@ func (s *spinner) Stop() {
 	time.Sleep(100 * time.Millisecond)
 }
 
+func printHelp() {
+	fmt.Printf(`ccells - Claude Cells: Run parallel Claude Code instances in Docker containers
+
+Usage:
+  ccells [options]
+
+Options:
+  -h, --help          Show this help message
+  -v, --version       Show version information
+  --repair-state      Validate and repair the state file by extracting
+                      session IDs from running containers
+
+Keyboard Shortcuts (in TUI):
+  n             Create new workstream
+  d             Destroy workstream (with confirmation)
+  1-9           Jump to pane by number
+  Tab/Shift+Tab Navigate between panes
+  Space         Toggle between main pane and others
+  l             Toggle layout (vertical/horizontal/grid)
+  Enter         Enter input mode (type in focused pane)
+  Esc Esc       Exit input mode (double-tap)
+  ?             Show help dialog
+  q             Quit (saves state for resume)
+
+State Management:
+  ccells automatically saves state on exit and resumes on restart.
+  If session IDs are corrupted, use --repair-state to fix them.
+
+For more information: https://github.com/STRML/claude-cells
+`)
+}
+
 func main() {
 	// Initialize logging early to prevent any log.Printf from polluting TUI
 	tui.InitLogging()
+
+	// Handle command-line flags
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "--help", "-h":
+			printHelp()
+			os.Exit(0)
+		case "--version", "-v":
+			fmt.Printf("ccells %s (%s)\n", Version, CommitHash)
+			os.Exit(0)
+		case "--repair-state":
+			if err := runStateRepair(); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			os.Exit(0)
+		}
+	}
 
 	// Create a cancellable context for the entire application.
 	// This context is cancelled on SIGINT/SIGTERM and propagates
@@ -271,13 +322,17 @@ func validatePrerequisites() error {
 }
 
 // cleanupOrphanedContainers removes ccells containers from previous crashed sessions.
-// It uses the container tracker (if available) and state file to find which containers should be kept.
+// It uses the container tracker (if available), state file, and worktree existence to find which containers should be kept.
+// IMPORTANT: Never removes containers that have corresponding worktrees (work in progress).
 func cleanupOrphanedContainers(tracker *docker.ContainerTracker) {
 	// Get current working directory for state file
 	cwd, err := os.Getwd()
 	if err != nil {
 		return // Silently skip if we can't get cwd
 	}
+
+	// Get project name from directory
+	projectName := filepath.Base(cwd)
 
 	// Collect known container IDs from multiple sources
 
@@ -303,6 +358,9 @@ func cleanupOrphanedContainers(tracker *docker.ContainerTracker) {
 		}
 	}
 
+	// 3. Get list of existing worktrees - these should NEVER be cleaned up
+	existingWorktrees := listExistingWorktrees()
+
 	// Create docker client and clean up orphaned containers
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
@@ -313,8 +371,8 @@ func cleanupOrphanedContainers(tracker *docker.ContainerTracker) {
 	}
 	defer client.Close()
 
-	// Clean up containers that aren't in knownIDs (from state file)
-	removed, err := client.CleanupOrphanedContainers(ctx, knownIDs)
+	// Clean up containers that aren't in knownIDs (from state file) and don't have worktrees
+	removed, err := client.CleanupOrphanedContainers(ctx, projectName, knownIDs, existingWorktrees)
 	if err == nil && removed > 0 {
 		fmt.Printf("Cleaned up %d orphaned container(s) from previous session\n", removed)
 	}
@@ -323,4 +381,108 @@ func cleanupOrphanedContainers(tracker *docker.ContainerTracker) {
 	if tracker != nil && len(orphanedFromCrash) > 0 {
 		tracker.Clear()
 	}
+}
+
+// listExistingWorktrees returns the names of all existing ccells worktrees
+func listExistingWorktrees() []string {
+	worktreeDir := "/tmp/ccells/worktrees"
+	entries, err := os.ReadDir(worktreeDir)
+	if err != nil {
+		return nil // No worktrees or can't read
+	}
+
+	var worktrees []string
+	for _, entry := range entries {
+		if entry.IsDir() {
+			worktrees = append(worktrees, entry.Name())
+		}
+	}
+	return worktrees
+}
+
+// runStateRepair validates and repairs the state file by extracting session IDs from running containers
+func runStateRepair() error {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return fmt.Errorf("failed to get current directory: %w", err)
+	}
+
+	// Check if state file exists
+	if !workstream.StateExists(cwd) {
+		fmt.Println("No state file found. Nothing to repair.")
+		return nil
+	}
+
+	// Load current state
+	state, err := workstream.LoadState(cwd)
+	if err != nil {
+		return fmt.Errorf("failed to load state: %w", err)
+	}
+
+	if len(state.Workstreams) == 0 {
+		fmt.Println("State file has no workstreams. Nothing to repair.")
+		return nil
+	}
+
+	fmt.Printf("Found %d workstream(s) in state file\n", len(state.Workstreams))
+
+	// Convert saved workstreams to full workstreams for repair
+	var workstreams []*workstream.Workstream
+	for _, saved := range state.Workstreams {
+		ws := workstream.NewWithID(saved.ID, saved.BranchName, saved.Prompt)
+		ws.ContainerID = saved.ContainerID
+		ws.Title = saved.Title
+		ws.CreatedAt = saved.CreatedAt
+		ws.ClaudeSessionID = saved.ClaudeSessionID
+		workstreams = append(workstreams, ws)
+	}
+
+	// Show current state
+	fmt.Println("\nCurrent state:")
+	for i, ws := range workstreams {
+		sessionID := ws.GetClaudeSessionID()
+		if sessionID == "" {
+			sessionID = "(missing)"
+		}
+		fmt.Printf("  %d. %s\n     Container: %s\n     Session ID: %s\n",
+			i+1, ws.Title, ws.ContainerID[:12], sessionID)
+	}
+
+	// Run validation and repair
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	fmt.Println("\nRepairing state...")
+	result, err := workstream.ValidateAndRepairState(ctx, workstreams)
+	if err != nil {
+		return fmt.Errorf("repair failed: %w", err)
+	}
+
+	fmt.Printf("\nResult: %s\n", result.Summary())
+
+	if result.WasRepaired() {
+		// Save the repaired state
+		if err := workstream.SaveState(cwd, workstreams, state.FocusedIndex, state.Layout); err != nil {
+			return fmt.Errorf("failed to save repaired state: %w", err)
+		}
+		fmt.Println("State file updated successfully.")
+
+		// Show updated state
+		fmt.Println("\nUpdated state:")
+		for i, ws := range workstreams {
+			sessionID := ws.GetClaudeSessionID()
+			if sessionID == "" {
+				sessionID = "(missing)"
+			}
+			fmt.Printf("  %d. %s\n     Container: %s\n     Session ID: %s\n",
+				i+1, ws.Title, ws.ContainerID[:12], sessionID)
+		}
+	} else if result.IsCorrupted() {
+		fmt.Println("\nWarning: Some session IDs could not be recovered.")
+		fmt.Println("The affected containers may start with fresh sessions on next launch.")
+	} else {
+		fmt.Println("\nState is already valid. No repairs needed.")
+	}
+
+	return nil
 }

@@ -164,8 +164,8 @@ func TestMockClient_CleanupOrphaned(t *testing.T) {
 	orphanID, _ := client.CreateContainer(ctx, orphanCfg)
 	_ = client.StartContainer(ctx, orphanID)
 
-	// Cleanup with only known ID
-	removed, err := client.CleanupOrphanedContainers(ctx, []string{knownID})
+	// Cleanup with only known ID (project name and worktrees not used in mock)
+	removed, err := client.CleanupOrphanedContainers(ctx, "test-project", []string{knownID}, nil)
 	if err != nil {
 		t.Fatalf("CleanupOrphanedContainers() error = %v", err)
 	}

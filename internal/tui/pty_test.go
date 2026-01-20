@@ -681,30 +681,63 @@ func TestSessionIDRegex(t *testing.T) {
 		wantMatch bool
 		wantID    string
 	}{
+		// ULID format tests (26 alphanumeric chars)
 		{
-			name:      "standard session format",
+			name:      "ULID - standard session format",
 			content:   "session: 01HZ8Y3QPXKJNM5VG2DTCW9RAE",
 			wantMatch: true,
 			wantID:    "01HZ8Y3QPXKJNM5VG2DTCW9RAE",
 		},
 		{
-			name:      "session_id format",
+			name:      "ULID - session_id format",
 			content:   "session_id: 01HZ8Y3QPXKJNM5VG2DTCW9RAE",
 			wantMatch: true,
 			wantID:    "01HZ8Y3QPXKJNM5VG2DTCW9RAE",
 		},
 		{
-			name:      "resuming session format",
+			name:      "ULID - resuming session format",
 			content:   "Resuming session: 01HZ8Y3QPXKJNM5VG2DTCW9RAE",
 			wantMatch: true,
 			wantID:    "01HZ8Y3QPXKJNM5VG2DTCW9RAE",
 		},
 		{
-			name:      "with surrounding text",
+			name:      "ULID - with surrounding text",
 			content:   "Starting... session: 01ABC2DEF3GHJ4KLM5NPQ6RST7 and more",
 			wantMatch: true,
 			wantID:    "01ABC2DEF3GHJ4KLM5NPQ6RST7",
 		},
+		// UUID format tests (36 chars with dashes)
+		{
+			name:      "UUID - standard session format",
+			content:   "session: 10b9a15d-6b70-4813-aaa8-8e438b796931",
+			wantMatch: true,
+			wantID:    "10b9a15d-6b70-4813-aaa8-8e438b796931",
+		},
+		{
+			name:      "UUID - session_id format",
+			content:   "session_id: 10b9a15d-6b70-4813-aaa8-8e438b796931",
+			wantMatch: true,
+			wantID:    "10b9a15d-6b70-4813-aaa8-8e438b796931",
+		},
+		{
+			name:      "UUID - resuming session format",
+			content:   "Resuming session: a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+			wantMatch: true,
+			wantID:    "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+		},
+		{
+			name:      "UUID - uppercase",
+			content:   "session: A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
+			wantMatch: true,
+			wantID:    "A1B2C3D4-E5F6-7890-ABCD-EF1234567890",
+		},
+		{
+			name:      "UUID - with surrounding text",
+			content:   "Starting... session: 12345678-1234-1234-1234-123456789012 and more",
+			wantMatch: true,
+			wantID:    "12345678-1234-1234-1234-123456789012",
+		},
+		// Negative tests
 		{
 			name:      "no session ID",
 			content:   "Normal output without session info",
@@ -712,16 +745,22 @@ func TestSessionIDRegex(t *testing.T) {
 			wantID:    "",
 		},
 		{
-			name:      "too short ID",
+			name:      "too short ULID",
 			content:   "session: 01HZ8Y3Q",
 			wantMatch: false,
 			wantID:    "",
 		},
 		{
-			name:      "too long ID - only captures 26 chars",
-			content:   "session: 01HZ8Y3QPXKJNM5VG2DTCW9RAETOOLONG",
-			wantMatch: true,
-			wantID:    "01HZ8Y3QPXKJNM5VG2DTCW9RAE",
+			name:      "malformed UUID - wrong segment lengths",
+			content:   "session: 10b9a15d-6b70-4813-aaa8-8e438b79693",
+			wantMatch: false,
+			wantID:    "",
+		},
+		{
+			name:      "UUID without prefix",
+			content:   "10b9a15d-6b70-4813-aaa8-8e438b796931",
+			wantMatch: false,
+			wantID:    "",
 		},
 	}
 

@@ -117,7 +117,8 @@ type StateLoadedMsg struct {
 
 // StateSavedMsg is sent when state has been saved
 type StateSavedMsg struct {
-	Error error
+	Error         error
+	RepairMessage string // Optional message about state repair (shown to user if not empty)
 }
 
 // spinnerTickMsg is sent to animate the spinner
@@ -175,7 +176,7 @@ func SaveStateAndQuitCmd(dir string, workstreams []*workstream.Workstream, focus
 	}
 }
 
-// PauseAllAndSaveCmd gracefully stops claude processes, pauses containers, then saves state
+// PauseAllAndSaveCmd gracefully stops claude processes, pauses containers, validates state, then saves
 func PauseAllAndSaveCmd(dir string, workstreams []*workstream.Workstream, focusedIndex int, layout int) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -194,6 +195,18 @@ func PauseAllAndSaveCmd(dir string, workstreams []*workstream.Workstream, focuse
 			// Wait for processes to handle the signal and finish writes
 			time.Sleep(500 * time.Millisecond)
 
+			// Validate and repair state before pausing containers
+			// This extracts session IDs from running containers
+			repairResult, repairErr := workstream.ValidateAndRepairState(ctx, workstreams)
+			var stateRepairMsg string
+			if repairErr != nil {
+				stateRepairMsg = fmt.Sprintf("State validation error: %v", repairErr)
+			} else if repairResult.WasRepaired() {
+				stateRepairMsg = fmt.Sprintf("State repaired: %s", repairResult.Summary())
+			} else if repairResult.IsCorrupted() {
+				stateRepairMsg = fmt.Sprintf("State issues: %s", repairResult.Summary())
+			}
+
 			// Now pause all containers
 			for _, ws := range workstreams {
 				if ws.ContainerID != "" {
@@ -201,9 +214,13 @@ func PauseAllAndSaveCmd(dir string, workstreams []*workstream.Workstream, focuse
 				}
 			}
 			dockerClient.Close()
+
+			// Save state (with any repairs applied)
+			saveErr := workstream.SaveState(dir, workstreams, focusedIndex, layout)
+			return StateSavedMsg{Error: saveErr, RepairMessage: stateRepairMsg}
 		}
 
-		// Then save state
+		// Fallback: no Docker client, just save state
 		saveErr := workstream.SaveState(dir, workstreams, focusedIndex, layout)
 		return StateSavedMsg{Error: saveErr}
 	}
@@ -1733,9 +1750,12 @@ Scroll Mode:
 
 	case StateSavedMsg:
 		// State was saved, now quit
+		// Print any repair messages to stderr so user sees them after TUI exits
+		if msg.RepairMessage != "" {
+			fmt.Fprintf(os.Stderr, "\n[ccells] %s\n", msg.RepairMessage)
+		}
 		if msg.Error != nil {
-			m.toast = fmt.Sprintf("Failed to save state: %v", msg.Error)
-			m.toastExpiry = time.Now().Add(toastDuration * 2)
+			fmt.Fprintf(os.Stderr, "[ccells] Failed to save state: %v\n", msg.Error)
 		}
 		return m, tea.Quit
 

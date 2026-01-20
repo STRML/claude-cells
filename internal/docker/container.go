@@ -399,10 +399,14 @@ func (c *Client) SignalProcess(ctx context.Context, containerID, processName, si
 	return c.cli.ContainerExecStart(ctx, execID.ID, container.ExecStartOptions{})
 }
 
-// CleanupOrphanedContainers removes ccells containers that aren't in the known list.
+// CleanupOrphanedContainers removes ccells containers for a specific project that aren't in the known list
+// and don't have corresponding worktrees.
 // This is used to clean up containers from crashed sessions.
-func (c *Client) CleanupOrphanedContainers(ctx context.Context, knownContainerIDs []string) (int, error) {
-	containers, err := c.ListDockerTUIContainers(ctx)
+// IMPORTANT: Only cleans up containers for the specified project to avoid affecting other projects.
+// IMPORTANT: Never removes containers that have a corresponding worktree (worktree = work in progress).
+func (c *Client) CleanupOrphanedContainers(ctx context.Context, projectName string, knownContainerIDs []string, existingWorktrees []string) (int, error) {
+	// Only list containers for THIS project - don't touch other projects' containers
+	containers, err := c.ListDockerTUIContainersForProject(ctx, projectName)
 	if err != nil {
 		return 0, err
 	}
@@ -413,11 +417,26 @@ func (c *Client) CleanupOrphanedContainers(ctx context.Context, knownContainerID
 		known[id] = true
 	}
 
+	// Build a set of existing worktree names for fast lookup
+	// Worktrees indicate work in progress - NEVER delete these containers
+	worktrees := make(map[string]bool)
+	for _, wt := range existingWorktrees {
+		worktrees[wt] = true
+	}
+
 	removed := 0
 	for _, cont := range containers {
 		// Skip if this container is known (managed by current or resumable session)
 		if known[cont.ID] {
 			continue
+		}
+
+		// Skip if this container has a corresponding worktree
+		// Container names are like "ccells-projectname-branchname"
+		// Extract the branch name and check if worktree exists
+		branchName := extractBranchFromContainerName(cont.Name, projectName)
+		if branchName != "" && worktrees[branchName] {
+			continue // Worktree exists - don't delete!
 		}
 
 		// Stop if running
@@ -432,4 +451,14 @@ func (c *Client) CleanupOrphanedContainers(ctx context.Context, knownContainerID
 	}
 
 	return removed, nil
+}
+
+// extractBranchFromContainerName extracts the branch name from a container name.
+// Container names follow the pattern: ccells-<projectname>-<branchname>
+func extractBranchFromContainerName(containerName, projectName string) string {
+	prefix := fmt.Sprintf("%s%s-", ContainerPrefix, projectName)
+	if strings.HasPrefix(containerName, prefix) {
+		return strings.TrimPrefix(containerName, prefix)
+	}
+	return ""
 }
