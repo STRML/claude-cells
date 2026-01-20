@@ -104,10 +104,10 @@ func TestCopyDir(t *testing.T) {
 
 // TestInitClaudeConfig_CreatesCredentialsInClaudeDir verifies that credentials.json
 // is written inside the .claude directory (not just as a separate file).
+// NOTE: This test is slow (~4s) because it copies the entire ~/.claude directory.
+// Run with: go test -tags=integration ./internal/docker/...
 func TestInitClaudeConfig_CreatesCredentialsInClaudeDir(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping test that writes to home directory")
-	}
+	t.Skip("slow test - copies ~/.claude directory; run with -tags=integration")
 
 	// Reset the global config so InitClaudeConfig runs fresh
 	globalConfigOnce = sync.Once{}
