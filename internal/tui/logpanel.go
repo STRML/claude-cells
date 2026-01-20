@@ -216,53 +216,64 @@ func (m *LogPanelModel) View() string {
 		visibleLines = append(visibleLines, strings.Repeat(" ", contentWidth))
 	}
 
-	content := strings.Join(visibleLines, "\n")
-
-	// Style the panel
+	// Style definitions
 	borderColor := lipgloss.Color("#444444")
 	headerStyle := lipgloss.NewStyle().
 		Bold(true).
 		Foreground(lipgloss.Color("#888888"))
+	borderStyle := lipgloss.NewStyle().
+		Foreground(borderColor)
 
-	panelStyle := lipgloss.NewStyle().
-		Border(lipgloss.RoundedBorder()).
-		BorderForeground(borderColor).
-		Width(m.width - 2).
-		Height(contentHeight)
+	// Build border lines manually to avoid ANSI splice corruption
+	// Using rounded border characters: ╭ ╮ ╰ ╯ ─ │
+	topLeft := "╭"
+	topRight := "╮"
+	bottomLeft := "╰"
+	bottomRight := "╯"
+	horizontal := "─"
+	vertical := "│"
 
-	// Render with custom header in border
-	panel := panelStyle.Render(content)
+	// Build top border with header centered
+	headerVisualWidth := lipgloss.Width(header)
+	topInnerWidth := m.width - 2 // excluding corners
+	leftPadding := (topInnerWidth - headerVisualWidth) / 2
+	rightPadding := topInnerWidth - headerVisualWidth - leftPadding
 
-	// Replace top border center with header
-	lines := strings.Split(panel, "\n")
-	if len(lines) > 0 {
-		topBorder := lines[0]
-		headerRendered := headerStyle.Render(header)
+	topBorder := borderStyle.Render(topLeft+strings.Repeat(horizontal, leftPadding)) +
+		headerStyle.Render(header) +
+		borderStyle.Render(strings.Repeat(horizontal, rightPadding)+topRight)
 
-		// Find position to insert header (centered)
-		headerLen := len(header)
-		borderLen := len(topBorder)
-		if borderLen > headerLen+4 {
-			insertPos := (borderLen - headerLen) / 2
-			// Build new top border with header
-			newTop := topBorder[:insertPos] + headerRendered + topBorder[insertPos+headerLen:]
-			lines[0] = newTop
-		}
-	}
-
-	// Add scroll indicator if needed
+	// Build bottom border with scroll indicator if needed
+	var bottomBorder string
 	if len(filtered) > contentHeight {
 		scrollInfo := fmt.Sprintf(" %d/%d ", len(filtered)-m.scrollOffset, len(filtered))
-		if len(lines) > 0 {
-			lastLine := lines[len(lines)-1]
-			lastLineLen := len(lastLine)
-			scrollInfoLen := len(scrollInfo)
-			if lastLineLen > scrollInfoLen+4 {
-				insertPos := lastLineLen - scrollInfoLen - 2
-				lines[len(lines)-1] = lastLine[:insertPos] + scrollInfo + lastLine[insertPos+scrollInfoLen:]
-			}
+		scrollVisualWidth := lipgloss.Width(scrollInfo)
+		bottomInnerWidth := m.width - 2
+		// Position scroll info near right side
+		rightMargin := 2
+		leftWidth := bottomInnerWidth - scrollVisualWidth - rightMargin
+		if leftWidth < 0 {
+			leftWidth = 0
 		}
+		bottomBorder = borderStyle.Render(bottomLeft+strings.Repeat(horizontal, leftWidth)) +
+			scrollInfo +
+			borderStyle.Render(strings.Repeat(horizontal, rightMargin)+bottomRight)
+	} else {
+		bottomBorder = borderStyle.Render(bottomLeft + strings.Repeat(horizontal, m.width-2) + bottomRight)
 	}
+
+	// Build content lines with side borders
+	var lines []string
+	lines = append(lines, topBorder)
+	for _, line := range visibleLines {
+		// Pad or truncate line to fit content width
+		lineWidth := lipgloss.Width(line)
+		if lineWidth < contentWidth {
+			line = line + strings.Repeat(" ", contentWidth-lineWidth)
+		}
+		lines = append(lines, borderStyle.Render(vertical)+line+borderStyle.Render(vertical))
+	}
+	lines = append(lines, bottomBorder)
 
 	return strings.Join(lines, "\n")
 }
