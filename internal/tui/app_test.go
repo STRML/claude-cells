@@ -2368,3 +2368,111 @@ func TestAppModel_RenumberPanes_LastSwapPositionReset(t *testing.T) {
 		t.Errorf("lastSwapPosition should be reset to 0 after destruction, got %d", app.lastSwapPosition)
 	}
 }
+
+// Paste Tests
+
+func TestAppModel_Paste_InInputMode(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Enter input mode
+	app.inputMode = true
+
+	// Create a mock PTY session
+	mockStdin := &mockWriteCloser{}
+	mockPTY := &PTYSession{
+		workstreamID: "test",
+		closed:       false,
+		done:         make(chan struct{}),
+		stdin:        mockStdin,
+	}
+	app.panes[0].SetPTY(mockPTY)
+
+	// Send paste message
+	pasteMsg := tea.PasteMsg{Content: "pasted text content"}
+	model, _ = app.Update(pasteMsg)
+	app = model.(AppModel)
+
+	// Verify paste content was written to PTY
+	if string(mockStdin.Bytes()) != "pasted text content" {
+		t.Errorf("Paste content not forwarded to PTY, got %q", string(mockStdin.Bytes()))
+	}
+}
+
+func TestAppModel_Paste_InNavMode_Ignored(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Stay in nav mode (inputMode = false by default)
+	if app.inputMode {
+		t.Fatal("App should start in nav mode")
+	}
+
+	// Create a mock PTY session
+	mockStdin := &mockWriteCloser{}
+	mockPTY := &PTYSession{
+		workstreamID: "test",
+		closed:       false,
+		done:         make(chan struct{}),
+		stdin:        mockStdin,
+	}
+	app.panes[0].SetPTY(mockPTY)
+
+	// Send paste message
+	pasteMsg := tea.PasteMsg{Content: "pasted text"}
+	model, _ = app.Update(pasteMsg)
+	app = model.(AppModel)
+
+	// Verify paste was NOT forwarded (nav mode)
+	if string(mockStdin.Bytes()) != "" {
+		t.Errorf("Paste should not be forwarded in nav mode, got %q", string(mockStdin.Bytes()))
+	}
+}
+
+func TestAppModel_Paste_NoPanes_Ignored(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// No panes created, just enable input mode
+	app.inputMode = true
+
+	// Send paste message - should not panic
+	pasteMsg := tea.PasteMsg{Content: "pasted text"}
+	model, _ := app.Update(pasteMsg)
+	_ = model.(AppModel)
+
+	// No crash = success
+}
+
+func TestAppModel_Paste_NoPTY_Ignored(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream but don't set up PTY
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Enter input mode
+	app.inputMode = true
+
+	// Don't set a PTY - pane has no PTY
+
+	// Send paste message - should not panic
+	pasteMsg := tea.PasteMsg{Content: "pasted text"}
+	model, _ = app.Update(pasteMsg)
+	_ = model.(AppModel)
+
+	// No crash = success
+}

@@ -357,6 +357,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 
+	case tea.PasteMsg:
+		// Handle paste from clipboard (cmd+v / ctrl+shift+v)
+		// Forward pasted content to the focused pane when in input mode
+		if m.inputMode && len(m.panes) > 0 && m.focusedPane < len(m.panes) {
+			if m.panes[m.focusedPane].HasPTY() {
+				_ = m.panes[m.focusedPane].SendToPTY(msg.Content)
+			}
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		// If dialog is active, handle dialog input
 		if m.dialog != nil {
@@ -2007,7 +2017,9 @@ func (m AppModel) View() tea.View {
 	// Create tea.View - basic keyboard enhancements (shift+enter) enabled by default in v2
 	v := tea.NewView(view)
 	v.AltScreen = true
-	v.MouseMode = tea.MouseModeCellMotion
+	// NOTE: Mouse mode disabled to allow native terminal text selection (copy with drag)
+	// Click-to-focus is disabled, use Ctrl+B+arrow or Ctrl+B+number to switch panes
+	// v.MouseMode = tea.MouseModeCellMotion
 	// Show cursor in input mode, hide in nav mode
 	if m.inputMode {
 		v.Cursor = &tea.Cursor{}
