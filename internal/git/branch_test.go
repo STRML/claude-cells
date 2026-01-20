@@ -411,6 +411,48 @@ func TestGit_WorktreeList(t *testing.T) {
 	}
 }
 
+func TestGit_WorktreeExistsForBranch(t *testing.T) {
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// Initially, no worktree for "test-branch"
+	path, exists := g.WorktreeExistsForBranch(ctx, "test-branch")
+	if exists {
+		t.Errorf("WorktreeExistsForBranch() found worktree at %s for non-existent branch", path)
+	}
+
+	// Create a worktree for test-branch
+	worktreePath := filepath.Join(os.TempDir(), "worktree-exists-test-"+filepath.Base(dir))
+	defer os.RemoveAll(worktreePath)
+
+	err := g.CreateWorktree(ctx, worktreePath, "test-branch")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+
+	// Now the worktree should exist
+	path, exists = g.WorktreeExistsForBranch(ctx, "test-branch")
+	if !exists {
+		t.Error("WorktreeExistsForBranch() did not find worktree for test-branch")
+	}
+	resolvedPath := resolvePath(worktreePath)
+	if path != resolvedPath {
+		t.Errorf("WorktreeExistsForBranch() path = %s, want %s", path, resolvedPath)
+	}
+
+	// A different branch should not exist
+	_, exists = g.WorktreeExistsForBranch(ctx, "other-branch")
+	if exists {
+		t.Error("WorktreeExistsForBranch() found worktree for non-existent other-branch")
+	}
+
+	// Clean up
+	_ = g.RemoveWorktree(ctx, worktreePath)
+}
+
 func TestGit_RemoveWorktree_SymlinkPath(t *testing.T) {
 	// This test verifies that worktree removal works when the path
 	// contains symlinks (e.g., /tmp -> /private/tmp on macOS)

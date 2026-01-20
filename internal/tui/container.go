@@ -481,20 +481,23 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 			}
 		}
 
-		// Clean up any existing worktree at this path (in case of previous crash)
-		_ = gitRepo.RemoveWorktree(ctx, worktreePath)
-		_ = os.RemoveAll(worktreePath)
-
-		if useExistingBranch {
-			// Create worktree from existing branch (don't create new branch)
-			if err := gitRepo.CreateWorktreeFromExisting(ctx, worktreePath, ws.BranchName); err != nil {
-				return ContainerErrorMsg{
+		// IMPORTANT: Check for existing worktree/branch BEFORE any cleanup.
+		// This prevents destroying worktree metadata for a running container.
+		if !useExistingBranch {
+			// Check if there's already an active worktree for this branch
+			existingPath, hasWorktree := gitRepo.WorktreeExistsForBranch(ctx, ws.BranchName)
+			if hasWorktree {
+				// A worktree exists for this branch - don't clean it up!
+				branchInfo, _ := gitRepo.GetBranchInfo(ctx, ws.BranchName)
+				return BranchConflictMsg{
 					WorkstreamID: ws.ID,
-					Error:        fmt.Errorf("failed to create worktree for branch %s: %w", ws.BranchName, err),
+					BranchName:   ws.BranchName,
+					RepoPath:     repoPath,
+					BranchInfo:   fmt.Sprintf("Active worktree at: %s\n%s", existingPath, branchInfo),
 				}
 			}
-		} else {
-			// Check if branch already exists
+
+			// Check if branch exists (even without a worktree)
 			exists, _ := gitRepo.BranchExists(ctx, ws.BranchName)
 			if exists {
 				// Get branch info (commits and diff stats)
@@ -508,7 +511,21 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 					BranchInfo:   branchInfo,
 				}
 			}
+		}
 
+		// Now safe to clean up any stale worktree at this path (no active worktree for this branch)
+		_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+		_ = os.RemoveAll(worktreePath)
+
+		if useExistingBranch {
+			// Create worktree from existing branch (don't create new branch)
+			if err := gitRepo.CreateWorktreeFromExisting(ctx, worktreePath, ws.BranchName); err != nil {
+				return ContainerErrorMsg{
+					WorkstreamID: ws.ID,
+					Error:        fmt.Errorf("failed to create worktree for branch %s: %w", ws.BranchName, err),
+				}
+			}
+		} else {
 			// Create worktree with new branch (git worktree add -b <branch> <path>)
 			if err := gitRepo.CreateWorktree(ctx, worktreePath, ws.BranchName); err != nil {
 				return ContainerErrorMsg{

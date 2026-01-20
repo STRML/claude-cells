@@ -223,6 +223,35 @@ func (g *Git) WorktreeList(ctx context.Context) ([]string, error) {
 	return paths, nil
 }
 
+// WorktreeExistsForBranch checks if a worktree exists that is using the specified branch.
+// Returns the worktree path if found, empty string otherwise.
+func (g *Git) WorktreeExistsForBranch(ctx context.Context, branchName string) (string, bool) {
+	out, err := g.run(ctx, "worktree", "list", "--porcelain")
+	if err != nil {
+		return "", false
+	}
+
+	// Parse porcelain output which looks like:
+	// worktree /path/to/worktree
+	// HEAD abc123
+	// branch refs/heads/branch-name
+	//
+	// worktree /path/to/another
+	// ...
+	var currentPath string
+	for _, line := range strings.Split(out, "\n") {
+		if strings.HasPrefix(line, "worktree ") {
+			currentPath = strings.TrimPrefix(line, "worktree ")
+		} else if strings.HasPrefix(line, "branch refs/heads/") {
+			branch := strings.TrimPrefix(line, "branch refs/heads/")
+			if branch == branchName {
+				return currentPath, true
+			}
+		}
+	}
+	return "", false
+}
+
 // GetBranchInfo returns a summary of commits and diff stats for a branch.
 func (g *Git) GetBranchInfo(ctx context.Context, branchName string) (string, error) {
 	baseBranch, err := g.GetBaseBranch(ctx)
