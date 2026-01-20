@@ -447,3 +447,29 @@ func (g *Git) GetBranchInfo(ctx context.Context, branchName string) (string, err
 
 	return info.String(), nil
 }
+
+// RemoteURL returns the URL for a named remote (e.g., "origin").
+func (g *Git) RemoteURL(ctx context.Context, remoteName string) (string, error) {
+	return g.run(ctx, "remote", "get-url", remoteName)
+}
+
+// RepoID returns a stable identifier for the repository (the first commit hash).
+// This ID is unique to the repository and doesn't change regardless of where it's cloned.
+func (g *Git) RepoID(ctx context.Context) (string, error) {
+	// Get the hash of the very first commit in the repository
+	out, err := g.run(ctx, "rev-list", "--max-parents=0", "HEAD")
+	if err != nil {
+		return "", fmt.Errorf("failed to get repo ID: %w", err)
+	}
+	// If there are multiple root commits (rare), take the first one
+	lines := strings.Split(out, "\n")
+	if len(lines) > 0 && lines[0] != "" {
+		// Return first 12 characters for brevity (still unique enough)
+		hash := lines[0]
+		if len(hash) > 12 {
+			hash = hash[:12]
+		}
+		return hash, nil
+	}
+	return "", fmt.Errorf("no commits found in repository")
+}

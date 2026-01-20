@@ -12,6 +12,7 @@ type PersistentManager struct {
 	stateDir   string
 	layout     int
 	focusedIdx int
+	repoInfo   *RepoInfo // Optional repo metadata for state file header
 
 	mu       sync.Mutex
 	dirty    bool
@@ -84,6 +85,14 @@ func (pm *PersistentManager) GetFocused() int {
 	return pm.focusedIdx
 }
 
+// SetRepoInfo sets the repo metadata to include in state files.
+// This is only written on first save; subsequent saves preserve existing RepoInfo.
+func (pm *PersistentManager) SetRepoInfo(info *RepoInfo) {
+	pm.mu.Lock()
+	pm.repoInfo = info
+	pm.mu.Unlock()
+}
+
 // UpdateWorkstream marks state as dirty when a workstream is modified.
 // Call this after modifying workstream fields (ContainerID, ClaudeSessionID, etc.)
 func (pm *PersistentManager) UpdateWorkstream(id string) {
@@ -128,13 +137,14 @@ func (pm *PersistentManager) flushIfDirty() {
 	pm.dirty = false
 	layout := pm.layout
 	focused := pm.focusedIdx
+	repoInfo := pm.repoInfo
 	pm.mu.Unlock()
 
 	// Get workstreams snapshot (Manager.List() is thread-safe)
 	workstreams := pm.List()
 
-	// Save to disk
-	_ = SaveState(pm.stateDir, workstreams, focused, layout)
+	// Save to disk (with RepoInfo if this is first save)
+	_ = SaveStateWithRepoInfo(pm.stateDir, workstreams, focused, layout, repoInfo)
 }
 
 // flush forces an immediate save regardless of dirty flag.
@@ -143,10 +153,11 @@ func (pm *PersistentManager) flush() {
 	pm.dirty = false
 	layout := pm.layout
 	focused := pm.focusedIdx
+	repoInfo := pm.repoInfo
 	pm.mu.Unlock()
 
 	workstreams := pm.List()
-	_ = SaveState(pm.stateDir, workstreams, focused, layout)
+	_ = SaveStateWithRepoInfo(pm.stateDir, workstreams, focused, layout, repoInfo)
 }
 
 // Flush forces an immediate save (public API for shutdown).

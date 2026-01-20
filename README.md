@@ -226,7 +226,7 @@ Pairing mode includes automatic health monitoring:
 
 When you quit ccells (`q` or `Ctrl+c`):
 1. All containers are **paused** (not stopped)
-2. State is saved to `.ccells-state.json` (auto-saved continuously during operation)
+2. State is saved to `~/.claude-cells/state/<repo-id>/` (auto-saved continuously during operation)
 3. Claude sessions are persisted to survive container rebuilds
 4. PTY sessions are closed gracefully
 
@@ -278,7 +278,7 @@ Claude Cells stores data in:
 | Location | Purpose |
 |----------|---------|
 | `~/.claude-cells/` | Global config, Claude credentials, and skills (copied into containers) |
-| `.ccells-state.json` | Session state for resume (in project directory, auto-saved) |
+| `~/.claude-cells/state/<repo-id>/` | Session state for resume (keyed by first commit hash, auto-saved) |
 | `/tmp/ccells/worktrees/` | Git worktrees for container isolation |
 
 ## Troubleshooting

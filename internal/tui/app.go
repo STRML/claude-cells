@@ -60,15 +60,17 @@ type AppModel struct {
 	width          int
 	height         int
 	quitting       bool
-	inputMode      bool      // True when input is being routed to focused pane
-	lastEscapeTime time.Time // For double-escape detection
-	pendingEscape  bool      // True when first Esc pressed, waiting to see if double-tap
-	toast          string    // Temporary notification message
-	toastExpiry    time.Time // When toast should disappear
-	workingDir     string    // Current working directory for state file
-	resuming       bool      // True if resuming from saved state
-	tmuxPrefix     bool      // True after ctrl-b is pressed (tmux-style prefix)
-	tmuxPrefixTime time.Time // When prefix was pressed
+	inputMode      bool                 // True when input is being routed to focused pane
+	lastEscapeTime time.Time            // For double-escape detection
+	pendingEscape  bool                 // True when first Esc pressed, waiting to see if double-tap
+	toast          string               // Temporary notification message
+	toastExpiry    time.Time            // When toast should disappear
+	workingDir     string               // Current working directory (git repo path)
+	stateDir       string               // State file directory (~/.claude-cells/state/<repo-id>/)
+	repoInfo       *workstream.RepoInfo // Repo metadata for state file
+	resuming       bool                 // True if resuming from saved state
+	tmuxPrefix     bool                 // True after ctrl-b is pressed (tmux-style prefix)
+	tmuxPrefixTime time.Time            // When prefix was pressed
 	// Pairing mode orchestrator (single source of truth)
 	pairingOrchestrator *sync.Pairing
 	// Pane swap state
@@ -89,11 +91,48 @@ func NewAppModel(ctx context.Context) AppModel {
 	gitOps := git.New(cwd)
 	mutagenOps := sync.NewMutagen()
 
+	// Compute state directory based on repo ID
+	stateDir := cwd // Fallback to cwd if we can't get repo ID
+	var repoInfo *workstream.RepoInfo
+	repoID, err := gitOps.RepoID(ctx)
+	if err == nil && repoID != "" {
+		// Get new state directory
+		newStateDir, err := workstream.GetStateDir(repoID)
+		if err == nil {
+			stateDir = newStateDir
+
+			// Migrate old state file if it exists
+			_, _ = workstream.MigrateStateFile(cwd, stateDir)
+
+			// Get remote URL for RepoInfo
+			remoteURL := ""
+			if out, err := gitOps.RemoteURL(ctx, "origin"); err == nil {
+				remoteURL = out
+			}
+
+			// Build RepoInfo for new state files
+			repoInfo = &workstream.RepoInfo{
+				Name:      filepath.Base(cwd),
+				Path:      cwd,
+				Remote:    remoteURL,
+				RepoID:    repoID,
+				CreatedAt: time.Now(),
+			}
+		}
+	}
+
+	manager := workstream.NewPersistentManager(stateDir)
+	if repoInfo != nil {
+		manager.SetRepoInfo(repoInfo)
+	}
+
 	return AppModel{
 		ctx:                 ctx,
-		manager:             workstream.NewPersistentManager(cwd),
+		manager:             manager,
 		statusBar:           NewStatusBarModel(),
 		workingDir:          cwd,
+		stateDir:            stateDir,
+		repoInfo:            repoInfo,
 		nextPaneIndex:       1, // Start pane numbering at 1
 		logPanel:            logPanel,
 		pairingOrchestrator: sync.NewPairing(gitOps, mutagenOps),
@@ -251,7 +290,7 @@ func PauseAllAndSaveCmd(dir string, workstreams []*workstream.Workstream, focuse
 func (m AppModel) Init() tea.Cmd {
 	// Try to load saved state on startup
 	// Cursor visibility is now controlled via View().Cursor
-	return LoadStateCmd(m.workingDir)
+	return LoadStateCmd(m.stateDir)
 }
 
 // Update handles messages
@@ -988,12 +1027,12 @@ Scroll Mode:
 				}
 				m.quitting = true
 				m.manager.Close() // Final flush before quit
-				return m, PauseAllAndSaveCmd(m.workingDir, workstreams, m.focusedPane, int(m.layout))
+				return m, PauseAllAndSaveCmd(m.stateDir, workstreams, m.focusedPane, int(m.layout))
 			}
 			m.quitting = true
 			m.manager.Close() // Final flush before quit
 			// Save empty state (no panes) so next startup is clean
-			return m, SaveStateAndQuitCmd(m.workingDir, nil, 0, int(m.layout))
+			return m, SaveStateAndQuitCmd(m.stateDir, nil, 0, int(m.layout))
 		}
 		return m, nil
 
