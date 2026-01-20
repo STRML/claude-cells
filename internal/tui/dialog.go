@@ -959,7 +959,7 @@ func (d DialogModel) View() string {
 			lineInfo = fmt.Sprintf("Lines: %d", len(lines))
 		}
 		content.WriteString(KeyHint("↑↓", " scroll") + "  " + KeyHint("PgUp/Dn", " page") + "  " + KeyHint("g/G", " top/bottom") + "  " + KeyHint("Enter/Esc", " close") + "  " + KeyHintStyle.Render(lineInfo))
-		return DialogBox.Width(d.width).Render(content.String())
+		return DialogBox.Width(d.width).Height(d.height).Render(content.String())
 	}
 
 	// Progress dialog shows operation status
