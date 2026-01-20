@@ -22,7 +22,12 @@ func (g *Git) run(ctx context.Context, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = g.repoPath
 	out, err := cmd.CombinedOutput()
-	return strings.TrimSpace(string(out)), err
+	output := strings.TrimSpace(string(out))
+	if err != nil && output != "" {
+		// Include git's output in the error message for better diagnostics
+		return output, fmt.Errorf("%s: %w", output, err)
+	}
+	return output, err
 }
 
 // CurrentBranch returns the current branch name.
