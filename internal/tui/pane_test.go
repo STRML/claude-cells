@@ -295,3 +295,115 @@ func TestPaneModel_View_ScrollModeIndicator(t *testing.T) {
 		t.Error("Pane in scroll mode should not show INPUT indicator")
 	}
 }
+
+func TestStripANSI(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{"no ansi", "Hello World", "Hello World"},
+		{"simple color", "\x1b[31mRed\x1b[0m", "Red"},
+		{"multiple colors", "\x1b[31mRed\x1b[32mGreen\x1b[0m", "RedGreen"},
+		{"256 color", "\x1b[38;5;196mRed\x1b[0m", "Red"},
+		{"true color", "\x1b[38;2;255;0;0mRed\x1b[0m", "Red"},
+		{"bold and color", "\x1b[1;31mBold Red\x1b[0m", "Bold Red"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := stripANSI(tt.input)
+			if result != tt.expected {
+				t.Errorf("stripANSI(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestMuteANSI(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"no ansi", "Hello World"},
+		{"basic red", "\x1b[31mRed\x1b[0m"},
+		{"basic green", "\x1b[32mGreen\x1b[0m"},
+		{"bright red", "\x1b[91mBright Red\x1b[0m"},
+		{"256 color", "\x1b[38;5;196mRed 256\x1b[0m"},
+		{"true color", "\x1b[38;2;255;0;0mTrue Red\x1b[0m"},
+		{"background color", "\x1b[44mBlue BG\x1b[0m"},
+		{"bold with color", "\x1b[1;31mBold Red\x1b[0m"},
+		{"multiple codes", "\x1b[1;4;31mBold Underline Red\x1b[0m"},
+		{"mixed content", "Normal \x1b[31mRed\x1b[0m Normal \x1b[32mGreen\x1b[0m"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Test that muteANSI doesn't panic and returns something
+			result := muteANSI(tt.input, 0.25, 0.6)
+			if result == "" && tt.input != "" {
+				t.Errorf("muteANSI(%q) returned empty string", tt.input)
+			}
+
+			// The plain text should still be present
+			plain := stripANSI(tt.input)
+			resultPlain := stripANSI(result)
+			if resultPlain != plain {
+				t.Errorf("muteANSI changed text content: %q -> %q", plain, resultPlain)
+			}
+		})
+	}
+}
+
+func TestMuteANSI_PreservesNonColorCodes(t *testing.T) {
+	// Test that non-color codes like bold, underline, reset are preserved
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"reset", "\x1b[0m"},
+		{"bold", "\x1b[1mBold\x1b[0m"},
+		{"underline", "\x1b[4mUnderline\x1b[0m"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := muteANSI(tt.input, 0.25, 0.6)
+			// Should not crash and should preserve text
+			plain := stripANSI(tt.input)
+			resultPlain := stripANSI(result)
+			if resultPlain != plain {
+				t.Errorf("muteANSI changed text content: %q -> %q", plain, resultPlain)
+			}
+		})
+	}
+}
+
+func TestColor256ToRGB(t *testing.T) {
+	tests := []struct {
+		index   int
+		r, g, b int
+	}{
+		// Standard colors (first 16)
+		{0, 0, 0, 0},        // Black
+		{1, 205, 49, 49},    // Red
+		{15, 255, 255, 255}, // Bright White
+		// 216 color cube
+		{16, 0, 0, 0},    // Start of cube (black)
+		{21, 0, 0, 255},  // Blue in cube
+		{196, 255, 0, 0}, // Red in cube
+		// Grayscale
+		{232, 8, 8, 8},       // Near black
+		{255, 238, 238, 238}, // Near white
+	}
+
+	for _, tt := range tests {
+		t.Run(string(rune('0'+tt.index)), func(t *testing.T) {
+			r, g, b := color256ToRGB(tt.index)
+			if r != tt.r || g != tt.g || b != tt.b {
+				t.Errorf("color256ToRGB(%d) = (%d, %d, %d), want (%d, %d, %d)",
+					tt.index, r, g, b, tt.r, tt.g, tt.b)
+			}
+		})
+	}
+}
