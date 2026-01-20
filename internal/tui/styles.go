@@ -1,6 +1,54 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"fmt"
+	"strconv"
+
+	"github.com/charmbracelet/lipgloss"
+)
+
+// hexToRGB converts a hex color string to RGB values
+func hexToRGB(hex string) (r, g, b int) {
+	if len(hex) == 0 {
+		return 0, 0, 0
+	}
+	if hex[0] == '#' {
+		hex = hex[1:]
+	}
+	if len(hex) != 6 {
+		return 0, 0, 0
+	}
+	rVal, _ := strconv.ParseInt(hex[0:2], 16, 64)
+	gVal, _ := strconv.ParseInt(hex[2:4], 16, 64)
+	bVal, _ := strconv.ParseInt(hex[4:6], 16, 64)
+	return int(rVal), int(gVal), int(bVal)
+}
+
+// rgbToHex converts RGB values to a hex color string
+func rgbToHex(r, g, b int) string {
+	return fmt.Sprintf("#%02X%02X%02X", r, g, b)
+}
+
+// easeOutCubic provides smooth deceleration for animations
+func easeOutCubic(t float64) float64 {
+	return 1 - (1-t)*(1-t)*(1-t)
+}
+
+// LerpColor interpolates between two hex colors based on progress (0.0 to 1.0)
+// Uses easeOutCubic for smooth animation feel
+func LerpColor(from, to string, progress float64) lipgloss.Color {
+	// Apply easing
+	t := easeOutCubic(progress)
+
+	r1, g1, b1 := hexToRGB(from)
+	r2, g2, b2 := hexToRGB(to)
+
+	r := int(float64(r1) + t*(float64(r2)-float64(r1)))
+	g := int(float64(g1) + t*(float64(g2)-float64(g1)))
+	b := int(float64(b1) + t*(float64(b2)-float64(b1)))
+
+	return lipgloss.Color(rgbToHex(r, g, b))
+}
 
 // Colors
 var (

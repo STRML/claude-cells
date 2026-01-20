@@ -48,6 +48,11 @@ type PaneModel struct {
 	initSteps       int            // Total initialization steps
 	scrollback      []string       // Scrollback buffer (lines that scrolled off top)
 	scrollMode      bool           // True when viewing scrollback (not following live output)
+
+	// Fade animation state
+	fading        bool      // True when fade animation is in progress
+	fadeStartTime time.Time // When fade started
+	fadeProgress  float64   // Progress from 0.0 to 1.0
 }
 
 // Width returns the pane width
@@ -85,8 +90,12 @@ func (p PaneModel) Init() tea.Cmd {
 	return nil
 }
 
+// fadeDuration is how long the fade animation takes
+const fadeDuration = 400 * time.Millisecond
+
 // SetInitializing sets the initializing state with a status message
 func (p *PaneModel) SetInitializing(initializing bool) {
+	wasInitializing := p.initializing
 	p.initializing = initializing
 	if initializing {
 		p.initStartTime = time.Now()
@@ -95,7 +104,35 @@ func (p *PaneModel) SetInitializing(initializing bool) {
 			p.initStatus = "Starting..."
 			p.initStep = 1
 		}
+		// Reset fade state when starting initialization
+		p.fading = false
+		p.fadeProgress = 0
+	} else if wasInitializing {
+		// Transition from initializing to ready - start fade animation
+		p.fading = true
+		p.fadeStartTime = time.Now()
+		p.fadeProgress = 0
 	}
+}
+
+// IsFading returns true if the pane is in fade animation
+func (p *PaneModel) IsFading() bool {
+	return p.fading
+}
+
+// TickFade advances the fade animation, returns true if still fading
+func (p *PaneModel) TickFade() bool {
+	if !p.fading {
+		return false
+	}
+	elapsed := time.Since(p.fadeStartTime)
+	p.fadeProgress = float64(elapsed) / float64(fadeDuration)
+	if p.fadeProgress >= 1.0 {
+		p.fadeProgress = 1.0
+		p.fading = false
+		return false
+	}
+	return true
 }
 
 // InitTimedOut returns true if initialization has taken longer than initTimeout
@@ -272,30 +309,73 @@ func (p PaneModel) Update(msg tea.Msg) (PaneModel, tea.Cmd) {
 
 // View renders the pane
 func (p PaneModel) View() string {
+	// Color constants for animation
+	const (
+		colorPurple    = "#7C3AED" // Initializing state
+		colorCyan      = "#0891B2" // Input mode
+		colorGreen     = "#059669" // Nav mode
+		colorDarkGrey  = "#444444" // Initializing content / unfocused border
+		colorMidGrey   = "#555555" // Unfocused content
+		colorLightGrey = "#888888" // Nav mode content
+	)
+
+	// Determine target colors based on state
+	var targetHeaderBg string
+	if p.focused {
+		if p.inputMode {
+			targetHeaderBg = colorCyan
+		} else {
+			targetHeaderBg = colorGreen
+		}
+	} else {
+		targetHeaderBg = colorPurple // Unfocused stays purple
+	}
+
+	// Calculate current header background color (with fade animation)
+	var headerBg lipgloss.Color
+	if p.initializing {
+		headerBg = lipgloss.Color(colorPurple)
+	} else if p.fading {
+		// Interpolate from purple to target color
+		headerBg = LerpColor(colorPurple, targetHeaderBg, p.fadeProgress)
+	} else {
+		headerBg = lipgloss.Color(targetHeaderBg)
+	}
+
 	// Header with index, status, and branch name
 	indexStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("#7C3AED")).
+		Background(headerBg).
 		Foreground(lipgloss.Color("#FFFFFF")).
 		Bold(true).
 		Padding(0, 1)
 
 	// Mode indicator for focused pane
 	var modeIndicator string
-	if p.focused {
+	if p.focused && !p.initializing {
 		if p.inputMode {
-			// Input mode - bright cyan background
-			indexStyle = indexStyle.Background(lipgloss.Color("#0891B2"))
+			// Input mode - bright cyan background (also fades in)
+			var modeBg lipgloss.Color
+			if p.fading {
+				modeBg = LerpColor(colorPurple, colorCyan, p.fadeProgress)
+			} else {
+				modeBg = lipgloss.Color(colorCyan)
+			}
 			modeIndicator = lipgloss.NewStyle().
-				Background(lipgloss.Color("#0891B2")).
+				Background(modeBg).
 				Foreground(lipgloss.Color("#FFFFFF")).
 				Bold(true).
 				Padding(0, 1).
 				Render("INPUT")
 		} else {
-			// Nav mode - green background
-			indexStyle = indexStyle.Background(lipgloss.Color("#059669"))
+			// Nav mode - green background (also fades in)
+			var modeBg lipgloss.Color
+			if p.fading {
+				modeBg = LerpColor(colorPurple, colorGreen, p.fadeProgress)
+			} else {
+				modeBg = lipgloss.Color(colorGreen)
+			}
 			modeIndicator = lipgloss.NewStyle().
-				Background(lipgloss.Color("#059669")).
+				Background(modeBg).
 				Foreground(lipgloss.Color("#FFFFFF")).
 				Bold(true).
 				Padding(0, 1).
@@ -352,14 +432,14 @@ func (p PaneModel) View() string {
 	if p.initializing {
 		// Grey out the output
 		outputView = stripANSI(outputView)
-		greyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#444444"))
+		greyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorDarkGrey))
 		outputView = greyStyle.Render(outputView)
 
 		// Create spinner overlay
 		spinnerChars := []string{"⠋", "⠙", "⠹", "⠸"}
 		spinner := spinnerChars[p.spinnerFrame%len(spinnerChars)]
 		spinnerStyle := lipgloss.NewStyle().
-			Foreground(lipgloss.Color("#0891B2")).
+			Foreground(lipgloss.Color(colorCyan)).
 			Bold(true)
 		messageStyle := lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#AAAAAA"))
@@ -393,15 +473,32 @@ func (p PaneModel) View() string {
 			}
 			outputView = strings.Join(lines, "\n")
 		}
+	} else if p.fading {
+		// During fade animation - interpolate content brightness
+		// Determine target grey level based on focus/mode
+		var targetGrey string
+		if p.focused && p.inputMode {
+			// Fading to full color - use a brighter grey that fades toward white
+			targetGrey = "#CCCCCC"
+		} else if p.focused && !p.inputMode {
+			targetGrey = colorLightGrey
+		} else {
+			targetGrey = colorMidGrey
+		}
+		// Strip ANSI during fade for consistent color application
+		outputView = stripANSI(outputView)
+		fadeColor := LerpColor(colorDarkGrey, targetGrey, p.fadeProgress)
+		greyStyle := lipgloss.NewStyle().Foreground(fadeColor)
+		outputView = greyStyle.Render(outputView)
 	} else if p.focused && !p.inputMode {
 		// Focused but nav mode: lighter grey
 		outputView = stripANSI(outputView)
-		greyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+		greyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorLightGrey))
 		outputView = greyStyle.Render(outputView)
 	} else if !p.focused {
 		// Unfocused panes: dark grey
 		outputView = stripANSI(outputView)
-		greyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#555555"))
+		greyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMidGrey))
 		outputView = greyStyle.Render(outputView)
 	}
 
@@ -417,23 +514,32 @@ func (p PaneModel) View() string {
 	// Apply border based on focus and input mode
 	var style lipgloss.Style
 	if p.focused {
-		var borderColor string
+		var borderColor lipgloss.Color
+		var targetBorderColor string
 		if p.inputMode {
 			// Input mode - bright cyan border (more noticeable)
-			borderColor = "#0891B2"
+			targetBorderColor = colorCyan
 		} else {
 			// Nav mode - dim border to reinforce "inactive" feel
-			borderColor = "#666666"
+			targetBorderColor = "#666666"
+		}
+		// Fade border color during animation
+		if p.fading {
+			borderColor = LerpColor(colorDarkGrey, targetBorderColor, p.fadeProgress)
+		} else if p.initializing {
+			borderColor = lipgloss.Color(colorDarkGrey)
+		} else {
+			borderColor = lipgloss.Color(targetBorderColor)
 		}
 		style = lipgloss.NewStyle().
 			Border(lipgloss.ThickBorder()).
-			BorderForeground(lipgloss.Color(borderColor)).
+			BorderForeground(borderColor).
 			Width(p.width - 2).
 			Height(p.height - 2)
 	} else {
 		style = lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder()).
-			BorderForeground(lipgloss.Color("#444444")).
+			BorderForeground(lipgloss.Color(colorDarkGrey)).
 			Width(p.width - 2).
 			Height(p.height - 2)
 	}
