@@ -50,9 +50,25 @@ Or with Homebrew (macOS):
 // BuildWithDevcontainerCLI builds a container image using the devcontainer CLI.
 // This properly processes devcontainer.json including features.
 // Returns the image ID/name on success.
+// Uses a per-image lock to prevent concurrent builds of the same image.
 func BuildWithDevcontainerCLI(ctx context.Context, projectPath string, output io.Writer) (string, error) {
 	// Generate image name based on project
 	imageName := generateProjectImageName(projectPath)
+
+	// Acquire build lock for this image
+	unlock := acquireBuildLock(imageName)
+	defer unlock()
+
+	// Check if image was built while we waited for the lock
+	client, err := NewClient()
+	if err == nil {
+		exists, _ := client.ImageExists(ctx, imageName)
+		client.Close()
+		if exists {
+			fmt.Fprintln(output, "Image already built by another workstream")
+			return imageName, nil
+		}
+	}
 
 	// Build command: devcontainer build --workspace-folder <path> --image-name <name>
 	args := []string{
