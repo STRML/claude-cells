@@ -237,9 +237,9 @@ func GetBaseImage(projectPath string) (string, error) {
 	return cfg.Image, nil
 }
 
-// computeConfigHash computes a hash of the devcontainer.json content.
-// This is used to detect when the config has changed and the image needs rebuilding.
-// Returns empty string if no devcontainer.json exists.
+// computeConfigHash computes a hash of the devcontainer.json content and any
+// referenced Dockerfile. This is used to detect when the config has changed
+// and the image needs rebuilding. Returns empty string if no devcontainer.json exists.
 func computeConfigHash(projectPath string) string {
 	candidates := []string{
 		filepath.Join(projectPath, ".devcontainer", "devcontainer.json"),
@@ -282,13 +282,57 @@ func computeConfigHash(projectPath string) string {
 		return hex.EncodeToString(hash[:])[:12]
 	}
 
-	hash := sha256.Sum256(normalized)
+	// Start with devcontainer.json content
+	hashInput := normalized
+
+	// If there's a Dockerfile reference, include its content in the hash
+	if build, ok := cfg["build"].(map[string]interface{}); ok {
+		if dockerfile, ok := build["dockerfile"].(string); ok && dockerfile != "" {
+			dockerfileContent := readDockerfileForHash(projectPath, configPath, build)
+			if dockerfileContent != nil {
+				hashInput = append(hashInput, dockerfileContent...)
+			}
+		}
+	}
+
+	hash := sha256.Sum256(hashInput)
 	return hex.EncodeToString(hash[:])[:12]
 }
 
+// readDockerfileForHash reads the Dockerfile content for inclusion in the config hash.
+// Returns nil if the Dockerfile cannot be read.
+func readDockerfileForHash(projectPath, configPath string, build map[string]interface{}) []byte {
+	dockerfile, ok := build["dockerfile"].(string)
+	if !ok || dockerfile == "" {
+		return nil
+	}
+
+	// Determine the context directory
+	configDir := filepath.Dir(configPath)
+	contextDir := configDir
+	if context, ok := build["context"].(string); ok && context != "" {
+		contextDir = filepath.Join(configDir, context)
+	}
+
+	// Try to find the Dockerfile
+	candidates := []string{
+		filepath.Join(contextDir, dockerfile),
+		filepath.Join(configDir, dockerfile),
+	}
+
+	for _, path := range candidates {
+		content, err := os.ReadFile(path)
+		if err == nil {
+			return content
+		}
+	}
+
+	return nil
+}
+
 // generateProjectImageName creates a unique image name for a project's custom build.
-// The image tag includes a hash of the devcontainer.json content so that config
-// changes automatically trigger a rebuild.
+// The image tag includes a hash of the devcontainer.json content and any referenced
+// Dockerfile, so that config or Dockerfile changes automatically trigger a rebuild.
 func generateProjectImageName(projectPath string) string {
 	projectName := filepath.Base(projectPath)
 	if projectName == "" || projectName == "." {

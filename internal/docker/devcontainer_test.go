@@ -730,3 +730,137 @@ func TestConfigChangeTriggersNewImageName(t *testing.T) {
 		t.Errorf("image tags should be different: %s vs %s", parts1[1], parts2[1])
 	}
 }
+
+func TestDockerfileChangeTriggersNewImageName(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "dockerfile-change-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	devcontainerDir := filepath.Join(tmpDir, ".devcontainer")
+	if err := os.MkdirAll(devcontainerDir, 0755); err != nil {
+		t.Fatalf("failed to create .devcontainer: %v", err)
+	}
+
+	// Config with build section referencing Dockerfile
+	config := `{"build": {"dockerfile": "Dockerfile"}}`
+	if err := os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(config), 0644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	// Initial Dockerfile
+	dockerfile1 := "FROM golang:1.23\nRUN go version"
+	if err := os.WriteFile(filepath.Join(devcontainerDir, "Dockerfile"), []byte(dockerfile1), 0644); err != nil {
+		t.Fatalf("failed to write Dockerfile: %v", err)
+	}
+
+	imageName1 := generateProjectImageName(tmpDir)
+	hash1 := computeConfigHash(tmpDir)
+
+	// Update only the Dockerfile (devcontainer.json stays the same)
+	dockerfile2 := "FROM golang:1.25.5\nRUN go version"
+	if err := os.WriteFile(filepath.Join(devcontainerDir, "Dockerfile"), []byte(dockerfile2), 0644); err != nil {
+		t.Fatalf("failed to write Dockerfile: %v", err)
+	}
+
+	imageName2 := generateProjectImageName(tmpDir)
+	hash2 := computeConfigHash(tmpDir)
+
+	// Hashes should be different
+	if hash1 == hash2 {
+		t.Errorf("Dockerfile change should produce different hash\nbefore: %s\nafter: %s", hash1, hash2)
+	}
+
+	// Image names should be different
+	if imageName1 == imageName2 {
+		t.Errorf("Dockerfile change should produce different image name\nbefore: %s\nafter: %s", imageName1, imageName2)
+	}
+
+	// Both should have same prefix, different tags
+	parts1 := strings.Split(imageName1, ":")
+	parts2 := strings.Split(imageName2, ":")
+	if parts1[0] != parts2[0] {
+		t.Errorf("image name prefix should be same: %s vs %s", parts1[0], parts2[0])
+	}
+}
+
+func TestDockerfileHashWithContext(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "dockerfile-context-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	devcontainerDir := filepath.Join(tmpDir, ".devcontainer")
+	if err := os.MkdirAll(devcontainerDir, 0755); err != nil {
+		t.Fatalf("failed to create .devcontainer: %v", err)
+	}
+
+	// Config with build section using context ".." (project root)
+	config := `{"build": {"dockerfile": "Dockerfile", "context": ".."}}`
+	if err := os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(config), 0644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	// Dockerfile in project root (context is "..")
+	dockerfile1 := "FROM node:20\nRUN npm --version"
+	if err := os.WriteFile(filepath.Join(tmpDir, "Dockerfile"), []byte(dockerfile1), 0644); err != nil {
+		t.Fatalf("failed to write Dockerfile: %v", err)
+	}
+
+	hash1 := computeConfigHash(tmpDir)
+
+	// Update Dockerfile in project root
+	dockerfile2 := "FROM node:22\nRUN npm --version"
+	if err := os.WriteFile(filepath.Join(tmpDir, "Dockerfile"), []byte(dockerfile2), 0644); err != nil {
+		t.Fatalf("failed to write Dockerfile: %v", err)
+	}
+
+	hash2 := computeConfigHash(tmpDir)
+
+	// Hashes should be different
+	if hash1 == hash2 {
+		t.Errorf("Dockerfile change with context should produce different hash\nbefore: %s\nafter: %s", hash1, hash2)
+	}
+}
+
+func TestImageOnlyConfigIgnoresDockerfile(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "image-only-test-*")
+	if err != nil {
+		t.Fatalf("failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	devcontainerDir := filepath.Join(tmpDir, ".devcontainer")
+	if err := os.MkdirAll(devcontainerDir, 0755); err != nil {
+		t.Fatalf("failed to create .devcontainer: %v", err)
+	}
+
+	// Config with image only (no build section)
+	config := `{"image": "golang:1.25"}`
+	if err := os.WriteFile(filepath.Join(devcontainerDir, "devcontainer.json"), []byte(config), 0644); err != nil {
+		t.Fatalf("failed to write config: %v", err)
+	}
+
+	// Random Dockerfile that shouldn't affect hash
+	dockerfile := "FROM alpine:latest"
+	if err := os.WriteFile(filepath.Join(devcontainerDir, "Dockerfile"), []byte(dockerfile), 0644); err != nil {
+		t.Fatalf("failed to write Dockerfile: %v", err)
+	}
+
+	hash1 := computeConfigHash(tmpDir)
+
+	// Update the Dockerfile
+	dockerfile2 := "FROM ubuntu:22.04"
+	if err := os.WriteFile(filepath.Join(devcontainerDir, "Dockerfile"), []byte(dockerfile2), 0644); err != nil {
+		t.Fatalf("failed to write Dockerfile: %v", err)
+	}
+
+	hash2 := computeConfigHash(tmpDir)
+
+	// Hashes should be the same (Dockerfile not referenced in config)
+	if hash1 != hash2 {
+		t.Errorf("Dockerfile change without build section should not affect hash\nbefore: %s\nafter: %s", hash1, hash2)
+	}
+}
