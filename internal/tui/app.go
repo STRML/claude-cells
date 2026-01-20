@@ -537,6 +537,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if len(m.panes) > 0 {
 						m.panes[m.focusedPane].SetFocused(true)
 					}
+					m.renumberPanes()
 					m.updateLayout()
 					return m, StopContainerCmd(ws)
 				}
@@ -837,6 +838,7 @@ Scroll Mode:
 					if len(m.panes) > 0 {
 						m.panes[m.focusedPane].SetFocused(true)
 					}
+					m.renumberPanes()
 					m.updateLayout()
 					// Stop container asynchronously
 					return m, StopContainerCmd(ws)
@@ -2091,6 +2093,17 @@ func (m *AppModel) Manager() *workstream.Manager {
 // InputMode returns true if the app is in input mode
 func (m *AppModel) InputMode() bool {
 	return m.inputMode
+}
+
+// renumberPanes renumbers all panes sequentially starting from 1
+// This should be called after destroying a pane to keep indices contiguous
+func (m *AppModel) renumberPanes() {
+	for i := range m.panes {
+		m.panes[i].SetIndex(i + 1) // 1-based indexing
+	}
+	m.nextPaneIndex = len(m.panes) + 1
+	// Reset swap position to avoid invalid indices after destruction
+	m.lastSwapPosition = 0
 }
 
 // getContainerIDs returns the container IDs for all current panes
