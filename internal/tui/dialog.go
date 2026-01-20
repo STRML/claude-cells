@@ -4,10 +4,10 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textarea"
-	"github.com/charmbracelet/bubbles/textinput"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/bubbles/v2/textarea"
+	"charm.land/bubbles/v2/textinput"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 )
 
 // DialogType represents the type of dialog
@@ -64,16 +64,24 @@ type DialogModel struct {
 func NewDestroyDialog(branchName, workstreamID string) DialogModel {
 	ti := textinput.New()
 	ti.Placeholder = "type 'destroy' to confirm"
-	ti.Width = 40
+	ti.SetWidth(40)
 	ti.Focus()
 	ti.CharLimit = 20
 
 	// Style the textinput
 	ti.Prompt = "› "
-	ti.PromptStyle = DialogInputPrompt
-	ti.TextStyle = DialogInputText
-	ti.PlaceholderStyle = DialogInputPlaceholder
-	ti.Cursor.Style = DialogInputCursor
+	ti.SetStyles(textinput.Styles{
+		Focused: textinput.StyleState{
+			Prompt:      DialogInputPrompt,
+			Text:        DialogInputText,
+			Placeholder: DialogInputPlaceholder,
+		},
+		Blurred: textinput.StyleState{
+			Prompt:      DialogInputPrompt,
+			Text:        DialogInputText,
+			Placeholder: DialogInputPlaceholder,
+		},
+	})
 
 	body := `This will:
   • Stop and remove the container
@@ -105,13 +113,18 @@ func NewWorkstreamDialog() DialogModel {
 	ta.ShowLineNumbers = false
 
 	// Style the textarea - remove default border, minimal chrome
-	ta.Prompt = ""                             // No per-line prompt
-	ta.FocusedStyle.Base = lipgloss.NewStyle() // No border
-	ta.FocusedStyle.Text = DialogInputText
-	ta.FocusedStyle.Placeholder = DialogInputPlaceholder
-	ta.FocusedStyle.CursorLine = DialogInputText
-	ta.FocusedStyle.EndOfBuffer = lipgloss.NewStyle().Foreground(lipgloss.Color("#333333"))
-	ta.BlurredStyle = ta.FocusedStyle
+	ta.Prompt = "" // No per-line prompt
+	styleState := textarea.StyleState{
+		Base:        lipgloss.NewStyle(), // No border
+		Text:        DialogInputText,
+		Placeholder: DialogInputPlaceholder,
+		CursorLine:  DialogInputText,
+		EndOfBuffer: lipgloss.NewStyle().Foreground(lipgloss.Color("#333333")),
+	}
+	ta.SetStyles(textarea.Styles{
+		Focused: styleState,
+		Blurred: styleState,
+	})
 
 	return DialogModel{
 		Type:        DialogNewWorkstream,
@@ -126,17 +139,25 @@ func NewWorkstreamDialog() DialogModel {
 func NewPRDialog(branchName, title, body string) DialogModel {
 	ti := textinput.New()
 	ti.Placeholder = "PR title..."
-	ti.Width = 50
+	ti.SetWidth(50)
 	ti.SetValue(title)
 	ti.Focus()
 	ti.CharLimit = 100
 
 	// Style the textinput
 	ti.Prompt = "› "
-	ti.PromptStyle = DialogInputPrompt
-	ti.TextStyle = DialogInputText
-	ti.PlaceholderStyle = DialogInputPlaceholder
-	ti.Cursor.Style = DialogInputCursor
+	ti.SetStyles(textinput.Styles{
+		Focused: textinput.StyleState{
+			Prompt:      DialogInputPrompt,
+			Text:        DialogInputText,
+			Placeholder: DialogInputPlaceholder,
+		},
+		Blurred: textinput.StyleState{
+			Prompt:      DialogInputPrompt,
+			Text:        DialogInputText,
+			Placeholder: DialogInputPlaceholder,
+		},
+	})
 
 	return DialogModel{
 		Type:  DialogPRPreview,
@@ -365,16 +386,24 @@ func NewSettingsDialog(containerCount int, projectName string) DialogModel {
 func NewPruneProjectConfirmDialog(projectName string) DialogModel {
 	ti := textinput.New()
 	ti.Placeholder = "type 'destroy' to confirm"
-	ti.Width = 40
+	ti.SetWidth(40)
 	ti.Focus()
 	ti.CharLimit = 20
 
 	// Style the textinput
 	ti.Prompt = "› "
-	ti.PromptStyle = DialogInputPrompt
-	ti.TextStyle = DialogInputText
-	ti.PlaceholderStyle = DialogInputPlaceholder
-	ti.Cursor.Style = DialogInputCursor
+	ti.SetStyles(textinput.Styles{
+		Focused: textinput.StyleState{
+			Prompt:      DialogInputPrompt,
+			Text:        DialogInputText,
+			Placeholder: DialogInputPlaceholder,
+		},
+		Blurred: textinput.StyleState{
+			Prompt:      DialogInputPrompt,
+			Text:        DialogInputText,
+			Placeholder: DialogInputPlaceholder,
+		},
+	})
 
 	body := fmt.Sprintf(`This will:
   • Stop and remove all ccells containers for %q
@@ -396,16 +425,24 @@ Type "destroy" to confirm:`, projectName)
 func NewPruneAllConfirmDialog() DialogModel {
 	ti := textinput.New()
 	ti.Placeholder = "type 'destroy' to confirm"
-	ti.Width = 40
+	ti.SetWidth(40)
 	ti.Focus()
 	ti.CharLimit = 20
 
 	// Style the textinput
 	ti.Prompt = "› "
-	ti.PromptStyle = DialogInputPrompt
-	ti.TextStyle = DialogInputText
-	ti.PlaceholderStyle = DialogInputPlaceholder
-	ti.Cursor.Style = DialogInputCursor
+	ti.SetStyles(textinput.Styles{
+		Focused: textinput.StyleState{
+			Prompt:      DialogInputPrompt,
+			Text:        DialogInputText,
+			Placeholder: DialogInputPlaceholder,
+		},
+		Blurred: textinput.StyleState{
+			Prompt:      DialogInputPrompt,
+			Text:        DialogInputText,
+			Placeholder: DialogInputPlaceholder,
+		},
+	})
 
 	body := `⚠️  WARNING: This affects ALL projects!
 

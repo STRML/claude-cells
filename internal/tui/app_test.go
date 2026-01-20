@@ -7,9 +7,48 @@ import (
 	"testing"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/STRML/claude-cells/internal/workstream"
-	tea "github.com/charmbracelet/bubbletea"
 )
+
+// Test helpers for creating key messages in bubbletea v2
+
+// viewString extracts string content from tea.View for testing
+// In v2, View() returns tea.View which contains a Layer
+func viewString(v interface{}) string {
+	switch val := v.(type) {
+	case tea.View:
+		return fmt.Sprintf("%v", val.Content)
+	case string:
+		return val
+	default:
+		return fmt.Sprintf("%v", v)
+	}
+}
+
+// keyPress creates a KeyPressMsg for a single character
+func keyPress(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: r, Text: string(r)}
+}
+
+// keyPressStr creates a KeyPressMsg for a string (first char)
+func keyPressStr(s string) tea.KeyPressMsg {
+	if len(s) == 0 {
+		return tea.KeyPressMsg{}
+	}
+	r := []rune(s)[0]
+	return tea.KeyPressMsg{Code: r, Text: string(r)}
+}
+
+// specialKey creates a KeyPressMsg for special keys (Enter, Esc, etc.)
+func specialKey(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: code}
+}
+
+// ctrlKey creates a KeyPressMsg for Ctrl+key combinations
+func ctrlKey(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: r, Mod: tea.ModCtrl}
+}
 
 func TestNewAppModel(t *testing.T) {
 	app := NewAppModel(context.Background())
@@ -40,11 +79,11 @@ func TestAppModel_Update_QuitDialog(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			app := NewAppModel(context.Background())
-			var msg tea.KeyMsg
+			var msg tea.KeyPressMsg
 			if tt.key == "ctrl+c" {
-				msg = tea.KeyMsg{Type: tea.KeyCtrlC}
+				msg = ctrlKey('c')
 			} else {
-				msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tt.key)}
+				msg = keyPressStr(tt.key)
 			}
 			model, _ := app.Update(msg)
 
@@ -86,7 +125,7 @@ func TestAppModel_Update_NewWorkstreamDialog(t *testing.T) {
 	app := NewAppModel(context.Background())
 
 	// Press 'n' to open dialog
-	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	model, _ := app.Update(keyPress('n'))
 	appModel := model.(AppModel)
 
 	if appModel.dialog == nil {
@@ -110,7 +149,7 @@ func TestAppModel_Update_DestroyDialog(t *testing.T) {
 	app = model.(AppModel)
 
 	// Press 'd' to open destroy dialog
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	model, _ = app.Update(keyPress('d'))
 	app = model.(AppModel)
 
 	if app.dialog == nil {
@@ -125,7 +164,7 @@ func TestAppModel_Update_DestroyWithNoPanes(t *testing.T) {
 	app := NewAppModel(context.Background())
 
 	// Press 'd' with no panes - should not crash
-	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	model, _ := app.Update(keyPress('d'))
 	app = model.(AppModel)
 
 	if app.dialog != nil {
@@ -163,7 +202,7 @@ func TestAppModel_Update_DialogCancel(t *testing.T) {
 	app := NewAppModel(context.Background())
 
 	// Open dialog
-	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	model, _ := app.Update(keyPress('n'))
 	app = model.(AppModel)
 
 	if app.dialog == nil {
@@ -192,7 +231,7 @@ func TestAppModel_Update_DialogBlocksInput(t *testing.T) {
 	app = model.(AppModel)
 
 	// Open dialog
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	model, _ = app.Update(keyPress('n'))
 	app = model.(AppModel)
 
 	if app.dialog == nil {
@@ -200,7 +239,7 @@ func TestAppModel_Update_DialogBlocksInput(t *testing.T) {
 	}
 
 	// Try pressing 'd' while dialog is open - should not open destroy dialog
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	model, _ = app.Update(keyPress('d'))
 	app = model.(AppModel)
 
 	// Dialog should still be the new workstream dialog
@@ -254,7 +293,7 @@ func TestAppModel_Update_TabCycle(t *testing.T) {
 	}
 
 	// Tab should cycle focus back to 0
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyTab})
+	model, _ = app.Update(specialKey(tea.KeyTab))
 	app = model.(AppModel)
 
 	if app.focusedPane != 0 {
@@ -268,7 +307,7 @@ func TestAppModel_Update_TabCycle(t *testing.T) {
 	}
 
 	// Tab again should go to 1
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyTab})
+	model, _ = app.Update(specialKey(tea.KeyTab))
 	app = model.(AppModel)
 
 	if app.focusedPane != 1 {
@@ -280,7 +319,7 @@ func TestAppModel_Update_TabWithNoPanes(t *testing.T) {
 	app := NewAppModel(context.Background())
 
 	// Tab with no panes should not panic
-	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyTab})
+	model, _ := app.Update(specialKey(tea.KeyTab))
 	app = model.(AppModel)
 
 	if app.focusedPane != 0 {
@@ -313,7 +352,7 @@ func TestAppModel_Update_NumberKeyFocus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.key, func(t *testing.T) {
-			model, _ := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tt.key)})
+			model, _ := app.Update(keyPressStr(tt.key))
 			app = model.(AppModel)
 
 			if app.focusedPane != tt.expectedPosition {
@@ -333,7 +372,7 @@ func TestAppModel_Update_NumberKeyOutOfRange(t *testing.T) {
 	app = model.(AppModel)
 
 	// Press '5' which is out of range
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'5'}})
+	model, _ = app.Update(keyPress('5'))
 	app = model.(AppModel)
 
 	// Focus should not change
@@ -363,10 +402,10 @@ func TestAppModel_View_Empty(t *testing.T) {
 
 	view := app.View()
 
-	if !strings.Contains(view, "No workstreams") {
+	if !strings.Contains(viewString(view), "No workstreams") {
 		t.Error("Empty view should show 'No workstreams' message")
 	}
-	if !strings.Contains(view, "[n]") {
+	if !strings.Contains(viewString(view), "[n]") {
 		t.Error("Empty view should show key hint to create")
 	}
 }
@@ -377,7 +416,7 @@ func TestAppModel_View_Quitting(t *testing.T) {
 
 	view := app.View()
 
-	if !strings.Contains(view, "Goodbye") {
+	if !strings.Contains(viewString(view), "Goodbye") {
 		t.Error("Quitting view should show goodbye message")
 	}
 }
@@ -392,7 +431,7 @@ func TestAppModel_View_WithPanes(t *testing.T) {
 
 	view := app.View()
 
-	if strings.Contains(view, "No workstreams") {
+	if strings.Contains(viewString(view), "No workstreams") {
 		t.Error("View with panes should not show 'No workstreams'")
 	}
 }
@@ -403,12 +442,12 @@ func TestAppModel_View_WithDialog(t *testing.T) {
 	app.height = 40
 
 	// Open dialog
-	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	model, _ := app.Update(keyPress('n'))
 	app = model.(AppModel)
 
 	view := app.View()
 
-	if !strings.Contains(view, "New Workstream") {
+	if !strings.Contains(viewString(view), "New Workstream") {
 		t.Error("View should contain dialog title")
 	}
 }
@@ -525,7 +564,7 @@ func TestAppModel_InputMode(t *testing.T) {
 	}
 
 	// Press 'i' to enter input mode
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("i")}
+	msg := keyPress('i')
 	model, _ = app.Update(msg)
 	app = model.(AppModel)
 
@@ -537,7 +576,7 @@ func TestAppModel_InputMode(t *testing.T) {
 	}
 
 	// Press Escape twice to exit input mode (single escape sends to pane, double exits)
-	msg = tea.KeyMsg{Type: tea.KeyEscape}
+	msg = specialKey(tea.KeyEscape)
 	model, _ = app.Update(msg)
 	app = model.(AppModel)
 
@@ -546,7 +585,7 @@ func TestAppModel_InputMode(t *testing.T) {
 	}
 
 	// Second escape within timeout should exit input mode
-	msg = tea.KeyMsg{Type: tea.KeyEscape}
+	msg = specialKey(tea.KeyEscape)
 	model, _ = app.Update(msg)
 	app = model.(AppModel)
 
@@ -565,7 +604,7 @@ func TestAppModel_InputMode_Enter(t *testing.T) {
 	app = model.(AppModel)
 
 	// Press 'enter' to enter input mode
-	msg := tea.KeyMsg{Type: tea.KeyEnter}
+	msg := specialKey(tea.KeyEnter)
 	model, _ = app.Update(msg)
 	app = model.(AppModel)
 
@@ -587,7 +626,7 @@ func TestAppModel_InputMode_RoutesKeysToPane(t *testing.T) {
 	app.inputMode = true
 
 	// Press 'n' - should NOT create a new workstream dialog
-	msg := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("n")}
+	msg := keyPress('n')
 	model, _ = app.Update(msg)
 	app = model.(AppModel)
 
@@ -600,21 +639,18 @@ func TestAppModel_NavMode_Keybinds(t *testing.T) {
 	tests := []struct {
 		name     string
 		key      string
-		keyType  tea.KeyType
 		checkFn  func(app AppModel) bool
 		errorMsg string
 	}{
 		{
 			name:     "n opens new workstream dialog",
 			key:      "n",
-			keyType:  tea.KeyRunes,
 			checkFn:  func(app AppModel) bool { return app.dialog != nil },
 			errorMsg: "n should open dialog",
 		},
 		{
 			name:     "l does nothing without panes",
 			key:      "l",
-			keyType:  tea.KeyRunes,
 			checkFn:  func(app AppModel) bool { return app.dialog == nil },
 			errorMsg: "l without panes should do nothing",
 		},
@@ -626,13 +662,7 @@ func TestAppModel_NavMode_Keybinds(t *testing.T) {
 			app.width = 100
 			app.height = 40
 
-			var msg tea.KeyMsg
-			if tt.keyType == tea.KeyRunes {
-				msg = tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune(tt.key)}
-			} else {
-				msg = tea.KeyMsg{Type: tt.keyType}
-			}
-
+			msg := keyPressStr(tt.key)
 			model, _ := app.Update(msg)
 			result := model.(AppModel)
 
@@ -660,7 +690,7 @@ func TestAppModel_TmuxPrefix_NavMode(t *testing.T) {
 	}
 
 	// Press ctrl+b (tmux prefix)
-	msg := tea.KeyMsg{Type: tea.KeyCtrlB}
+	msg := ctrlKey('b')
 	model, _ = app.Update(msg)
 	app = model.(AppModel)
 
@@ -669,7 +699,7 @@ func TestAppModel_TmuxPrefix_NavMode(t *testing.T) {
 	}
 
 	// Press left arrow
-	msg = tea.KeyMsg{Type: tea.KeyLeft}
+	msg = specialKey(tea.KeyLeft)
 	model, _ = app.Update(msg)
 	app = model.(AppModel)
 
@@ -701,7 +731,7 @@ func TestAppModel_TmuxPrefix_InputMode(t *testing.T) {
 	app.focusedPane = 1
 
 	// Press ctrl+b (tmux prefix) - should work in input mode
-	msg := tea.KeyMsg{Type: tea.KeyCtrlB}
+	msg := ctrlKey('b')
 	model, _ = app.Update(msg)
 	app = model.(AppModel)
 
@@ -710,7 +740,7 @@ func TestAppModel_TmuxPrefix_InputMode(t *testing.T) {
 	}
 
 	// Press right arrow
-	msg = tea.KeyMsg{Type: tea.KeyRight}
+	msg = specialKey(tea.KeyRight)
 	model, _ = app.Update(msg)
 	app = model.(AppModel)
 
@@ -739,7 +769,7 @@ func TestAppModel_TmuxPrefix_Timeout(t *testing.T) {
 
 	// Press left arrow - in nav mode, arrow keys ALWAYS switch panes
 	// (the tmux prefix is only required in input mode)
-	msg := tea.KeyMsg{Type: tea.KeyLeft}
+	msg := specialKey(tea.KeyLeft)
 	model, _ = app.Update(msg)
 	app = model.(AppModel)
 
@@ -768,7 +798,7 @@ func TestPaneModel_InputModeVisual(t *testing.T) {
 	pane.SetInputMode(false)
 	view := pane.View()
 
-	if !strings.Contains(view, "NAV") {
+	if !strings.Contains(viewString(view), "NAV") {
 		t.Error("Focused pane in nav mode should show NAV indicator")
 	}
 
@@ -776,7 +806,7 @@ func TestPaneModel_InputModeVisual(t *testing.T) {
 	pane.SetInputMode(true)
 	view = pane.View()
 
-	if !strings.Contains(view, "INPUT") {
+	if !strings.Contains(viewString(view), "INPUT") {
 		t.Error("Focused pane in input mode should show INPUT indicator")
 	}
 
@@ -785,7 +815,7 @@ func TestPaneModel_InputModeVisual(t *testing.T) {
 	pane.SetInputMode(false)
 	view = pane.View()
 
-	if strings.Contains(view, "NAV") || strings.Contains(view, "INPUT") {
+	if strings.Contains(viewString(view), "NAV") || strings.Contains(viewString(view), "INPUT") {
 		t.Error("Unfocused pane should not show mode indicator")
 	}
 }
@@ -810,9 +840,9 @@ func TestAppModel_TmuxPrefix_UpDown(t *testing.T) {
 	}
 
 	// Press ctrl+b then up
-	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	model, _ := app.Update(ctrlKey('b'))
 	app = model.(AppModel)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyUp})
+	model, _ = app.Update(specialKey(tea.KeyUp))
 	app = model.(AppModel)
 
 	// Should move to pane 1 (spatially above in LayoutRows)
@@ -821,9 +851,9 @@ func TestAppModel_TmuxPrefix_UpDown(t *testing.T) {
 	}
 
 	// Press ctrl+b then down
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	model, _ = app.Update(ctrlKey('b'))
 	app = model.(AppModel)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model, _ = app.Update(specialKey(tea.KeyDown))
 	app = model.(AppModel)
 
 	// Should move to pane 2
@@ -852,9 +882,9 @@ func TestAppModel_TmuxPrefix_Wrapping(t *testing.T) {
 	app.panes[1].SetFocused(true)
 
 	// Press ctrl+b then right - should wrap to pane 0 (LayoutColumns wraps)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	model, _ = app.Update(ctrlKey('b'))
 	app = model.(AppModel)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRight})
+	model, _ = app.Update(specialKey(tea.KeyRight))
 	app = model.(AppModel)
 
 	if app.focusedPane != 0 {
@@ -862,9 +892,9 @@ func TestAppModel_TmuxPrefix_Wrapping(t *testing.T) {
 	}
 
 	// Press ctrl+b then left - should wrap to pane 1
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	model, _ = app.Update(ctrlKey('b'))
 	app = model.(AppModel)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	model, _ = app.Update(specialKey(tea.KeyLeft))
 	app = model.(AppModel)
 
 	if app.focusedPane != 1 {
@@ -882,9 +912,9 @@ func TestAppModel_TmuxPrefix_SinglePane(t *testing.T) {
 	app = model.(AppModel)
 
 	// Press ctrl+b then left
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	model, _ = app.Update(ctrlKey('b'))
 	app = model.(AppModel)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	model, _ = app.Update(specialKey(tea.KeyLeft))
 	app = model.(AppModel)
 
 	// Focus should stay on pane 0 (only pane)
@@ -897,9 +927,9 @@ func TestAppModel_TmuxPrefix_NoPanes(t *testing.T) {
 	app := NewAppModel(context.Background())
 
 	// Press ctrl+b then left with no panes - should not panic
-	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	model, _ := app.Update(ctrlKey('b'))
 	app = model.(AppModel)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	model, _ = app.Update(specialKey(tea.KeyLeft))
 	app = model.(AppModel)
 
 	if app.focusedPane != 0 {
@@ -919,7 +949,7 @@ func TestAppModel_TmuxPrefix_ResetOnArrowKey(t *testing.T) {
 	app = model.(AppModel)
 
 	// Press ctrl+b
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	model, _ = app.Update(ctrlKey('b'))
 	app = model.(AppModel)
 
 	if !app.tmuxPrefix {
@@ -927,7 +957,7 @@ func TestAppModel_TmuxPrefix_ResetOnArrowKey(t *testing.T) {
 	}
 
 	// Press arrow key - should reset prefix after use
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	model, _ = app.Update(specialKey(tea.KeyLeft))
 	app = model.(AppModel)
 
 	if app.tmuxPrefix {
@@ -949,11 +979,11 @@ func TestAppModel_TmuxPrefix_OtherKeyStillWorks(t *testing.T) {
 	originalFocus := app.focusedPane
 
 	// Press ctrl+b
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	model, _ = app.Update(ctrlKey('b'))
 	app = model.(AppModel)
 
 	// Press 'n' (not an arrow key) - should still open dialog
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	model, _ = app.Update(keyPress('n'))
 	app = model.(AppModel)
 
 	// Focus should not change
@@ -979,7 +1009,7 @@ func TestAppModel_InputMode_CtrlC(t *testing.T) {
 	app.inputMode = true
 
 	// Press ctrl+c - should be sent to pane, not quit app
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	model, _ = app.Update(ctrlKey('c'))
 	app = model.(AppModel)
 
 	// App should not be quitting (ctrl+c was sent to pane)
@@ -1001,7 +1031,7 @@ func TestAppModel_InputMode_EscapeToNavMode(t *testing.T) {
 	app.inputMode = true
 
 	// Single escape should NOT exit (sends to pane)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	model, _ = app.Update(specialKey(tea.KeyEscape))
 	app = model.(AppModel)
 
 	if !app.inputMode {
@@ -1009,7 +1039,7 @@ func TestAppModel_InputMode_EscapeToNavMode(t *testing.T) {
 	}
 
 	// Double escape should exit to nav mode
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	model, _ = app.Update(specialKey(tea.KeyEscape))
 	app = model.(AppModel)
 
 	if app.inputMode {
@@ -1030,7 +1060,7 @@ func TestAppModel_InputMode_DeferredEscape(t *testing.T) {
 	app.inputMode = true
 
 	// Single escape should set pendingEscape but NOT immediately send to pane
-	model, cmd := app.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	model, cmd := app.Update(specialKey(tea.KeyEscape))
 	app = model.(AppModel)
 
 	if !app.inputMode {
@@ -1044,7 +1074,7 @@ func TestAppModel_InputMode_DeferredEscape(t *testing.T) {
 	}
 
 	// Double escape should exit WITHOUT triggering the deferred escape
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	model, _ = app.Update(specialKey(tea.KeyEscape))
 	app = model.(AppModel)
 
 	if app.inputMode {
@@ -1098,11 +1128,11 @@ func TestAppModel_InputMode_EscapeTimeoutIgnoredAfterDoubleTap(t *testing.T) {
 	app.inputMode = true
 
 	// Press Esc twice to exit (double tap)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	model, _ = app.Update(specialKey(tea.KeyEscape))
 	app = model.(AppModel)
 	escTime := app.lastEscapeTime
 
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	model, _ = app.Update(specialKey(tea.KeyEscape))
 	app = model.(AppModel)
 
 	if app.inputMode {
@@ -1135,7 +1165,7 @@ func TestAppModel_InputMode_ArrowWithoutTmuxPrefix(t *testing.T) {
 	originalFocus := app.focusedPane
 
 	// Press left arrow without tmux prefix - should not change focus
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	model, _ = app.Update(specialKey(tea.KeyLeft))
 	app = model.(AppModel)
 
 	// Focus should not change (arrow goes to pane in input mode)
@@ -1158,7 +1188,7 @@ func TestAppModel_NavMode_ArrowWithoutTmuxPrefix(t *testing.T) {
 	originalFocus := app.focusedPane
 
 	// Press left arrow without tmux prefix in nav mode
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	model, _ = app.Update(specialKey(tea.KeyLeft))
 	app = model.(AppModel)
 
 	// In nav mode, arrow keys SHOULD change focus (no prefix needed)
@@ -1256,7 +1286,7 @@ func TestAppModel_ToastHint_UnhandledKey(t *testing.T) {
 	app = model.(AppModel)
 
 	// Press an unhandled key in nav mode
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'x'}})
+	model, _ = app.Update(keyPress('x'))
 	app = model.(AppModel)
 
 	// Should show toast hint
@@ -1277,7 +1307,7 @@ func TestAppModel_View_ToastOverlay(t *testing.T) {
 
 	view := app.View()
 
-	if !strings.Contains(view, "Test toast message") {
+	if !strings.Contains(viewString(view), "Test toast message") {
 		t.Error("View should contain active toast message")
 	}
 }
@@ -1291,7 +1321,7 @@ func TestAppModel_View_ExpiredToast(t *testing.T) {
 
 	view := app.View()
 
-	if strings.Contains(view, "Expired toast") {
+	if strings.Contains(viewString(view), "Expired toast") {
 		t.Error("View should not contain expired toast message")
 	}
 }
@@ -1308,14 +1338,14 @@ func TestAppModel_TitleBar_InputModeIndicator(t *testing.T) {
 	// Nav mode
 	app.inputMode = false
 	view := app.View()
-	if !strings.Contains(view, "NAV") {
+	if !strings.Contains(viewString(view), "NAV") {
 		t.Error("Title bar should show NAV in nav mode")
 	}
 
 	// Input mode
 	app.inputMode = true
 	view = app.View()
-	if !strings.Contains(view, "INPUT") {
+	if !strings.Contains(viewString(view), "INPUT") {
 		t.Error("Title bar should show INPUT in input mode")
 	}
 }
@@ -1333,11 +1363,11 @@ func TestAppModel_InputMode_WithDialog(t *testing.T) {
 	app.inputMode = true
 
 	// Open dialog (press escape twice to exit input mode, then 'n')
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	model, _ = app.Update(specialKey(tea.KeyEscape))
 	app = model.(AppModel)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyEscape}) // Second escape to exit
+	model, _ = app.Update(specialKey(tea.KeyEscape)) // Second escape to exit
 	app = model.(AppModel)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	model, _ = app.Update(keyPress('n'))
 	app = model.(AppModel)
 
 	// Dialog should be open
@@ -1369,7 +1399,7 @@ func TestAppModel_ShiftTab(t *testing.T) {
 		app.panes[i].SetFocused(i == 0)
 	}
 
-	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyTab})
+	model, _ := app.Update(specialKey(tea.KeyTab))
 	app = model.(AppModel)
 
 	if app.focusedPane != 1 {
@@ -1397,7 +1427,7 @@ func TestPaneModel_Index(t *testing.T) {
 	pane.SetFocused(true)
 	view := pane.View()
 
-	if !strings.Contains(view, "3") {
+	if !strings.Contains(viewString(view), "3") {
 		t.Error("View should contain pane index")
 	}
 }
@@ -1468,7 +1498,7 @@ func TestAppModel_NumberKeyFocusByPermanentIndex(t *testing.T) {
 	}
 
 	// Press '1' - should focus the pane with index 1 (slice position 0)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	model, _ = app.Update(keyPress('1'))
 	app = model.(AppModel)
 
 	if app.focusedPane != 0 {
@@ -1476,7 +1506,7 @@ func TestAppModel_NumberKeyFocusByPermanentIndex(t *testing.T) {
 	}
 
 	// Press '2' - should focus the pane with index 2 (slice position 1)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	model, _ = app.Update(keyPress('2'))
 	app = model.(AppModel)
 
 	if app.focusedPane != 1 {
@@ -1484,7 +1514,7 @@ func TestAppModel_NumberKeyFocusByPermanentIndex(t *testing.T) {
 	}
 
 	// Press '3' - should do nothing (no pane with index 3 exists after renumbering)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	model, _ = app.Update(keyPress('3'))
 	app = model.(AppModel)
 
 	if app.focusedPane != 1 {
@@ -1533,7 +1563,7 @@ func TestAppModel_SpaceSwapPreservesIndices(t *testing.T) {
 	}
 
 	// Press Space to swap focused pane (index 2) to main position
-	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	model, _ := app.Update(keyPress(' '))
 	app = model.(AppModel)
 
 	// After swap, pane indices should be preserved but positions swapped
@@ -1581,11 +1611,10 @@ func TestAppModel_MouseClick_FocusesPane(t *testing.T) {
 	centerX := bounds[0].X + bounds[0].Width/2
 	centerY := bounds[0].Y + bounds[0].Height/2
 
-	mouseMsg := tea.MouseMsg{
+	mouseMsg := tea.MouseClickMsg{
 		X:      centerX,
 		Y:      centerY,
-		Button: tea.MouseButtonLeft,
-		Action: tea.MouseActionPress,
+		Button: tea.MouseLeft,
 	}
 
 	model, _ = app.Update(mouseMsg)
@@ -1624,11 +1653,10 @@ func TestAppModel_MouseClick_EntersInputMode(t *testing.T) {
 	bounds := CalculatePaneBounds(app.layout, len(app.panes), app.width, availableHeight, titleBarHeight)
 
 	// Click in the pane
-	mouseMsg := tea.MouseMsg{
+	mouseMsg := tea.MouseClickMsg{
 		X:      bounds[0].X + 10,
 		Y:      bounds[0].Y + 5,
-		Button: tea.MouseButtonLeft,
-		Action: tea.MouseActionPress,
+		Button: tea.MouseLeft,
 	}
 
 	model, cmd := app.Update(mouseMsg)
@@ -1639,10 +1667,9 @@ func TestAppModel_MouseClick_EntersInputMode(t *testing.T) {
 		t.Error("Clicking on pane should enter input mode")
 	}
 
-	// Should return ShowCursor command
-	if cmd == nil {
-		t.Error("Should return ShowCursor command")
-	}
+	// Note: In bubble-tea v2, cursor visibility is controlled via View().Cursor
+	// rather than returning a ShowCursor command. The command being nil is fine.
+	_ = cmd
 }
 
 func TestAppModel_MouseClick_OutsidePanes(t *testing.T) {
@@ -1657,11 +1684,10 @@ func TestAppModel_MouseClick_OutsidePanes(t *testing.T) {
 	originalFocus := app.focusedPane
 
 	// Click on the title bar (Y=0)
-	mouseMsg := tea.MouseMsg{
+	mouseMsg := tea.MouseClickMsg{
 		X:      50,
 		Y:      0,
-		Button: tea.MouseButtonLeft,
-		Action: tea.MouseActionPress,
+		Button: tea.MouseLeft,
 	}
 
 	model, _ = app.Update(mouseMsg)
@@ -1685,11 +1711,10 @@ func TestAppModel_MouseClick_OnStatusBar(t *testing.T) {
 	originalFocus := app.focusedPane
 
 	// Click on the status bar (bottom line)
-	mouseMsg := tea.MouseMsg{
+	mouseMsg := tea.MouseClickMsg{
 		X:      50,
 		Y:      app.height - 1,
-		Button: tea.MouseButtonLeft,
-		Action: tea.MouseActionPress,
+		Button: tea.MouseLeft,
 	}
 
 	model, _ = app.Update(mouseMsg)
@@ -1713,7 +1738,7 @@ func TestAppModel_MouseClick_WithDialog(t *testing.T) {
 	app = model.(AppModel)
 
 	// Open a dialog
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	model, _ = app.Update(keyPress('n'))
 	app = model.(AppModel)
 
 	if app.dialog == nil {
@@ -1728,11 +1753,10 @@ func TestAppModel_MouseClick_WithDialog(t *testing.T) {
 	availableHeight := app.height - titleBarHeight - statusBarHeight
 	bounds := CalculatePaneBounds(app.layout, len(app.panes), app.width, availableHeight, titleBarHeight)
 
-	mouseMsg := tea.MouseMsg{
+	mouseMsg := tea.MouseClickMsg{
 		X:      bounds[0].X + 10,
 		Y:      bounds[0].Y + 5,
-		Button: tea.MouseButtonLeft,
-		Action: tea.MouseActionPress,
+		Button: tea.MouseLeft,
 	}
 
 	model, _ = app.Update(mouseMsg)
@@ -1768,11 +1792,10 @@ func TestAppModel_MouseClick_RightButton(t *testing.T) {
 	availableHeight := app.height - titleBarHeight - statusBarHeight
 	bounds := CalculatePaneBounds(app.layout, len(app.panes), app.width, availableHeight, titleBarHeight)
 
-	mouseMsg := tea.MouseMsg{
+	mouseMsg := tea.MouseClickMsg{
 		X:      bounds[0].X + 10,
 		Y:      bounds[0].Y + 5,
-		Button: tea.MouseButtonRight,
-		Action: tea.MouseActionPress,
+		Button: tea.MouseRight,
 	}
 
 	model, _ = app.Update(mouseMsg)
@@ -1803,17 +1826,17 @@ func TestAppModel_MouseClick_Release(t *testing.T) {
 	availableHeight := app.height - titleBarHeight - statusBarHeight
 	bounds := CalculatePaneBounds(app.layout, len(app.panes), app.width, availableHeight, titleBarHeight)
 
-	mouseMsg := tea.MouseMsg{
+	// In v2, mouse release is a different message type
+	mouseMsg := tea.MouseReleaseMsg{
 		X:      bounds[0].X + 10,
 		Y:      bounds[0].Y + 5,
-		Button: tea.MouseButtonLeft,
-		Action: tea.MouseActionRelease,
+		Button: tea.MouseLeft,
 	}
 
 	model, _ = app.Update(mouseMsg)
 	app = model.(AppModel)
 
-	// Focus should not change (only press focuses)
+	// Focus should not change (only click focuses, not release)
 	if app.focusedPane != originalFocus {
 		t.Errorf("Mouse release should not change focus, expected %d, got %d", originalFocus, app.focusedPane)
 	}
@@ -1825,11 +1848,10 @@ func TestAppModel_MouseClick_NoPanes(t *testing.T) {
 	app.height = 40
 
 	// No panes - click should not panic
-	mouseMsg := tea.MouseMsg{
+	mouseMsg := tea.MouseClickMsg{
 		X:      50,
 		Y:      20,
-		Button: tea.MouseButtonLeft,
-		Action: tea.MouseActionPress,
+		Button: tea.MouseLeft,
 	}
 
 	model, _ := app.Update(mouseMsg)
@@ -1875,11 +1897,10 @@ func TestAppModel_MouseClick_AllLayouts(t *testing.T) {
 				centerX := bounds[targetPane].X + bounds[targetPane].Width/2
 				centerY := bounds[targetPane].Y + bounds[targetPane].Height/2
 
-				mouseMsg := tea.MouseMsg{
+				mouseMsg := tea.MouseClickMsg{
 					X:      centerX,
 					Y:      centerY,
-					Button: tea.MouseButtonLeft,
-					Action: tea.MouseActionPress,
+					Button: tea.MouseLeft,
 				}
 
 				model, _ := app.Update(mouseMsg)
@@ -1929,11 +1950,10 @@ func TestAppModel_MouseClick_EdgeCases(t *testing.T) {
 			}
 			app.focusedPane = 1
 
-			mouseMsg := tea.MouseMsg{
+			mouseMsg := tea.MouseClickMsg{
 				X:      tt.x,
 				Y:      tt.y,
-				Button: tea.MouseButtonLeft,
-				Action: tea.MouseActionPress,
+				Button: tea.MouseLeft,
 			}
 
 			model, _ := app.Update(mouseMsg)
@@ -1965,7 +1985,7 @@ func TestAppModel_ScrollMode_EnterWithBracket_NavMode(t *testing.T) {
 	}
 
 	// Press '[' in nav mode to enter scroll mode
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	model, _ = app.Update(keyPress('['))
 	app = model.(AppModel)
 
 	if !app.panes[0].IsScrollMode() {
@@ -1986,14 +2006,14 @@ func TestAppModel_ScrollMode_EnterWithCtrlBBracket_InputMode(t *testing.T) {
 	app.inputMode = true
 
 	// Press ctrl+b then '[' to enter scroll mode
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	model, _ = app.Update(ctrlKey('b'))
 	app = model.(AppModel)
 
 	if !app.tmuxPrefix {
 		t.Error("ctrl+b should set tmux prefix")
 	}
 
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	model, _ = app.Update(keyPress('['))
 	app = model.(AppModel)
 
 	if !app.panes[0].IsScrollMode() {
@@ -2021,7 +2041,7 @@ func TestAppModel_ScrollMode_ArrowKeysScroll_NavMode(t *testing.T) {
 	}
 
 	// Press up arrow - should scroll, not navigate (there's only one pane anyway)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyUp})
+	model, _ = app.Update(specialKey(tea.KeyUp))
 	app = model.(AppModel)
 
 	// Should still be in scroll mode
@@ -2030,7 +2050,7 @@ func TestAppModel_ScrollMode_ArrowKeysScroll_NavMode(t *testing.T) {
 	}
 
 	// Press down arrow - should scroll
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyDown})
+	model, _ = app.Update(specialKey(tea.KeyDown))
 	app = model.(AppModel)
 
 	// Might exit scroll mode if at bottom, but should not panic
@@ -2050,7 +2070,7 @@ func TestAppModel_ScrollMode_ArrowKeysScroll_InputMode(t *testing.T) {
 	app.panes[0].EnterScrollMode()
 
 	// Press up arrow in input mode while in scroll mode
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyUp})
+	model, _ = app.Update(specialKey(tea.KeyUp))
 	app = model.(AppModel)
 
 	// Should still be in scroll mode (arrow scrolled instead of going to pane)
@@ -2076,7 +2096,7 @@ func TestAppModel_ScrollMode_ExitWithEscape_NavMode(t *testing.T) {
 	}
 
 	// Press escape in nav mode - should exit scroll mode
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	model, _ = app.Update(specialKey(tea.KeyEscape))
 	app = model.(AppModel)
 
 	if app.panes[0].IsScrollMode() {
@@ -2104,7 +2124,7 @@ func TestAppModel_ScrollMode_TitleBarIndicator(t *testing.T) {
 	view := app.View()
 
 	// Should contain SCROLL indicator
-	if !strings.Contains(view, "SCROLL") {
+	if !strings.Contains(viewString(view), "SCROLL") {
 		t.Error("View should contain SCROLL indicator when in scroll mode")
 	}
 }
@@ -2122,7 +2142,7 @@ func TestAppModel_ScrollMode_BracketWithoutPrefix_InputMode(t *testing.T) {
 	app.inputMode = true
 
 	// Press '[' without ctrl+b prefix - should pass through to pane, not enter scroll mode
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	model, _ = app.Update(keyPress('['))
 	app = model.(AppModel)
 
 	if app.panes[0].IsScrollMode() {
@@ -2151,7 +2171,7 @@ func TestAppModel_ScrollMode_ArrowsDontNavigate_InScrollMode(t *testing.T) {
 
 	// Press left arrow in nav mode while in scroll mode
 	// Left/right arrows should still navigate panes (only up/down scroll)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	model, _ = app.Update(specialKey(tea.KeyLeft))
 	app = model.(AppModel)
 
 	// Focus should change to pane 0 (left/right still navigate)
@@ -2254,7 +2274,7 @@ func TestAppModel_RenumberPanesAfterDestroy_QuickDestroy(t *testing.T) {
 	app.panes[1].SetFocused(false)
 
 	// Press 'd' to quick-destroy the errored workstream
-	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	model, _ := app.Update(keyPress('d'))
 	app = model.(AppModel)
 
 	// Should have 1 pane remaining, renumbered to index 1
@@ -2291,7 +2311,7 @@ func TestAppModel_RenumberPanes_NumberKeysFocusCorrectly(t *testing.T) {
 	app.panes[1].SetFocused(false)
 
 	// Press '2' - should focus the pane with index 2 (slice position 1)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	model, _ = app.Update(keyPress('2'))
 	app = model.(AppModel)
 
 	if app.focusedPane != 1 {
@@ -2299,7 +2319,7 @@ func TestAppModel_RenumberPanes_NumberKeysFocusCorrectly(t *testing.T) {
 	}
 
 	// Press '1' - should focus the pane with index 1 (slice position 0)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	model, _ = app.Update(keyPress('1'))
 	app = model.(AppModel)
 
 	if app.focusedPane != 0 {
@@ -2307,7 +2327,7 @@ func TestAppModel_RenumberPanes_NumberKeysFocusCorrectly(t *testing.T) {
 	}
 
 	// Press '3' - should do nothing (no pane with index 3 exists after renumbering)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	model, _ = app.Update(keyPress('3'))
 	app = model.(AppModel)
 
 	if app.focusedPane != 0 {
@@ -2330,7 +2350,7 @@ func TestAppModel_RenumberPanes_LastSwapPositionReset(t *testing.T) {
 	app.focusedPane = 2
 	app.panes[0].SetFocused(false)
 	app.panes[2].SetFocused(true)
-	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	model, _ := app.Update(keyPress(' '))
 	app = model.(AppModel)
 
 	// Should have a lastSwapPosition set

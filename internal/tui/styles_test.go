@@ -268,7 +268,7 @@ func TestLerpColor(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := LerpColor(tt.from, tt.to, tt.progress)
-			if result == "" {
+			if result == nil {
 				t.Error("LerpColor should return a color")
 			}
 		})

@@ -2,10 +2,11 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"math"
 	"strconv"
 
-	"github.com/charmbracelet/lipgloss"
+	"charm.land/lipgloss/v2"
 )
 
 // hexToRGB converts a hex color string to RGB values
@@ -151,7 +152,7 @@ func easeOutCubic(t float64) float64 {
 
 // LerpColor interpolates between two hex colors based on progress (0.0 to 1.0)
 // Uses easeOutCubic for smooth animation feel
-func LerpColor(from, to string, progress float64) lipgloss.Color {
+func LerpColor(from, to string, progress float64) color.Color {
 	// Apply easing
 	t := easeOutCubic(progress)
 

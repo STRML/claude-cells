@@ -10,10 +10,10 @@ import (
 	"syscall"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/STRML/claude-cells/internal/docker"
 	"github.com/STRML/claude-cells/internal/tui"
 	"github.com/STRML/claude-cells/internal/workstream"
-	tea "github.com/charmbracelet/bubbletea"
 )
 
 // Version info - set via ldflags at build time
@@ -161,7 +161,8 @@ func main() {
 		tui.SetContainerTracker(tracker)
 	}
 
-	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
+	// Note: AltScreen and MouseMode are now controlled via View() in bubbletea v2
+	p := tea.NewProgram(app)
 
 	// Set the program reference so PTY sessions can send messages
 	tui.SetProgram(p)
