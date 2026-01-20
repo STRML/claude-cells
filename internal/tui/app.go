@@ -903,17 +903,27 @@ Scroll Mode:
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
 				outputStr := string(msg.Output)
 
-				// Check if Claude Code is ready (bypass permissions accepted)
+				// Check if Claude Code is ready
 				if m.panes[i].IsInitializing() {
-					if strings.Contains(outputStr, "bypass permissions on") ||
-						strings.Contains(outputStr, "What would you like to do?") {
+					// Detect various indicators that Claude is ready:
+					// - "bypass permissions on" - after accepting bypass permissions
+					// - "What would you like to do?" - initial prompt
+					// - "Resuming" - resuming a previous session
+					// - ">" at start of line - Claude's input prompt
+					// - Contains project path - Claude showing the project
+					claudeReady := strings.Contains(outputStr, "bypass permissions on") ||
+						strings.Contains(outputStr, "What would you like to do?") ||
+						strings.Contains(outputStr, "Resuming") ||
+						strings.Contains(outputStr, "/workspace") ||
+						strings.Contains(outputStr, "\n> ") ||
+						strings.Contains(outputStr, "\r> ")
+					if claudeReady {
 						m.panes[i].SetInitializing(false)
 						// Auto-enter input mode if this is the focused pane
 						if i == m.focusedPane {
 							m.inputMode = true
 							return m, tea.ShowCursor
 						}
-						break
 					}
 					// Show ALL output during initialization for debugging
 					// Only filter out the permissions dialog spinner
