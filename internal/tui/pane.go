@@ -2,17 +2,18 @@ package tui
 
 import (
 	"fmt"
+	"image/color"
 	"os"
 	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
+	"charm.land/bubbles/v2/textinput"
+	"charm.land/bubbles/v2/viewport"
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/STRML/claude-cells/internal/workstream"
-	"github.com/charmbracelet/bubbles/textinput"
-	"github.com/charmbracelet/bubbles/viewport"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/hinshun/vt10x"
 )
 
@@ -230,7 +231,7 @@ func NewPaneModel(ws *workstream.Workstream) PaneModel {
 	ti.Placeholder = "Enter prompt..."
 	ti.CharLimit = 500
 
-	vp := viewport.New(0, 0)
+	vp := viewport.New()
 
 	// Create virtual terminal with default size (will be resized later)
 	vterm := vt10x.New(vt10x.WithSize(80, 24))
@@ -411,7 +412,7 @@ func (p PaneModel) Update(msg tea.Msg) (PaneModel, tea.Cmd) {
 
 	if p.focused {
 		switch msg := msg.(type) {
-		case tea.KeyMsg:
+		case tea.KeyPressMsg:
 			// If we have a PTY session, send keys directly to it
 			if p.pty != nil && !p.pty.IsClosed() {
 				// Send the key to the PTY
@@ -501,8 +502,9 @@ func (p PaneModel) Update(msg tea.Msg) (PaneModel, tea.Cmd) {
 					} else if len(keyStr) == 1 {
 						// Single character
 						data = []byte(keyStr)
-					} else if msg.Type == tea.KeyRunes {
-						data = []byte(string(msg.Runes))
+					} else if msg.Text != "" {
+						// Printable characters (replaces KeyRunes in v2)
+						data = []byte(msg.Text)
 					}
 				}
 				if len(data) > 0 {
@@ -554,7 +556,7 @@ func (p PaneModel) View() string {
 	}
 
 	// Calculate current header background color (with fade animation)
-	var headerBg lipgloss.Color
+	var headerBg color.Color
 	if p.initializing {
 		headerBg = lipgloss.Color(colorPurple)
 	} else if p.fading {
@@ -585,7 +587,7 @@ func (p PaneModel) View() string {
 				Render("SCROLL")
 		} else if p.inputMode {
 			// Input mode - bright cyan background (also fades in)
-			var modeBg lipgloss.Color
+			var modeBg color.Color
 			if p.fading {
 				modeBg = LerpColor(colorPurple, colorCyan, p.fadeProgress)
 			} else {
@@ -599,7 +601,7 @@ func (p PaneModel) View() string {
 				Render("INPUT")
 		} else {
 			// Nav mode - green background (also fades in)
-			var modeBg lipgloss.Color
+			var modeBg color.Color
 			if p.fading {
 				modeBg = LerpColor(colorPurple, colorGreen, p.fadeProgress)
 			} else {
@@ -644,7 +646,7 @@ func (p PaneModel) View() string {
 
 	// Remember scroll position before setting content
 	wasAtBottom := p.viewport.AtBottom()
-	yOffset := p.viewport.YOffset
+	yOffset := p.viewport.YOffset()
 
 	p.viewport.SetContent(outputContent)
 
@@ -933,7 +935,7 @@ func (p PaneModel) View() string {
 	// Apply border based on focus and input mode
 	var style lipgloss.Style
 	if p.focused {
-		var borderColor lipgloss.Color
+		var borderColor color.Color
 		var targetBorderColor string
 		if p.inputMode {
 			// Input mode - bright cyan border
@@ -1122,8 +1124,8 @@ func (p *PaneModel) SetSize(width, height int) {
 
 	p.width = width
 	p.height = height
-	p.viewport.Width = width - 4   // Account for border and padding
-	p.viewport.Height = height - 6 // Account for header, input, borders
+	p.viewport.SetWidth(width - 4)   // Account for border and padding
+	p.viewport.SetHeight(height - 6) // Account for header, input, borders
 
 	// Calculate inner dimensions
 	innerWidth := width - 4

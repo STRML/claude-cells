@@ -4,8 +4,20 @@ import (
 	"strings"
 	"testing"
 
-	tea "github.com/charmbracelet/bubbletea"
+	tea "charm.land/bubbletea/v2"
 )
+
+// Test helpers for creating key messages in bubbletea v2
+
+// dKeyPress creates a KeyPressMsg for a single character
+func dKeyPress(r rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: r, Text: string(r)}
+}
+
+// dSpecialKey creates a KeyPressMsg for special keys (Enter, Esc, etc.)
+func dSpecialKey(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: code}
+}
 
 func TestNewDestroyDialog(t *testing.T) {
 	d := NewDestroyDialog("add-auth", "ws-123")
@@ -56,7 +68,7 @@ func TestNewPRDialog(t *testing.T) {
 
 func TestDialogModel_Update_Escape(t *testing.T) {
 	d := NewWorkstreamDialog()
-	_, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, cmd := d.Update(dSpecialKey(tea.KeyEsc))
 
 	if cmd == nil {
 		t.Error("Should return a command on escape")
@@ -72,7 +84,7 @@ func TestDialogModel_Update_Escape(t *testing.T) {
 func TestDialogModel_Update_Enter_Empty(t *testing.T) {
 	d := NewWorkstreamDialog()
 	// Don't type anything, just press enter
-	_, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := d.Update(dSpecialKey(tea.KeyEnter))
 
 	// Should not confirm with empty input
 	if cmd != nil {
@@ -86,7 +98,7 @@ func TestDialogModel_Update_Enter_Empty(t *testing.T) {
 func TestDialogModel_Update_Enter_WithValue(t *testing.T) {
 	d := NewWorkstreamDialog()
 	d.TextArea.SetValue("implement login feature")
-	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	d, cmd := d.Update(dSpecialKey(tea.KeyEnter))
 
 	if cmd == nil {
 		t.Fatal("Should return a command on enter with value")
@@ -108,7 +120,7 @@ func TestDialogModel_Update_Enter_WithValue(t *testing.T) {
 func TestDialogModel_Update_DestroyConfirm_WrongWord(t *testing.T) {
 	d := NewDestroyDialog("test-branch", "ws-123")
 	d.Input.SetValue("delete") // Wrong word
-	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	d, cmd := d.Update(dSpecialKey(tea.KeyEnter))
 
 	// Should not confirm with wrong word
 	if cmd != nil {
@@ -122,7 +134,7 @@ func TestDialogModel_Update_DestroyConfirm_WrongWord(t *testing.T) {
 func TestDialogModel_Update_DestroyConfirm_CorrectWord(t *testing.T) {
 	d := NewDestroyDialog("test-branch", "ws-123")
 	d.Input.SetValue("destroy")
-	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	d, cmd := d.Update(dSpecialKey(tea.KeyEnter))
 
 	if cmd == nil {
 		t.Fatal("Should return a command on correct confirm word")
@@ -144,7 +156,7 @@ func TestDialogModel_Update_DestroyConfirm_CorrectWord(t *testing.T) {
 func TestDialogModel_Update_DestroyConfirm_CaseInsensitive(t *testing.T) {
 	d := NewDestroyDialog("test-branch", "ws-123")
 	d.Input.SetValue("DESTROY") // Uppercase should work
-	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	d, cmd := d.Update(dSpecialKey(tea.KeyEnter))
 
 	if cmd == nil {
 		t.Fatal("Should return a command on uppercase confirm word")
@@ -238,49 +250,49 @@ func TestSettingsDialog_Navigation(t *testing.T) {
 	d := NewSettingsDialog(3, "test-project")
 
 	// Navigate down
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
+	d, _ = d.Update(dSpecialKey(tea.KeyDown))
 	if d.MenuSelection != 1 {
 		t.Errorf("Selection should be 1, got %d", d.MenuSelection)
 	}
 
 	// Navigate down again
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
+	d, _ = d.Update(dSpecialKey(tea.KeyDown))
 	if d.MenuSelection != 2 {
 		t.Errorf("Selection should be 2, got %d", d.MenuSelection)
 	}
 
 	// Navigate down again
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
+	d, _ = d.Update(dSpecialKey(tea.KeyDown))
 	if d.MenuSelection != 3 {
 		t.Errorf("Selection should be 3, got %d", d.MenuSelection)
 	}
 
 	// Navigate down at bottom - should stay at 3
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
+	d, _ = d.Update(dSpecialKey(tea.KeyDown))
 	if d.MenuSelection != 3 {
 		t.Errorf("Selection should stay at 3 at bottom, got %d", d.MenuSelection)
 	}
 
 	// Navigate up
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyUp})
+	d, _ = d.Update(dSpecialKey(tea.KeyUp))
 	if d.MenuSelection != 2 {
 		t.Errorf("Selection should be 2, got %d", d.MenuSelection)
 	}
 
 	// Navigate up again
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyUp})
+	d, _ = d.Update(dSpecialKey(tea.KeyUp))
 	if d.MenuSelection != 1 {
 		t.Errorf("Selection should be 1, got %d", d.MenuSelection)
 	}
 
 	// Navigate up to top
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyUp})
+	d, _ = d.Update(dSpecialKey(tea.KeyUp))
 	if d.MenuSelection != 0 {
 		t.Errorf("Selection should be 0, got %d", d.MenuSelection)
 	}
 
 	// Navigate up at top - should stay at 0
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyUp})
+	d, _ = d.Update(dSpecialKey(tea.KeyUp))
 	if d.MenuSelection != 0 {
 		t.Errorf("Selection should stay at 0 at top, got %d", d.MenuSelection)
 	}
@@ -290,13 +302,13 @@ func TestSettingsDialog_VimNavigation(t *testing.T) {
 	d := NewSettingsDialog(3, "test-project")
 
 	// Navigate with j (down)
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	d, _ = d.Update(dKeyPress('j'))
 	if d.MenuSelection != 1 {
 		t.Errorf("Selection should be 1 after 'j', got %d", d.MenuSelection)
 	}
 
 	// Navigate with k (up)
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	d, _ = d.Update(dKeyPress('k'))
 	if d.MenuSelection != 0 {
 		t.Errorf("Selection should be 0 after 'k', got %d", d.MenuSelection)
 	}
@@ -306,7 +318,7 @@ func TestSettingsDialog_PruneStopped(t *testing.T) {
 	d := NewSettingsDialog(3, "test-project")
 	// Selection 0 = Prune stopped containers
 	d.MenuSelection = 0
-	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	d, cmd := d.Update(dSpecialKey(tea.KeyEnter))
 
 	if cmd == nil {
 		t.Fatal("Should return a command on enter")
@@ -326,7 +338,7 @@ func TestSettingsDialog_PruneProject(t *testing.T) {
 	d := NewSettingsDialog(3, "test-project")
 	// Selection 1 = Destroy project containers
 	d.MenuSelection = 1
-	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	d, cmd := d.Update(dSpecialKey(tea.KeyEnter))
 
 	if cmd == nil {
 		t.Fatal("Should return a command on enter")
@@ -346,7 +358,7 @@ func TestSettingsDialog_PruneAll(t *testing.T) {
 	d := NewSettingsDialog(3, "test-project")
 	// Selection 2 = Destroy ALL containers (all projects)
 	d.MenuSelection = 2
-	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	d, cmd := d.Update(dSpecialKey(tea.KeyEnter))
 
 	if cmd == nil {
 		t.Fatal("Should return a command on enter")
@@ -366,7 +378,7 @@ func TestSettingsDialog_Cancel(t *testing.T) {
 	d := NewSettingsDialog(3, "test-project")
 	// Selection 3 = Cancel
 	d.MenuSelection = 3
-	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	d, cmd := d.Update(dSpecialKey(tea.KeyEnter))
 
 	if cmd == nil {
 		t.Fatal("Should return a command on enter")
@@ -442,31 +454,31 @@ func TestLogDialog_Scrolling(t *testing.T) {
 	}
 
 	// Scroll down
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
+	d, _ = d.Update(dSpecialKey(tea.KeyDown))
 	if d.scrollOffset != 1 {
 		t.Errorf("scrollOffset should be 1 after down, got %d", d.scrollOffset)
 	}
 
 	// Scroll down with j
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	d, _ = d.Update(dKeyPress('j'))
 	if d.scrollOffset != 2 {
 		t.Errorf("scrollOffset should be 2 after 'j', got %d", d.scrollOffset)
 	}
 
 	// Scroll up
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyUp})
+	d, _ = d.Update(dSpecialKey(tea.KeyUp))
 	if d.scrollOffset != 1 {
 		t.Errorf("scrollOffset should be 1 after up, got %d", d.scrollOffset)
 	}
 
 	// Scroll up with k
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	d, _ = d.Update(dKeyPress('k'))
 	if d.scrollOffset != 0 {
 		t.Errorf("scrollOffset should be 0 after 'k', got %d", d.scrollOffset)
 	}
 
 	// Can't scroll past top
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyUp})
+	d, _ = d.Update(dSpecialKey(tea.KeyUp))
 	if d.scrollOffset != 0 {
 		t.Errorf("scrollOffset should stay at 0 at top, got %d", d.scrollOffset)
 	}
@@ -474,7 +486,7 @@ func TestLogDialog_Scrolling(t *testing.T) {
 
 func TestLogDialog_DismissOnEnter(t *testing.T) {
 	d := NewLogDialog("test-branch", "Some log content")
-	_, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := d.Update(dSpecialKey(tea.KeyEnter))
 
 	if cmd == nil {
 		t.Fatal("Should return a command on enter")
@@ -488,7 +500,7 @@ func TestLogDialog_DismissOnEnter(t *testing.T) {
 
 func TestLogDialog_DismissOnEscape(t *testing.T) {
 	d := NewLogDialog("test-branch", "Some log content")
-	_, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, cmd := d.Update(dSpecialKey(tea.KeyEsc))
 
 	if cmd == nil {
 		t.Fatal("Should return a command on escape")
@@ -563,7 +575,7 @@ func TestProgressDialog_CantDismissWhileInProgress(t *testing.T) {
 	d := NewProgressDialog("Working", "Please wait...", "ws-1")
 
 	// Try to dismiss with Enter - should not work
-	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	d, cmd := d.Update(dSpecialKey(tea.KeyEnter))
 	if cmd != nil {
 		msg := cmd()
 		if _, ok := msg.(DialogCancelMsg); ok {
@@ -572,7 +584,7 @@ func TestProgressDialog_CantDismissWhileInProgress(t *testing.T) {
 	}
 
 	// Try to dismiss with Escape - should not work
-	_, cmd = d.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, cmd = d.Update(dSpecialKey(tea.KeyEsc))
 	if cmd != nil {
 		msg := cmd()
 		if _, ok := msg.(DialogCancelMsg); ok {
@@ -593,7 +605,7 @@ func TestProgressDialog_CanDismissWhenComplete(t *testing.T) {
 	}
 
 	// Now can dismiss with Enter
-	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	d, cmd := d.Update(dSpecialKey(tea.KeyEnter))
 	if cmd == nil {
 		t.Fatal("Should return a command on enter when complete")
 	}
@@ -739,7 +751,7 @@ func TestNewFirstRunIntroductionDialog(t *testing.T) {
 
 func TestFirstRunIntroductionDialog_DismissOnEnter(t *testing.T) {
 	d := NewFirstRunIntroductionDialog()
-	_, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := d.Update(dSpecialKey(tea.KeyEnter))
 
 	if cmd == nil {
 		t.Fatal("Should return a command on enter")
@@ -757,7 +769,7 @@ func TestFirstRunIntroductionDialog_DismissOnEnter(t *testing.T) {
 
 func TestFirstRunIntroductionDialog_DismissOnEscape(t *testing.T) {
 	d := NewFirstRunIntroductionDialog()
-	_, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, cmd := d.Update(dSpecialKey(tea.KeyEsc))
 
 	if cmd == nil {
 		t.Fatal("Should return a command on escape")
@@ -779,25 +791,25 @@ func TestFirstRunIntroductionDialog_Scrolling(t *testing.T) {
 	}
 
 	// Scroll down
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
+	d, _ = d.Update(dSpecialKey(tea.KeyDown))
 	if d.scrollOffset != 1 {
 		t.Errorf("scrollOffset should be 1 after down, got %d", d.scrollOffset)
 	}
 
 	// Scroll down with j
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	d, _ = d.Update(dKeyPress('j'))
 	if d.scrollOffset != 2 {
 		t.Errorf("scrollOffset should be 2 after 'j', got %d", d.scrollOffset)
 	}
 
 	// Scroll up
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyUp})
+	d, _ = d.Update(dSpecialKey(tea.KeyUp))
 	if d.scrollOffset != 1 {
 		t.Errorf("scrollOffset should be 1 after up, got %d", d.scrollOffset)
 	}
 
 	// Scroll up with k
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	d, _ = d.Update(dKeyPress('k'))
 	if d.scrollOffset != 0 {
 		t.Errorf("scrollOffset should be 0 after 'k', got %d", d.scrollOffset)
 	}
@@ -853,25 +865,25 @@ func TestMergeConflictDialog_Navigation(t *testing.T) {
 	}
 
 	// Navigate down
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
+	d, _ = d.Update(dSpecialKey(tea.KeyDown))
 	if d.MenuSelection != 1 {
 		t.Errorf("Selection should be 1 after down, got %d", d.MenuSelection)
 	}
 
 	// Navigate down at bottom - should stay at 1
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
+	d, _ = d.Update(dSpecialKey(tea.KeyDown))
 	if d.MenuSelection != 1 {
 		t.Errorf("Selection should stay at 1 at bottom, got %d", d.MenuSelection)
 	}
 
 	// Navigate up
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyUp})
+	d, _ = d.Update(dSpecialKey(tea.KeyUp))
 	if d.MenuSelection != 0 {
 		t.Errorf("Selection should be 0 after up, got %d", d.MenuSelection)
 	}
 
 	// Navigate up at top - should stay at 0
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyUp})
+	d, _ = d.Update(dSpecialKey(tea.KeyUp))
 	if d.MenuSelection != 0 {
 		t.Errorf("Selection should stay at 0 at top, got %d", d.MenuSelection)
 	}
@@ -881,13 +893,13 @@ func TestMergeConflictDialog_VimNavigation(t *testing.T) {
 	d := NewMergeConflictDialog("feature-branch", "ws-123", []string{"file1.go"})
 
 	// Navigate with j (down)
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	d, _ = d.Update(dKeyPress('j'))
 	if d.MenuSelection != 1 {
 		t.Errorf("Selection should be 1 after 'j', got %d", d.MenuSelection)
 	}
 
 	// Navigate with k (up)
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	d, _ = d.Update(dKeyPress('k'))
 	if d.MenuSelection != 0 {
 		t.Errorf("Selection should be 0 after 'k', got %d", d.MenuSelection)
 	}
@@ -897,7 +909,7 @@ func TestMergeConflictDialog_EnterRebase(t *testing.T) {
 	d := NewMergeConflictDialog("feature-branch", "ws-123", []string{"file1.go"})
 	// Selection 0 = Rebase onto main
 	d.MenuSelection = 0
-	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	d, cmd := d.Update(dSpecialKey(tea.KeyEnter))
 
 	if cmd == nil {
 		t.Fatal("Should return a command on enter")
@@ -923,7 +935,7 @@ func TestMergeConflictDialog_EnterCancel(t *testing.T) {
 	d := NewMergeConflictDialog("feature-branch", "ws-123", []string{"file1.go"})
 	// Selection 1 = Cancel
 	d.MenuSelection = 1
-	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	d, cmd := d.Update(dSpecialKey(tea.KeyEnter))
 
 	if cmd == nil {
 		t.Fatal("Should return a command on enter")
@@ -982,19 +994,19 @@ func TestPostMergeDestroyDialog_Navigation(t *testing.T) {
 	d := NewPostMergeDestroyDialog("feature-branch", "ws-123")
 
 	// Navigate down
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
+	d, _ = d.Update(dSpecialKey(tea.KeyDown))
 	if d.MenuSelection != 1 {
 		t.Errorf("Selection should be 1 after down, got %d", d.MenuSelection)
 	}
 
 	// Navigate down at bottom - should stay at 1
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
+	d, _ = d.Update(dSpecialKey(tea.KeyDown))
 	if d.MenuSelection != 1 {
 		t.Errorf("Selection should stay at 1 at bottom, got %d", d.MenuSelection)
 	}
 
 	// Navigate up
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyUp})
+	d, _ = d.Update(dSpecialKey(tea.KeyUp))
 	if d.MenuSelection != 0 {
 		t.Errorf("Selection should be 0 after up, got %d", d.MenuSelection)
 	}
@@ -1004,7 +1016,7 @@ func TestPostMergeDestroyDialog_EnterDestroy(t *testing.T) {
 	d := NewPostMergeDestroyDialog("feature-branch", "ws-123")
 	// Selection 0 = Yes, destroy container
 	d.MenuSelection = 0
-	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	d, cmd := d.Update(dSpecialKey(tea.KeyEnter))
 
 	if cmd == nil {
 		t.Fatal("Should return a command on enter")
@@ -1030,7 +1042,7 @@ func TestPostMergeDestroyDialog_EnterKeep(t *testing.T) {
 	d := NewPostMergeDestroyDialog("feature-branch", "ws-123")
 	// Selection 1 = No, keep container
 	d.MenuSelection = 1
-	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	d, cmd := d.Update(dSpecialKey(tea.KeyEnter))
 
 	if cmd == nil {
 		t.Fatal("Should return a command on enter")
@@ -1096,7 +1108,7 @@ func TestWorkstreamDialog_ShiftEnterKeyHandling(t *testing.T) {
 	// Test 1: Enter with text should confirm
 	d1 := NewWorkstreamDialog()
 	d1.TextArea.SetValue("test value")
-	d1, cmd1 := d1.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	d1, cmd1 := d1.Update(dSpecialKey(tea.KeyEnter))
 
 	if cmd1 == nil {
 		t.Error("Enter with text should return a confirm command")
@@ -1161,25 +1173,25 @@ func TestQuitConfirmDialog_Navigation(t *testing.T) {
 	}
 
 	// Navigate up to Yes
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyUp})
+	d, _ = d.Update(dSpecialKey(tea.KeyUp))
 	if d.MenuSelection != 0 {
 		t.Errorf("Selection should be 0 after up, got %d", d.MenuSelection)
 	}
 
 	// Navigate up at top - should stay at 0
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyUp})
+	d, _ = d.Update(dSpecialKey(tea.KeyUp))
 	if d.MenuSelection != 0 {
 		t.Errorf("Selection should stay at 0 at top, got %d", d.MenuSelection)
 	}
 
 	// Navigate down to No
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
+	d, _ = d.Update(dSpecialKey(tea.KeyDown))
 	if d.MenuSelection != 1 {
 		t.Errorf("Selection should be 1 after down, got %d", d.MenuSelection)
 	}
 
 	// Navigate down at bottom - should stay at 1
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
+	d, _ = d.Update(dSpecialKey(tea.KeyDown))
 	if d.MenuSelection != 1 {
 		t.Errorf("Selection should stay at 1 at bottom, got %d", d.MenuSelection)
 	}
@@ -1189,13 +1201,13 @@ func TestQuitConfirmDialog_VimNavigation(t *testing.T) {
 	d := NewQuitConfirmDialog()
 
 	// Navigate with k (up)
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	d, _ = d.Update(dKeyPress('k'))
 	if d.MenuSelection != 0 {
 		t.Errorf("Selection should be 0 after 'k', got %d", d.MenuSelection)
 	}
 
 	// Navigate with j (down)
-	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	d, _ = d.Update(dKeyPress('j'))
 	if d.MenuSelection != 1 {
 		t.Errorf("Selection should be 1 after 'j', got %d", d.MenuSelection)
 	}
@@ -1205,7 +1217,7 @@ func TestQuitConfirmDialog_EnterYes(t *testing.T) {
 	d := NewQuitConfirmDialog()
 	// Selection 0 = Yes
 	d.MenuSelection = 0
-	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	d, cmd := d.Update(dSpecialKey(tea.KeyEnter))
 
 	if cmd == nil {
 		t.Fatal("Should return a command on enter")
@@ -1225,7 +1237,7 @@ func TestQuitConfirmDialog_EnterNo(t *testing.T) {
 	d := NewQuitConfirmDialog()
 	// Selection 1 = No (default)
 	d.MenuSelection = 1
-	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	d, cmd := d.Update(dSpecialKey(tea.KeyEnter))
 
 	if cmd == nil {
 		t.Fatal("Should return a command on enter")
@@ -1239,7 +1251,7 @@ func TestQuitConfirmDialog_EnterNo(t *testing.T) {
 
 func TestQuitConfirmDialog_YKeyConfirms(t *testing.T) {
 	d := NewQuitConfirmDialog()
-	_, cmd := d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+	_, cmd := d.Update(dKeyPress('y'))
 
 	if cmd == nil {
 		t.Fatal("Should return a command on 'y'")
@@ -1257,7 +1269,7 @@ func TestQuitConfirmDialog_YKeyConfirms(t *testing.T) {
 
 func TestQuitConfirmDialog_YKeyUppercaseConfirms(t *testing.T) {
 	d := NewQuitConfirmDialog()
-	_, cmd := d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'Y'}})
+	_, cmd := d.Update(dKeyPress('Y'))
 
 	if cmd == nil {
 		t.Fatal("Should return a command on 'Y'")
@@ -1275,7 +1287,7 @@ func TestQuitConfirmDialog_YKeyUppercaseConfirms(t *testing.T) {
 
 func TestQuitConfirmDialog_NKeyCancels(t *testing.T) {
 	d := NewQuitConfirmDialog()
-	_, cmd := d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	_, cmd := d.Update(dKeyPress('n'))
 
 	if cmd == nil {
 		t.Fatal("Should return a command on 'n'")
@@ -1289,7 +1301,7 @@ func TestQuitConfirmDialog_NKeyCancels(t *testing.T) {
 
 func TestQuitConfirmDialog_NKeyUppercaseCancels(t *testing.T) {
 	d := NewQuitConfirmDialog()
-	_, cmd := d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
+	_, cmd := d.Update(dKeyPress('N'))
 
 	if cmd == nil {
 		t.Fatal("Should return a command on 'N'")
@@ -1303,7 +1315,7 @@ func TestQuitConfirmDialog_NKeyUppercaseCancels(t *testing.T) {
 
 func TestQuitConfirmDialog_EscapeCancels(t *testing.T) {
 	d := NewQuitConfirmDialog()
-	_, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, cmd := d.Update(dSpecialKey(tea.KeyEscape))
 
 	if cmd == nil {
 		t.Fatal("Should return a command on escape")

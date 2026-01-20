@@ -8,13 +8,13 @@ import (
 	"strings"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 	"github.com/STRML/claude-cells/internal/config"
 	"github.com/STRML/claude-cells/internal/docker"
 	"github.com/STRML/claude-cells/internal/git"
 	"github.com/STRML/claude-cells/internal/sync"
 	"github.com/STRML/claude-cells/internal/workstream"
-	tea "github.com/charmbracelet/bubbletea"
-	"github.com/charmbracelet/lipgloss"
 	"github.com/charmbracelet/x/ansi"
 )
 
@@ -229,8 +229,8 @@ func PauseAllAndSaveCmd(dir string, workstreams []*workstream.Workstream, focuse
 // Init initializes the application
 func (m AppModel) Init() tea.Cmd {
 	// Try to load saved state on startup
-	// Start with cursor hidden since we begin in nav mode
-	return tea.Batch(LoadStateCmd(m.workingDir), tea.HideCursor)
+	// Cursor visibility is now controlled via View().Cursor
+	return LoadStateCmd(m.workingDir)
 }
 
 // Update handles messages
@@ -242,9 +242,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateLayout()
 		return m, nil
 
-	case tea.MouseMsg:
+	case tea.MouseClickMsg:
 		// Handle mouse clicks to focus panes and enter input mode
-		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
+		if msg.Button == tea.MouseLeft {
 			// Don't handle clicks when dialog is active
 			if m.dialog != nil {
 				return m, nil
@@ -267,9 +267,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.focusedPane = clickedPane
 				m.panes[m.focusedPane].SetFocused(true)
 
-				// Enter input mode
+				// Enter input mode (cursor visibility handled in View)
 				m.inputMode = true
-				return m, tea.ShowCursor
+				return m, nil
 			}
 		}
 		return m, nil
@@ -305,7 +305,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					// Otherwise exit to nav mode
 					m.inputMode = false
-					return m, tea.HideCursor
+					return m, nil
 				}
 				m.tmuxPrefix = false
 				// Check for double-escape (exit to nav mode)
@@ -314,7 +314,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.lastEscapeTime = time.Time{} // Reset
 					m.pendingEscape = false
 					m.inputMode = false
-					return m, tea.HideCursor
+					return m, nil
 				}
 				// First escape - defer sending to pane, wait to see if it's a double-tap
 				m.lastEscapeTime = time.Now()
@@ -625,7 +625,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Enter input mode for focused pane
 			if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
 				m.inputMode = true
-				return m, tea.ShowCursor
+				return m, nil
 			}
 			return m, nil
 
@@ -695,7 +695,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case " ":
+		case "space":
 			// Toggle focused pane with main pane (position 0)
 			if len(m.panes) > 1 {
 				if m.focusedPane > 0 {
@@ -1281,7 +1281,7 @@ Scroll Mode:
 						}
 						if i == m.focusedPane {
 							m.inputMode = true
-							cmds = append(cmds, tea.ShowCursor)
+							cmds = append(cmds, nil)
 						}
 						if len(cmds) > 0 {
 							return m, tea.Batch(cmds...)
@@ -1775,7 +1775,7 @@ Scroll Mode:
 			// Send the deferred Esc to the focused pane
 			if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
 				var cmd tea.Cmd
-				m.panes[m.focusedPane], cmd = m.panes[m.focusedPane].Update(tea.KeyMsg{Type: tea.KeyEscape})
+				m.panes[m.focusedPane], cmd = m.panes[m.focusedPane].Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 				return m, cmd
 			}
 		}
@@ -1809,9 +1809,9 @@ Scroll Mode:
 }
 
 // View renders the application
-func (m AppModel) View() string {
+func (m AppModel) View() tea.View {
 	if m.quitting {
-		return "Goodbye!\n"
+		return tea.NewView("Goodbye!\n")
 	}
 
 	var sections []string
@@ -1868,7 +1868,15 @@ func (m AppModel) View() string {
 		view = m.overlayDialog(view)
 	}
 
-	return view
+	// Create tea.View - basic keyboard enhancements (shift+enter) enabled by default in v2
+	v := tea.NewView(view)
+	v.AltScreen = true
+	v.MouseMode = tea.MouseModeCellMotion
+	// Show cursor in input mode, hide in nav mode
+	if m.inputMode {
+		v.Cursor = &tea.Cursor{}
+	}
+	return v
 }
 
 // padToHeight ensures the view has exactly m.height lines
