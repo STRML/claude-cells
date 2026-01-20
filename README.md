@@ -6,6 +6,8 @@
   <img src="cc-4-pane.png" alt="Claude Cells running 4 parallel workstreams" width="100%">
 </p>
 
+> **Why another tool?** Other multi-agent orchestrators exist—but they all layer heavy GUIs on top, burying the Claude Code experience under their own interfaces. Claude Code's TUI is already best-in-class. We don't replace it; we multiply it. Claude Cells gives you the isolation and parallelism you need while keeping you in the terminal where you belong.
+
 Claude Cells is a terminal multiplexer specifically designed for AI-assisted development. Spin up multiple Claude Code instances, each working on a different feature or bug fix in complete isolation, and watch them all progress simultaneously.
 
 ## Why Claude Cells?
