@@ -35,6 +35,7 @@ type MockGitClient struct {
 	ListCCellsBranchesFn         func(ctx context.Context) ([]string, error)
 	GetBaseBranchFn              func(ctx context.Context) (string, error)
 	GetBranchInfoFn              func(ctx context.Context, branchName string) (string, error)
+	GetBranchCommitLogsFn        func(ctx context.Context, branchName string) (string, error)
 	HasUncommittedChangesFn      func(ctx context.Context) (bool, error)
 	StashFn                      func(ctx context.Context) error
 	StashPopFn                   func(ctx context.Context) error
@@ -301,6 +302,17 @@ func (m *MockGitClient) GetBranchInfo(ctx context.Context, branchName string) (s
 		return m.GetBranchInfoFn(ctx, branchName)
 	}
 	return fmt.Sprintf("Branch: %s\nNo commits ahead of %s", branchName, m.baseBranch), nil
+}
+
+func (m *MockGitClient) GetBranchCommitLogs(ctx context.Context, branchName string) (string, error) {
+	if m.Err != nil {
+		return "", m.Err
+	}
+	if m.GetBranchCommitLogsFn != nil {
+		return m.GetBranchCommitLogsFn(ctx, branchName)
+	}
+	// Default: return empty (no commits)
+	return "", nil
 }
 
 // Working directory operations

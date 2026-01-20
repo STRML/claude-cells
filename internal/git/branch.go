@@ -130,6 +130,9 @@ func (g *Git) MergeBranchWithOptions(ctx context.Context, branch string, squash 
 	// Merge the branch
 	var err error
 	if squash {
+		// Get commit logs before squashing so we can preserve them
+		commitLogs, _ := g.GetBranchCommitLogs(ctx, branch)
+
 		// Squash merge: combines all commits into staged changes
 		_, err = g.run(ctx, "merge", "--squash", branch)
 		if err != nil {
@@ -142,8 +145,15 @@ func (g *Git) MergeBranchWithOptions(ctx context.Context, branch string, squash 
 			}
 			return err
 		}
+
+		// Build commit message that preserves all squashed commit logs
+		commitMsg := fmt.Sprintf("Squash merge branch '%s'", branch)
+		if commitLogs != "" {
+			commitMsg = fmt.Sprintf("%s\n\nSquashed commits:\n\n%s", commitMsg, commitLogs)
+		}
+
 		// Squash merge requires a separate commit
-		_, err = g.run(ctx, "commit", "-m", fmt.Sprintf("Squash merge branch '%s'", branch))
+		_, err = g.run(ctx, "commit", "-m", commitMsg)
 		if err != nil {
 			return fmt.Errorf("failed to commit squash merge: %w", err)
 		}
@@ -456,6 +466,24 @@ func (g *Git) GetBranchInfo(ctx context.Context, branchName string) (string, err
 // RemoteURL returns the URL for a named remote (e.g., "origin").
 func (g *Git) RemoteURL(ctx context.Context, remoteName string) (string, error) {
 	return g.run(ctx, "remote", "get-url", remoteName)
+}
+
+// GetBranchCommitLogs returns all commit messages from a branch that are not in the base branch.
+// The format includes the full commit message (subject and body) for each commit.
+func (g *Git) GetBranchCommitLogs(ctx context.Context, branchName string) (string, error) {
+	baseBranch, err := g.GetBaseBranch(ctx)
+	if err != nil {
+		baseBranch = "main"
+	}
+
+	// Get all commit messages with full body, separated by a delimiter
+	// Format: hash (short) followed by subject and body
+	out, err := g.run(ctx, "log", "--format=%h %s%n%n%b", baseBranch+".."+branchName)
+	if err != nil {
+		return "", err
+	}
+
+	return strings.TrimSpace(out), nil
 }
 
 // RepoID returns a stable identifier for the repository (the first commit hash).

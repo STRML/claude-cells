@@ -18,6 +18,7 @@ type GitClient interface {
 	ListCCellsBranches(ctx context.Context) ([]string, error)
 	GetBaseBranch(ctx context.Context) (string, error)
 	GetBranchInfo(ctx context.Context, branchName string) (string, error)
+	GetBranchCommitLogs(ctx context.Context, branchName string) (string, error)
 
 	// Working directory operations
 	HasUncommittedChanges(ctx context.Context) (bool, error)

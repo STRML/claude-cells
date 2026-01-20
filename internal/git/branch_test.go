@@ -657,3 +657,131 @@ func TestGit_BranchHasCommits_WithCommits(t *testing.T) {
 		t.Error("BranchHasCommits() = false for branch with commits")
 	}
 }
+
+func TestGit_GetBranchCommitLogs(t *testing.T) {
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// Create and checkout a new branch
+	err := g.CreateAndCheckout(ctx, "feature-branch")
+	if err != nil {
+		t.Fatalf("CreateAndCheckout() error = %v", err)
+	}
+
+	// Make multiple commits
+	_ = os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("content1"), 0644)
+	exec.Command("git", "-C", dir, "add", "file1.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Add first feature").Run()
+
+	_ = os.WriteFile(filepath.Join(dir, "file2.txt"), []byte("content2"), 0644)
+	exec.Command("git", "-C", dir, "add", "file2.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Add second feature").Run()
+
+	// Get commit logs
+	logs, err := g.GetBranchCommitLogs(ctx, "feature-branch")
+	if err != nil {
+		t.Fatalf("GetBranchCommitLogs() error = %v", err)
+	}
+
+	// Should contain both commit messages
+	if !strings.Contains(logs, "Add first feature") {
+		t.Errorf("GetBranchCommitLogs() missing 'Add first feature', got: %s", logs)
+	}
+	if !strings.Contains(logs, "Add second feature") {
+		t.Errorf("GetBranchCommitLogs() missing 'Add second feature', got: %s", logs)
+	}
+}
+
+func TestGit_GetBranchCommitLogs_Empty(t *testing.T) {
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// Create a new branch without any commits
+	err := g.CreateBranch(ctx, "empty-branch")
+	if err != nil {
+		t.Fatalf("CreateBranch() error = %v", err)
+	}
+
+	// Get commit logs - should be empty
+	logs, err := g.GetBranchCommitLogs(ctx, "empty-branch")
+	if err != nil {
+		t.Fatalf("GetBranchCommitLogs() error = %v", err)
+	}
+
+	if logs != "" {
+		t.Errorf("GetBranchCommitLogs() = %q, want empty string for branch with no commits", logs)
+	}
+}
+
+func TestGit_MergeBranchWithOptions_SquashPreservesCommitLogs(t *testing.T) {
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// Get the base branch name (main or master)
+	baseBranch, _ := g.CurrentBranch(ctx)
+
+	// Create and checkout a feature branch
+	err := g.CreateAndCheckout(ctx, "feature-squash")
+	if err != nil {
+		t.Fatalf("CreateAndCheckout() error = %v", err)
+	}
+
+	// Make multiple commits with descriptive messages
+	_ = os.WriteFile(filepath.Join(dir, "feature1.txt"), []byte("feature 1"), 0644)
+	exec.Command("git", "-C", dir, "add", "feature1.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Implement feature one").Run()
+
+	_ = os.WriteFile(filepath.Join(dir, "feature2.txt"), []byte("feature 2"), 0644)
+	exec.Command("git", "-C", dir, "add", "feature2.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Implement feature two").Run()
+
+	_ = os.WriteFile(filepath.Join(dir, "bugfix.txt"), []byte("bugfix"), 0644)
+	exec.Command("git", "-C", dir, "add", "bugfix.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Fix bug in feature").Run()
+
+	// Checkout main and squash merge
+	err = g.Checkout(ctx, baseBranch)
+	if err != nil {
+		t.Fatalf("Checkout() error = %v", err)
+	}
+
+	err = g.MergeBranchWithOptions(ctx, "feature-squash", true)
+	if err != nil {
+		t.Fatalf("MergeBranchWithOptions() error = %v", err)
+	}
+
+	// Get the last commit message
+	cmd := exec.Command("git", "log", "-1", "--format=%B")
+	cmd.Dir = dir
+	out, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("git log error = %v", err)
+	}
+	commitMsg := string(out)
+
+	// Verify the squash commit message contains all the original commit messages
+	if !strings.Contains(commitMsg, "Squash merge branch 'feature-squash'") {
+		t.Errorf("Squash commit missing header, got: %s", commitMsg)
+	}
+	if !strings.Contains(commitMsg, "Implement feature one") {
+		t.Errorf("Squash commit missing 'Implement feature one', got: %s", commitMsg)
+	}
+	if !strings.Contains(commitMsg, "Implement feature two") {
+		t.Errorf("Squash commit missing 'Implement feature two', got: %s", commitMsg)
+	}
+	if !strings.Contains(commitMsg, "Fix bug in feature") {
+		t.Errorf("Squash commit missing 'Fix bug in feature', got: %s", commitMsg)
+	}
+	if !strings.Contains(commitMsg, "Squashed commits:") {
+		t.Errorf("Squash commit missing 'Squashed commits:' section, got: %s", commitMsg)
+	}
+}
