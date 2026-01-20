@@ -495,3 +495,65 @@ func TestSaveStateEmptyClaudeSessionID(t *testing.T) {
 		t.Errorf("ClaudeSessionID should be empty, got %q", saved.ClaudeSessionID)
 	}
 }
+
+func TestSaveStateExcludesTitleGenerationSessions(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create a normal workstream with branch name
+	normalWs := New("implement user auth")
+	normalWs.ContainerID = "container-normal"
+
+	// Create a title-generation workstream (empty BranchName)
+	titleGenWs := NewForSummarizing("fix the login bug")
+	titleGenWs.ContainerID = "container-title-gen"
+
+	// Save both
+	err = SaveState(tmpDir, []*Workstream{normalWs, titleGenWs}, 0, 0)
+	if err != nil {
+		t.Fatalf("SaveState() error = %v", err)
+	}
+
+	// Load and verify only normal session is saved
+	state, err := LoadState(tmpDir)
+	if err != nil {
+		t.Fatalf("LoadState() error = %v", err)
+	}
+
+	if len(state.Workstreams) != 1 {
+		t.Errorf("Expected 1 workstream (title-gen excluded), got %d", len(state.Workstreams))
+	}
+
+	if state.Workstreams[0].ID != normalWs.ID {
+		t.Errorf("Expected normal workstream ID %s, got %s", normalWs.ID, state.Workstreams[0].ID)
+	}
+}
+
+func TestSaveStateAllTitleGenerationSessionsExcluded(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create only title-generation workstreams
+	ws1 := NewForSummarizing("task 1")
+	ws2 := NewForSummarizing("task 2")
+
+	err = SaveState(tmpDir, []*Workstream{ws1, ws2}, 0, 0)
+	if err != nil {
+		t.Fatalf("SaveState() error = %v", err)
+	}
+
+	state, err := LoadState(tmpDir)
+	if err != nil {
+		t.Fatalf("LoadState() error = %v", err)
+	}
+
+	if len(state.Workstreams) != 0 {
+		t.Errorf("Expected 0 workstreams (all title-gen excluded), got %d", len(state.Workstreams))
+	}
+}

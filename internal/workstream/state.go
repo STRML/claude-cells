@@ -54,6 +54,10 @@ func SaveState(dir string, workstreams []*Workstream, focusedIndex int, layout i
 	}
 
 	for _, ws := range workstreams {
+		// Skip title-generation sessions (empty BranchName means still generating title)
+		if ws.BranchName == "" {
+			continue
+		}
 		state.Workstreams = append(state.Workstreams, SavedWorkstream{
 			ID:              ws.ID,
 			BranchName:      ws.BranchName,
