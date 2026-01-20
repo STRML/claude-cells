@@ -249,8 +249,9 @@ echo "[ccells] Starting Claude Code..."
 
 // autoAcceptBypassPermissions reads PTY output looking for the bypass permissions
 // prompt and automatically accepts it by sending down arrow + enter.
+// It forwards all output to the pane in real-time so the user sees startup progress.
 func (p *PTYSession) autoAcceptBypassPermissions() error {
-	// Buffer to accumulate output
+	// Buffer to detect the bypass prompt (we need to see the full phrase)
 	var accumulated strings.Builder
 	buf := make([]byte, 1024)
 
@@ -290,6 +291,16 @@ func (p *PTYSession) autoAcceptBypassPermissions() error {
 				return result.err
 			}
 			if result.n > 0 {
+				// Forward output to the pane so user sees startup progress
+				if program != nil {
+					output := make([]byte, result.n)
+					copy(output, buf[:result.n])
+					program.Send(PTYOutputMsg{
+						WorkstreamID: p.workstreamID,
+						Output:       output,
+					})
+				}
+
 				accumulated.Write(buf[:result.n])
 				content := accumulated.String()
 
@@ -305,8 +316,6 @@ func (p *PTYSession) autoAcceptBypassPermissions() error {
 					// Send enter to confirm
 					p.Write([]byte{'\r'})
 
-					// Don't forward the permissions dialog to the pane - discard it
-					// The pane will start fresh after permissions are accepted
 					return nil
 				}
 			}
