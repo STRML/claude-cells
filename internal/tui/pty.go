@@ -122,9 +122,16 @@ func NewPTYSession(ctx context.Context, dockerClient *client.Client, containerID
 	// 4. Run claude with --dangerously-skip-permissions since we're in an isolated container
 	//    - If resuming, use --continue to resume the previous session
 	//    - If new session with prompt, pass the prompt as argument
+	//
+	// On resume (IS_RESUME=1), the script is quieter since container is already configured.
 	setupScript := `
-echo "[ccells] Starting container setup..."
-echo "[ccells] User: $(whoami), Home: $HOME"
+# Helper function for logging (quiet on resume)
+log() {
+  test -z "$IS_RESUME" && echo "[ccells] $1"
+}
+
+log "Starting container setup..."
+log "User: $(whoami), Home: $HOME"
 
 # Ensure PATH includes user's local bin directories
 export PATH="$HOME/.local/bin:$HOME/.claude/local/bin:$PATH"
@@ -133,7 +140,7 @@ export PATH="$HOME/.local/bin:$HOME/.claude/local/bin:$PATH"
 # This happens when ccells quits - the container stays running but the PTY is orphaned
 # Use specific pattern to avoid killing this script (which contains "claude" in paths)
 if pgrep -x "claude" >/dev/null 2>&1; then
-  echo "[ccells] Killing existing Claude processes from previous session..."
+  log "Killing existing Claude processes from previous session..."
   pkill -9 -x "claude" 2>/dev/null
   sleep 1
 fi
@@ -147,14 +154,14 @@ elif test -f "/home/claude/.claude-credentials"; then
 fi
 
 if test -n "$CREDS_SRC"; then
-  echo "[ccells] Copying credentials from $CREDS_SRC..."
+  log "Copying credentials from $CREDS_SRC..."
   mkdir -p "$HOME/.claude" 2>/dev/null
   cp "$CREDS_SRC" "$HOME/.claude/.credentials.json" 2>/dev/null
 fi
 
 # Copy essential .claude files (NOT the whole directory - it's huge!)
 if test -d "/home/claude/.claude" && test "$HOME" != "/home/claude"; then
-  echo "[ccells] Copying .claude config from /home/claude..."
+  log "Copying .claude config from /home/claude..."
   # Only copy essential config files, not cache/telemetry/shell-snapshots
   for f in settings.json CLAUDE.md statsig; do
     test -e "/home/claude/.claude/$f" && cp -r "/home/claude/.claude/$f" "$HOME/.claude/" 2>/dev/null
@@ -174,25 +181,25 @@ if test -d "/home/claude/.claude" && test "$HOME" != "/home/claude"; then
     HOST_ENCODED=$(echo "$HOST_PROJECT_PATH" | sed 's|/|-|g')
     HOST_SESSION_DIR="/home/claude/.claude/projects/$HOST_ENCODED"
     if test -d "$HOST_SESSION_DIR"; then
-      echo "[ccells] Copying session data from $HOST_ENCODED to -workspace..."
+      log "Copying session data from $HOST_ENCODED to -workspace..."
       mkdir -p "$HOME/.claude/projects/-workspace"
       cp -r "$HOST_SESSION_DIR"/* "$HOME/.claude/projects/-workspace/" 2>/dev/null
     else
-      echo "[ccells] No session data found at $HOST_SESSION_DIR"
+      log "No session data found at $HOST_SESSION_DIR"
     fi
   fi
 fi
 
 # Copy .claude.json (onboarding state, settings) if mounted at /home/claude
 if test -f "/home/claude/.claude.json" && test "$HOME" != "/home/claude"; then
-  echo "[ccells] Copying .claude.json from /home/claude..."
+  log "Copying .claude.json from /home/claude..."
   cp /home/claude/.claude.json "$HOME/.claude.json" 2>/dev/null || true
 fi
 
 # Copy .gitconfig for git user identity (name/email) - this is critical!
 # Without this, commits show as "Claude" instead of the actual user
 if test -f "/home/claude/.gitconfig" && test "$HOME" != "/home/claude"; then
-  echo "[ccells] Copying .gitconfig from /home/claude..."
+  log "Copying .gitconfig from /home/claude..."
   cp /home/claude/.gitconfig "$HOME/.gitconfig" 2>/dev/null || true
 fi
 
@@ -212,8 +219,8 @@ if ! which claude >/dev/null 2>&1; then
   fi
 fi
 
-echo "[ccells] Claude Code found at: $(which claude)"
-echo "[ccells] Starting Claude Code..."
+log "Claude Code found at: $(which claude)"
+log "Starting Claude Code..."
 `
 	var setupCmd string
 	if opts != nil && opts.IsResume {
@@ -249,6 +256,10 @@ echo "[ccells] Starting Claude Code..."
 		// Pass host project path for session data copying
 		if opts.HostProjectPath != "" {
 			env = append(env, "HOST_PROJECT_PATH="+opts.HostProjectPath)
+		}
+		// Pass IS_RESUME to make setup script quieter on resume
+		if opts.IsResume {
+			env = append(env, "IS_RESUME=1")
 		}
 	}
 
