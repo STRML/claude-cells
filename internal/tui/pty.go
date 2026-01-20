@@ -135,9 +135,11 @@ fi
 
 	// Build environment variables
 	// Don't hardcode HOME or user-specific paths - let the container determine them
+	// IS_SANDBOX=1 tells Claude Code it's in a sandboxed container (allows --dangerously-skip-permissions as root)
 	env := []string{
 		"TERM=xterm-256color",
 		"COLORTERM=truecolor",
+		"IS_SANDBOX=1",
 	}
 	if opts != nil && len(opts.EnvVars) > 0 {
 		env = append(env, opts.EnvVars...)
