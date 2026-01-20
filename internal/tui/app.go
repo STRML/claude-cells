@@ -265,6 +265,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, cmd
 		}
 
+		// If focused pane has an in-pane dialog, handle that dialog's input
+		if len(m.panes) > 0 && m.focusedPane < len(m.panes) && m.panes[m.focusedPane].HasInPaneDialog() {
+			dialog := m.panes[m.focusedPane].GetInPaneDialog()
+			newDialog, cmd := dialog.Update(msg)
+			m.panes[m.focusedPane].SetInPaneDialog(&newDialog)
+			return m, cmd
+		}
+
 		// Handle input mode (keys routed to focused pane)
 		if m.inputMode && len(m.panes) > 0 && m.focusedPane < len(m.panes) {
 			switch msg.String() {
@@ -1074,18 +1082,15 @@ Scroll Mode:
 				if msg.Error != nil {
 					// Error checking - just show merge dialog anyway
 					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo)
-					dialog.SetSize(50, 20)
-					m.dialog = &dialog
+					m.panes[i].SetInPaneDialog(&dialog)
 				} else if msg.HasChanges {
 					// Has uncommitted changes - ask if user wants to commit first
 					dialog := NewCommitBeforeMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo)
-					dialog.SetSize(55, 12)
-					m.dialog = &dialog
+					m.panes[i].SetInPaneDialog(&dialog)
 				} else {
 					// No uncommitted changes - show merge dialog directly
 					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo)
-					dialog.SetSize(50, 20)
-					m.dialog = &dialog
+					m.panes[i].SetInPaneDialog(&dialog)
 				}
 				break
 			}
@@ -1093,9 +1098,11 @@ Scroll Mode:
 		return m, nil
 
 	case CommitBeforeMergeConfirmMsg:
+		// Clear any global dialog and in-pane dialog
 		m.dialog = nil
 		for i := range m.panes {
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				m.panes[i].ClearInPaneDialog()
 				ws := m.panes[i].Workstream()
 				switch msg.Action {
 				case CommitBeforeMergeYes:
@@ -1108,10 +1115,9 @@ Scroll Mode:
 					}
 					// Don't show merge dialog yet - user can press 'm' again after commit
 				case CommitBeforeMergeNo:
-					// Continue to merge dialog without committing
+					// Continue to merge dialog without committing (in-pane)
 					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo)
-					dialog.SetSize(50, 20)
-					m.dialog = &dialog
+					m.panes[i].SetInPaneDialog(&dialog)
 				}
 				break
 			}
@@ -1347,6 +1353,10 @@ Scroll Mode:
 
 	case DialogCancelMsg:
 		m.dialog = nil
+		// Also clear any in-pane dialog on the focused pane
+		if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
+			m.panes[m.focusedPane].ClearInPaneDialog()
+		}
 		return m, nil
 
 	case ContainerCountMsg:
@@ -1387,6 +1397,8 @@ Scroll Mode:
 		// Find the workstream and show progress dialog
 		for i := range m.panes {
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				// Clear in-pane dialog before starting action
+				m.panes[i].ClearInPaneDialog()
 				ws := m.panes[i].Workstream()
 				switch msg.Action {
 				case MergeActionCreatePR:

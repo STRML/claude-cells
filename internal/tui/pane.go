@@ -209,6 +209,9 @@ type PaneModel struct {
 	summarizePhase     SummarizePhase // Current animation phase
 	summarizeTitle     string         // Generated title (set when ready)
 	summarizeFadeEndAt time.Time      // When fading overlay should disappear
+
+	// In-pane dialog (e.g., merge dialog shown inside the pane)
+	inPaneDialog *DialogModel
 }
 
 // Width returns the pane width
@@ -523,6 +526,11 @@ func (p PaneModel) Update(msg tea.Msg) (PaneModel, tea.Cmd) {
 
 // View renders the pane
 func (p PaneModel) View() string {
+	// If there's an in-pane dialog, render it instead of normal content
+	if p.inPaneDialog != nil {
+		return p.viewWithInPaneDialog()
+	}
+
 	// Color constants for animation
 	const (
 		colorPurple    = "#7C3AED" // Initializing state
@@ -958,6 +966,49 @@ func (p *PaneModel) SetInputMode(inputMode bool) {
 	p.inputMode = inputMode
 }
 
+// viewWithInPaneDialog renders the pane with the in-pane dialog filling the content area
+func (p PaneModel) viewWithInPaneDialog() string {
+	const colorPurple = "#A855F7" // Dialog mode border
+
+	// Header with index, status, and branch name (same as normal view)
+	headerBg := lipgloss.Color(colorPurple)
+	indexStyle := lipgloss.NewStyle().
+		Background(headerBg).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Bold(true).
+		Padding(0, 1)
+
+	indexLabel := indexStyle.Render(fmt.Sprintf("%d", p.index))
+	status := StatusStyle(string(p.workstream.GetState()))
+	title := PaneTitle.Render(p.workstream.GetTitle())
+	stateLabel := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render(fmt.Sprintf("(%s)", p.workstream.GetState()))
+
+	// Mode indicator for dialog
+	modeIndicator := lipgloss.NewStyle().
+		Background(lipgloss.Color(colorPurple)).
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Bold(true).
+		Padding(0, 1).
+		Render("DIALOG")
+
+	header := fmt.Sprintf("%s %s %s %s %s", indexLabel, modeIndicator, status, title, stateLabel)
+
+	// Render the dialog content to fill the pane
+	dialogContent := p.inPaneDialog.ViewInPane()
+
+	// Combine header and dialog content
+	content := header + "\n\n" + dialogContent
+
+	// Apply border - purple border for dialog mode
+	style := lipgloss.NewStyle().
+		Border(lipgloss.ThickBorder()).
+		BorderForeground(lipgloss.Color(colorPurple)).
+		Width(p.width - 2).
+		Height(p.height - 2)
+
+	return style.Render(content)
+}
+
 // renderVTerm renders the virtual terminal content as a string with ANSI colors
 func (p *PaneModel) renderVTerm() (result string) {
 	// Use defer/recover to handle any panics from vt10x
@@ -1308,6 +1359,40 @@ func (p *PaneModel) ExportLogs(logsDir string) (string, error) {
 	}
 
 	return filepath, nil
+}
+
+// SetInPaneDialog sets the dialog to show inside the pane
+func (p *PaneModel) SetInPaneDialog(dialog *DialogModel) {
+	p.inPaneDialog = dialog
+	if dialog != nil {
+		// Size the dialog to fill the pane's content area
+		// Account for border (2) and padding (2) on each side = 4 total horizontal
+		// And header (2 lines), border (2), padding (2) vertical
+		dialogWidth := p.width - 4
+		dialogHeight := p.height - 6
+		if dialogWidth < 30 {
+			dialogWidth = 30
+		}
+		if dialogHeight < 10 {
+			dialogHeight = 10
+		}
+		dialog.SetSize(dialogWidth, dialogHeight)
+	}
+}
+
+// GetInPaneDialog returns the current in-pane dialog, if any
+func (p *PaneModel) GetInPaneDialog() *DialogModel {
+	return p.inPaneDialog
+}
+
+// ClearInPaneDialog removes the in-pane dialog
+func (p *PaneModel) ClearInPaneDialog() {
+	p.inPaneDialog = nil
+}
+
+// HasInPaneDialog returns true if the pane has an active in-pane dialog
+func (p *PaneModel) HasInPaneDialog() bool {
+	return p.inPaneDialog != nil
 }
 
 // PromptMsg is sent when user submits a prompt

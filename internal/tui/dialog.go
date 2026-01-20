@@ -1016,6 +1016,83 @@ func (d *DialogModel) SetSize(width, height int) {
 	}
 }
 
+// ViewInPane renders the dialog to fill a pane's content area (no outer box border)
+func (d DialogModel) ViewInPane() string {
+	// Use full available width/height for in-pane rendering
+	contentWidth := d.width
+	contentHeight := d.height
+
+	titleStyle := lipgloss.NewStyle().
+		Bold(true).
+		Foreground(lipgloss.Color("#A855F7")). // Purple accent
+		MarginBottom(1)
+
+	var content strings.Builder
+
+	// Title with underline
+	content.WriteString(titleStyle.Render(d.Title))
+	content.WriteString("\n")
+	content.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("#555555")).Render(strings.Repeat("─", contentWidth-2)))
+	content.WriteString("\n\n")
+
+	// Body content
+	content.WriteString(d.Body)
+	content.WriteString("\n\n")
+
+	// Menu items (for menu-style dialogs like merge)
+	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogQuitConfirm {
+		// Add extra spacing before menu
+		content.WriteString("\n")
+
+		for i, item := range d.MenuItems {
+			if i == d.MenuSelection {
+				// Selected item - highlight with arrow and color
+				selectedStyle := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#22C55E")). // Green
+					Bold(true)
+				content.WriteString(selectedStyle.Render("→ " + item))
+			} else {
+				// Unselected item
+				unselectedStyle := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#888888"))
+				content.WriteString(unselectedStyle.Render("  " + item))
+			}
+			content.WriteString("\n")
+		}
+		content.WriteString("\n")
+
+		// Footer hints
+		hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+		if d.Type == DialogQuitConfirm {
+			content.WriteString(hintStyle.Render("[y] yes  [n] no  [↑↓] navigate  [Enter] select"))
+		} else {
+			content.WriteString(hintStyle.Render("[↑↓] navigate  [Enter] select  [Esc] cancel"))
+		}
+	} else if d.useTextArea {
+		inputStyle := DialogInputFocused.Width(contentWidth - 4)
+		content.WriteString(inputStyle.Render(d.TextArea.View()))
+		content.WriteString("\n\n")
+		hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+		content.WriteString(hintStyle.Render("[Shift+Enter] newline  [Enter] create  [Esc] cancel"))
+	} else if d.ConfirmWord != "" {
+		inputStyle := DialogInputFocused.Width(contentWidth - 4)
+		content.WriteString(inputStyle.Render(d.Input.View()))
+		content.WriteString("\n\n")
+		hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+		content.WriteString(hintStyle.Render("[Esc] cancel"))
+	}
+
+	// Create the final styled output that fills the pane
+	style := lipgloss.NewStyle().
+		Width(contentWidth).
+		Height(contentHeight).
+		Padding(1, 2).
+		Background(lipgloss.Color("#1a1a2e")). // Darker background to distinguish from pane content
+		Foreground(lipgloss.Color("#DDDDDD"))
+
+	return style.Render(content.String())
+}
+
 // DialogConfirmMsg is sent when dialog is confirmed
 type DialogConfirmMsg struct {
 	Type         DialogType
