@@ -187,6 +187,13 @@ if test -f "/home/claude/.claude.json" && test "$HOME" != "/home/claude"; then
   cp /home/claude/.claude.json "$HOME/.claude.json" 2>/dev/null || true
 fi
 
+# Copy .gitconfig for git user identity (name/email) - this is critical!
+# Without this, commits show as "Claude" instead of the actual user
+if test -f "/home/claude/.gitconfig" && test "$HOME" != "/home/claude"; then
+  echo "[ccells] Copying .gitconfig from /home/claude..."
+  cp /home/claude/.gitconfig "$HOME/.gitconfig" 2>/dev/null || true
+fi
+
 mkdir -p "$HOME/.local/bin" 2>/dev/null
 test ! -f "$HOME/.local/bin/claude" && which claude >/dev/null 2>&1 && ln -sf "$(which claude)" "$HOME/.local/bin/claude" 2>/dev/null
 
