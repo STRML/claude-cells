@@ -122,8 +122,8 @@ func TestStatusBarModel_View_KeyHints(t *testing.T) {
 
 	view := sb.View()
 
-	// Check for all expected key hints
-	expectedHints := []string{"n", "p", "m", "d", "i", "?"}
+	// Check for all expected key hints (actions, not navigation which is in title bar)
+	expectedHints := []string{"n", "d", "m", "p", "l", "`", "r"}
 	for _, hint := range expectedHints {
 		if !strings.Contains(view, hint) {
 			t.Errorf("View should contain key hint %q", hint)

@@ -2096,19 +2096,20 @@ func (m AppModel) renderTitleBar() string {
 	// App title
 	title := titleStyle.Render(" Claude Cells ")
 
-	// Keybinds hint
+	// Keybinds hint - top bar shows navigation/mode hints (context-sensitive)
+	// Bottom status bar shows action keys, so avoid duplication here
 	var hints string
 	if m.inputMode {
 		if scrollIndicator != "" {
-			hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [↑↓/PgUp/Dn] scroll  [Esc] exit scroll")
+			hints = "  " + KeyHint("↑↓/PgUp/Dn", " scroll") + "  " + KeyHint("Esc", " exit scroll")
 		} else {
-			hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [Esc Esc] nav  [Ctrl+B ←→] switch  [Ctrl+B [] scroll")
+			hints = "  " + KeyHint("Esc Esc", " nav") + "  " + KeyHint("Ctrl+B ←→", " switch pane") + "  " + KeyHint("Ctrl+B PgUp/Dn", " scroll")
 		}
 	} else {
 		if scrollIndicator != "" {
-			hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [↑↓/PgUp/Dn] scroll  [Esc] exit scroll  [i]nput")
+			hints = "  " + KeyHint("↑↓/PgUp/Dn", " scroll") + "  " + KeyHint("Esc", " exit") + "  " + KeyHint("i", " input mode")
 		} else {
-			hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [←→]panes  [n]ew  [m]erge  [d]estroy  [l]ogs  [`]panel  [[]scroll  [i]nput  [?]help")
+			hints = "  " + KeyHint("←→", " panes") + "  " + KeyHint("Tab", " cycle") + "  " + KeyHint("1-9", " focus") + "  " + KeyHint("Space", " promote") + "  " + KeyHint("L", " layout") + "  " + KeyHint("i", " input") + "  " + KeyHint("?", " help")
 		}
 	}
 

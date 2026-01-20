@@ -70,15 +70,16 @@ func (s StatusBarModel) View() string {
 		center = fmt.Sprintf(" | %s Pairing: %s", IndicatorPairing, pairingStyle.Render(s.pairingBranch))
 	}
 
-	// Right section: key hints
+	// Right section: action key hints
+	// Navigation hints are in the top title bar, so focus on actions here
 	hints := []string{
 		KeyHint("n", "ew"),
-		KeyHint("p", "air"),
-		KeyHint("m", "erge/PR"),
 		KeyHint("d", "estroy"),
-		KeyHint("`", "logs"),
-		KeyHint("i", "nput"),
-		KeyHint("?", "help"),
+		KeyHint("m", "erge/PR"),
+		KeyHint("p", "air"),
+		KeyHint("l", "ogs"),
+		KeyHint("`", "panel"),
+		KeyHint("r", "esources"),
 	}
 	right := ""
 	for i, hint := range hints {
