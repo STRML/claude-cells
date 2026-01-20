@@ -223,6 +223,40 @@ func CleanupContainerConfig(containerName string) error {
 	return removeAllSafe(containerConfigDir)
 }
 
+// CleanupOrphanedContainerConfigs removes config directories for containers
+// that no longer exist. Returns the number of configs cleaned up.
+func CleanupOrphanedContainerConfigs(existingContainerNames map[string]bool) (int, error) {
+	cellsDir, err := GetCellsDir()
+	if err != nil {
+		return 0, err
+	}
+
+	containersDir := filepath.Join(cellsDir, "containers")
+	entries, err := os.ReadDir(containersDir)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return 0, nil // No containers dir = nothing to clean up
+		}
+		return 0, err
+	}
+
+	count := 0
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		containerName := entry.Name()
+		if !existingContainerNames[containerName] {
+			configDir := filepath.Join(containersDir, containerName)
+			if err := removeAllSafe(configDir); err == nil {
+				count++
+			}
+		}
+	}
+
+	return count, nil
+}
+
 // GetCellsDir returns the path to the ccells data directory
 func GetCellsDir() (string, error) {
 	home, err := os.UserHomeDir()

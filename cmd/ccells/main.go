@@ -465,6 +465,19 @@ func cleanupOrphanedContainers(tracker *docker.ContainerTracker) {
 		fmt.Printf("Cleaned up %d orphaned container(s) from previous session\n", removed)
 	}
 
+	// Clean up orphaned container configs (configs for containers that no longer exist)
+	containers, err := client.ListDockerTUIContainers(ctx)
+	if err == nil {
+		existingContainerNames := make(map[string]bool)
+		for _, c := range containers {
+			existingContainerNames[c.Name] = true
+		}
+		configsRemoved, _ := docker.CleanupOrphanedContainerConfigs(existingContainerNames)
+		if configsRemoved > 0 {
+			fmt.Printf("Cleaned up %d orphaned container config(s)\n", configsRemoved)
+		}
+	}
+
 	// Clear the tracker since we've handled orphaned containers
 	if tracker != nil && len(orphanedFromCrash) > 0 {
 		tracker.Clear()
