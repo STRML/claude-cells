@@ -139,15 +139,21 @@ fi
 # Copy essential .claude files (NOT the whole directory - it's huge!)
 if test -d "/home/claude/.claude" && test "$HOME" != "/home/claude"; then
   echo "[ccells] Copying .claude config from /home/claude..."
-  # Only copy essential config files, not session data/cache/telemetry
-  for f in settings.json CLAUDE.md; do
-    test -f "/home/claude/.claude/$f" && cp "/home/claude/.claude/$f" "$HOME/.claude/" 2>/dev/null
+  # Only copy essential config files, not cache/telemetry/shell-snapshots
+  for f in settings.json CLAUDE.md statsig; do
+    test -e "/home/claude/.claude/$f" && cp -r "/home/claude/.claude/$f" "$HOME/.claude/" 2>/dev/null
   done
   # Copy plugins config if it exists
   if test -d "/home/claude/.claude/plugins"; then
     mkdir -p "$HOME/.claude/plugins"
     test -f "/home/claude/.claude/plugins/installed_plugins.json" && \
       cp "/home/claude/.claude/plugins/installed_plugins.json" "$HOME/.claude/plugins/" 2>/dev/null
+  fi
+  # Copy session data for /workspace project (needed for --continue)
+  if test -d "/home/claude/.claude/projects/-workspace"; then
+    echo "[ccells] Copying session data for --continue..."
+    mkdir -p "$HOME/.claude/projects"
+    cp -r "/home/claude/.claude/projects/-workspace" "$HOME/.claude/projects/" 2>/dev/null
   fi
 fi
 
