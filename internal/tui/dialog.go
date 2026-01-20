@@ -27,6 +27,8 @@ const (
 	DialogPruneProjectConfirm
 	DialogCommitBeforeMerge
 	DialogResourceUsage
+	DialogPostMergeDestroy // Confirmation to destroy container after successful merge
+	DialogMergeConflict    // Merge failed due to conflicts - offer rebase
 )
 
 // DialogModel represents a modal dialog
@@ -235,6 +237,44 @@ func NewCommitBeforeMergeDialog(branchName, workstreamID string) DialogModel {
 			"Yes, commit changes",
 			"No, continue without committing",
 			"Cancel",
+		},
+		MenuSelection: 0,
+	}
+}
+
+// NewPostMergeDestroyDialog creates a dialog asking if user wants to destroy the container after merge
+func NewPostMergeDestroyDialog(branchName, workstreamID string) DialogModel {
+	body := fmt.Sprintf("Branch '%s' has been merged into main.\n\nThe work is complete. Would you like to destroy this container?", branchName)
+
+	return DialogModel{
+		Type:         DialogPostMergeDestroy,
+		Title:        "Merge Successful",
+		Body:         body,
+		WorkstreamID: workstreamID,
+		MenuItems: []string{
+			"Yes, destroy container",
+			"No, keep container",
+		},
+		MenuSelection: 0,
+	}
+}
+
+// NewMergeConflictDialog creates a dialog for handling merge conflicts
+func NewMergeConflictDialog(branchName, workstreamID string, conflictFiles []string) DialogModel {
+	body := fmt.Sprintf("Merge of '%s' into main has conflicts.\n\nConflicting files:\n", branchName)
+	for _, f := range conflictFiles {
+		body += fmt.Sprintf("  • %s\n", f)
+	}
+	body += "\nYou can rebase onto main and resolve conflicts in the container,\nor cancel and keep the current state."
+
+	return DialogModel{
+		Type:         DialogMergeConflict,
+		Title:        "Merge Conflict",
+		Body:         body,
+		WorkstreamID: workstreamID,
+		MenuItems: []string{
+			"Rebase onto main (resolve conflicts in container)",
+			"Cancel (keep current state)",
 		},
 		MenuSelection: 0,
 	}

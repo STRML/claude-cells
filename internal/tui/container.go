@@ -7,6 +7,7 @@ import (
 	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -22,9 +23,17 @@ import (
 // containerTracker holds the global container tracker for crash recovery
 var containerTracker *docker.ContainerTracker
 
+// credentialRefresher holds the global credential refresher for OAuth token updates
+var credentialRefresher *docker.CredentialRefresher
+
 // SetContainerTracker sets the container tracker for tracking container lifecycle
 func SetContainerTracker(tracker *docker.ContainerTracker) {
 	containerTracker = tracker
+}
+
+// SetCredentialRefresher sets the credential refresher for OAuth token updates
+func SetCredentialRefresher(refresher *docker.CredentialRefresher) {
+	credentialRefresher = refresher
 }
 
 // trackContainer adds a container to the tracker if available
@@ -38,6 +47,20 @@ func trackContainer(containerID, workstreamID, branchName, repoPath string) {
 func untrackContainer(containerID string) {
 	if containerTracker != nil {
 		containerTracker.Untrack(containerID)
+	}
+}
+
+// registerContainerCredentials registers a container with the credential refresher
+func registerContainerCredentials(containerID, containerName, configDir string) {
+	if credentialRefresher != nil {
+		credentialRefresher.RegisterContainer(containerID, containerName, configDir)
+	}
+}
+
+// unregisterContainerCredentials removes a container from the credential refresher
+func unregisterContainerCredentials(containerID string) {
+	if credentialRefresher != nil {
+		credentialRefresher.UnregisterContainer(containerID)
 	}
 }
 
@@ -435,6 +458,9 @@ func RebuildContainerCmd(ws *workstream.Workstream) tea.Cmd {
 
 		trackContainer(containerID, ws.ID, ws.BranchName, worktreePath)
 
+		// Register for credential refresh - use parent of ClaudeDir as config dir
+		registerContainerCredentials(containerID, cfg.Name, filepath.Dir(configPaths.ClaudeDir))
+
 		// Return with IsResume=true so PTY uses --continue
 		return ContainerStartedMsg{
 			WorkstreamID: ws.ID,
@@ -678,6 +704,9 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 		// Track the container for crash recovery
 		trackContainer(containerID, ws.ID, ws.BranchName, worktreePath)
 
+		// Register for credential refresh - use parent of ClaudeDir as config dir
+		registerContainerCredentials(containerID, cfg.Name, filepath.Dir(configPaths.ClaudeDir))
+
 		return ContainerStartedMsg{
 			WorkstreamID: ws.ID,
 			ContainerID:  containerID,
@@ -777,6 +806,8 @@ func StopContainerCmd(ws *workstream.Workstream) tea.Cmd {
 			}
 			// Untrack the container since it's been removed
 			untrackContainer(ws.ContainerID)
+			// Unregister from credential refresh
+			unregisterContainerCredentials(ws.ContainerID)
 		}
 		log.Printf("[DEBUG] Container cleanup done")
 
@@ -1272,8 +1303,9 @@ func CreatePRCmd(ws *workstream.Workstream) tea.Cmd {
 
 // MergeBranchMsg is sent when a branch merge completes.
 type MergeBranchMsg struct {
-	WorkstreamID string
-	Error        error
+	WorkstreamID  string
+	Error         error
+	ConflictFiles []string // Files with conflicts (if any)
 }
 
 // MergeBranchCmd returns a command that merges a branch into main.
@@ -1291,10 +1323,56 @@ func MergeBranchCmd(ws *workstream.Workstream) tea.Cmd {
 
 		// Merge the branch into main
 		if err := gitRepo.MergeBranch(ctx, ws.BranchName); err != nil {
+			// Check if it's a conflict error
+			if conflictErr, ok := err.(*git.MergeConflictError); ok {
+				return MergeBranchMsg{
+					WorkstreamID:  ws.ID,
+					Error:         err,
+					ConflictFiles: conflictErr.ConflictFiles,
+				}
+			}
 			return MergeBranchMsg{WorkstreamID: ws.ID, Error: fmt.Errorf("failed to merge branch: %w", err)}
 		}
 
 		return MergeBranchMsg{WorkstreamID: ws.ID}
+	}
+}
+
+// RebaseBranchMsg is sent when a rebase completes.
+type RebaseBranchMsg struct {
+	WorkstreamID  string
+	Error         error
+	ConflictFiles []string // Files with conflicts (if rebase stopped)
+}
+
+// RebaseBranchCmd returns a command that rebases a branch onto main.
+func RebaseBranchCmd(ws *workstream.Workstream) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
+
+		// Use the worktree path if available
+		worktreePath := ws.WorktreePath
+		if worktreePath == "" {
+			worktreePath = getWorktreePath(ws.BranchName)
+		}
+
+		gitRepo := git.New(worktreePath)
+
+		// Rebase the branch onto main
+		if err := gitRepo.RebaseBranch(ctx, ws.BranchName); err != nil {
+			// Check if it's a conflict error
+			if conflictErr, ok := err.(*git.MergeConflictError); ok {
+				return RebaseBranchMsg{
+					WorkstreamID:  ws.ID,
+					Error:         err,
+					ConflictFiles: conflictErr.ConflictFiles,
+				}
+			}
+			return RebaseBranchMsg{WorkstreamID: ws.ID, Error: err}
+		}
+
+		return RebaseBranchMsg{WorkstreamID: ws.ID}
 	}
 }
 

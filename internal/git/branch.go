@@ -87,8 +87,19 @@ func (g *Git) Push(ctx context.Context, branch string) error {
 	return err
 }
 
+// MergeConflictError represents a merge conflict that needs resolution
+type MergeConflictError struct {
+	Branch        string
+	ConflictFiles []string
+}
+
+func (e *MergeConflictError) Error() string {
+	return fmt.Sprintf("merge conflict in branch %s: %d files with conflicts", e.Branch, len(e.ConflictFiles))
+}
+
 // MergeBranch merges a branch into the current branch (typically main).
 // It performs a checkout to main, then merges the specified branch.
+// Returns MergeConflictError if there are conflicts that need resolution.
 func (g *Git) MergeBranch(ctx context.Context, branch string) error {
 	// Checkout main first
 	if _, err := g.run(ctx, "checkout", "main"); err != nil {
@@ -100,6 +111,59 @@ func (g *Git) MergeBranch(ctx context.Context, branch string) error {
 
 	// Merge the branch
 	_, err := g.run(ctx, "merge", branch, "--no-edit")
+	if err != nil {
+		// Check if this is a conflict
+		conflictFiles, conflictErr := g.GetConflictFiles(ctx)
+		if conflictErr == nil && len(conflictFiles) > 0 {
+			// Abort the failed merge to leave repo in clean state
+			_, _ = g.run(ctx, "merge", "--abort")
+			return &MergeConflictError{Branch: branch, ConflictFiles: conflictFiles}
+		}
+		return err
+	}
+	return nil
+}
+
+// GetConflictFiles returns list of files with merge conflicts
+func (g *Git) GetConflictFiles(ctx context.Context) ([]string, error) {
+	out, err := g.run(ctx, "diff", "--name-only", "--diff-filter=U")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	return lines, nil
+}
+
+// RebaseBranch rebases the specified branch onto main.
+// This should be run from within the branch's worktree.
+func (g *Git) RebaseBranch(ctx context.Context, branch string) error {
+	// Make sure we're on the branch
+	if _, err := g.run(ctx, "checkout", branch); err != nil {
+		return fmt.Errorf("failed to checkout branch %s: %w", branch, err)
+	}
+
+	// Fetch latest main from origin
+	_, _ = g.run(ctx, "fetch", "origin", "main")
+
+	// Try to rebase onto origin/main
+	_, err := g.run(ctx, "rebase", "origin/main")
+	if err != nil {
+		// Check if this is a conflict during rebase
+		conflictFiles, conflictErr := g.GetConflictFiles(ctx)
+		if conflictErr == nil && len(conflictFiles) > 0 {
+			return &MergeConflictError{Branch: branch, ConflictFiles: conflictFiles}
+		}
+		return fmt.Errorf("rebase failed: %w", err)
+	}
+	return nil
+}
+
+// AbortRebase aborts an in-progress rebase
+func (g *Git) AbortRebase(ctx context.Context) error {
+	_, err := g.run(ctx, "rebase", "--abort")
 	return err
 }
 

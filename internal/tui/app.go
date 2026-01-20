@@ -19,6 +19,17 @@ const escapeTimeout = 300 * time.Millisecond
 
 const toastDuration = 2 * time.Second
 
+// formatFileList formats a list of files for display
+func formatFileList(files []string) string {
+	var sb strings.Builder
+	for _, f := range files {
+		sb.WriteString("  • ")
+		sb.WriteString(f)
+		sb.WriteString("\n")
+	}
+	return sb.String()
+}
+
 // Version info - set by main via SetVersionInfo
 var (
 	versionInfo = "dev"
@@ -771,6 +782,46 @@ Scroll Mode:
 			m.updateLayout()
 			// Prune all containers and empty branches (globally!)
 			return m, PruneAllContainersAndBranchesCmd()
+
+		case DialogPostMergeDestroy:
+			// Value is "0" for "Yes, destroy container", "1" for "No, keep container"
+			if msg.Value == "0" {
+				// User chose to destroy
+				for i, pane := range m.panes {
+					if pane.Workstream().ID == msg.WorkstreamID {
+						ws := pane.Workstream()
+						m.manager.Remove(msg.WorkstreamID)
+						m.panes = append(m.panes[:i], m.panes[i+1:]...)
+						if m.focusedPane >= len(m.panes) && len(m.panes) > 0 {
+							m.focusedPane = len(m.panes) - 1
+						}
+						if len(m.panes) > 0 {
+							m.panes[m.focusedPane].SetFocused(true)
+						}
+						m.updateLayout()
+						m.toast = "Destroying merged container..."
+						m.toastExpiry = time.Now().Add(toastDuration)
+						return m, StopContainerCmd(ws)
+					}
+				}
+			}
+			// User chose to keep - do nothing
+
+		case DialogMergeConflict:
+			// Value is "0" for "Rebase onto main", "1" for "Cancel"
+			if msg.Value == "0" {
+				// User chose to rebase
+				for _, pane := range m.panes {
+					if pane.Workstream().ID == msg.WorkstreamID {
+						ws := pane.Workstream()
+						m.toast = "Rebasing onto main..."
+						m.toastExpiry = time.Now().Add(toastDuration)
+						pane.AppendOutput("Rebasing branch onto main...\n")
+						return m, RebaseBranchCmd(ws)
+					}
+				}
+			}
+			// User chose to cancel - do nothing
 		}
 		return m, nil
 
@@ -1254,6 +1305,8 @@ Scroll Mode:
 					}
 				} else {
 					m.panes[i].AppendOutput(fmt.Sprintf("PR created: %s\n", msg.PRURL))
+					// Notify Claude Code about the PR creation
+					_ = m.panes[i].SendToPTY(fmt.Sprintf("\n[ccells] ✓ PR #%d created: %s\n", msg.PRNumber, msg.PRURL))
 					// Update progress dialog if open
 					if m.dialog != nil && m.dialog.Type == DialogProgress && m.dialog.WorkstreamID == msg.WorkstreamID {
 						m.dialog.SetComplete(fmt.Sprintf("Pull Request Created!\n\nPR #%d: %s\n\nPress Enter or Esc to close.", msg.PRNumber, msg.PRURL))
@@ -1267,18 +1320,55 @@ Scroll Mode:
 	case MergeBranchMsg:
 		for i := range m.panes {
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				ws := m.panes[i].Workstream()
 				if msg.Error != nil {
-					m.panes[i].AppendOutput(fmt.Sprintf("Merge failed: %v\n", msg.Error))
-					// Update progress dialog if open
-					if m.dialog != nil && m.dialog.Type == DialogProgress && m.dialog.WorkstreamID == msg.WorkstreamID {
-						m.dialog.SetComplete(fmt.Sprintf("Merge Failed\n\n%v", msg.Error))
+					// Check if this is a conflict error
+					if len(msg.ConflictFiles) > 0 {
+						m.panes[i].AppendOutput(fmt.Sprintf("Merge conflict: %d files need resolution\n", len(msg.ConflictFiles)))
+						// Show merge conflict dialog
+						dialog := NewMergeConflictDialog(ws.BranchName, ws.ID, msg.ConflictFiles)
+						dialog.width = m.width
+						dialog.height = m.height
+						m.dialog = &dialog
+					} else {
+						m.panes[i].AppendOutput(fmt.Sprintf("Merge failed: %v\n", msg.Error))
+						// Update progress dialog if open
+						if m.dialog != nil && m.dialog.Type == DialogProgress && m.dialog.WorkstreamID == msg.WorkstreamID {
+							m.dialog.SetComplete(fmt.Sprintf("Merge Failed\n\n%v", msg.Error))
+						}
 					}
 				} else {
 					m.panes[i].AppendOutput("Branch merged into main successfully!\n")
-					// Update progress dialog if open
-					if m.dialog != nil && m.dialog.Type == DialogProgress && m.dialog.WorkstreamID == msg.WorkstreamID {
-						m.dialog.SetComplete("Branch merged into main!\n\nPress Enter or Esc to close.")
+					// Notify Claude Code about the merge
+					_ = m.panes[i].SendToPTY(fmt.Sprintf("\n[ccells] ✓ Branch '%s' merged into main\n", ws.BranchName))
+					// Show post-merge destroy dialog
+					dialog := NewPostMergeDestroyDialog(ws.BranchName, ws.ID)
+					dialog.width = m.width
+					dialog.height = m.height
+					m.dialog = &dialog
+				}
+				break
+			}
+		}
+		return m, nil
+
+	case RebaseBranchMsg:
+		for i := range m.panes {
+			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				ws := m.panes[i].Workstream()
+				if msg.Error != nil {
+					if len(msg.ConflictFiles) > 0 {
+						// Rebase has conflicts - notify Claude to resolve
+						m.panes[i].AppendOutput("Rebase has conflicts. Resolve in container and run 'git rebase --continue'\n")
+						_ = m.panes[i].SendToPTY(fmt.Sprintf("\n[ccells] ⚠ Rebase has conflicts. Please resolve the following files and run 'git rebase --continue':\n%s\n", formatFileList(msg.ConflictFiles)))
+					} else {
+						m.panes[i].AppendOutput(fmt.Sprintf("Rebase failed: %v\n", msg.Error))
 					}
+				} else {
+					m.panes[i].AppendOutput("Rebase successful! Branch is now up to date with main.\n")
+					_ = m.panes[i].SendToPTY(fmt.Sprintf("\n[ccells] ✓ Branch '%s' rebased onto main. You can now try merging again.\n", ws.BranchName))
+					m.toast = "Rebase successful"
+					m.toastExpiry = time.Now().Add(toastDuration)
 				}
 				break
 			}

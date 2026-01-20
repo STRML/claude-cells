@@ -279,10 +279,10 @@ func TestTitleGeneratedMsg(t *testing.T) {
 
 func TestUncommittedChangesMsg(t *testing.T) {
 	tests := []struct {
-		name        string
-		msg         UncommittedChangesMsg
-		hasChanges  bool
-		wantErr     bool
+		name       string
+		msg        UncommittedChangesMsg
+		hasChanges bool
+		wantErr    bool
 	}{
 		{
 			name: "has changes",

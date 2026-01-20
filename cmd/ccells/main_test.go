@@ -271,4 +271,3 @@ func TestCleanupOrphanedContainers_WithStateFile(t *testing.T) {
 	// The actual cleanup depends on Docker availability
 	cleanupOrphanedContainers(nil)
 }
-

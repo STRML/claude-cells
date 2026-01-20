@@ -30,10 +30,10 @@ func stripANSI(s string) string {
 type SummarizePhase int
 
 const (
-	SummarizePhasePrompt   SummarizePhase = iota // Showing prompt with spinner
-	SummarizePhaseReveal                         // Title revealed, brief highlight
-	SummarizePhaseFading                         // Title fading out over initialization
-	SummarizePhaseDone                           // Animation complete
+	SummarizePhasePrompt SummarizePhase = iota // Showing prompt with spinner
+	SummarizePhaseReveal                       // Title revealed, brief highlight
+	SummarizePhaseFading                       // Title fading out over initialization
+	SummarizePhaseDone                         // Animation complete
 )
 
 // PaneModel represents a single workstream pane
@@ -955,6 +955,15 @@ func (p *PaneModel) AppendOutput(text string) {
 	p.output.WriteString(text)
 	p.viewport.SetContent(p.output.String())
 	p.viewport.GotoBottom()
+}
+
+// SendToPTY sends text to the PTY session as if the user typed it.
+// This is used to notify Claude Code about external events like PR creation.
+func (p *PaneModel) SendToPTY(text string) error {
+	if p.pty == nil || p.pty.IsClosed() {
+		return fmt.Errorf("PTY session not available")
+	}
+	return p.pty.WriteString(text)
 }
 
 // WritePTYOutput writes raw PTY output to the virtual terminal

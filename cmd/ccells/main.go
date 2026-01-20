@@ -91,6 +91,12 @@ func main() {
 		go runHeartbeat(appCtx, tracker)
 	}
 
+	// Start credential refresher to keep OAuth tokens updated in containers
+	credRefresher := docker.NewCredentialRefresher(15 * time.Minute)
+	credRefresher.Start()
+	defer credRefresher.Stop()
+	tui.SetCredentialRefresher(credRefresher)
+
 	// Set version info for display in help dialog
 	tui.SetVersionInfo(Version, CommitHash)
 
