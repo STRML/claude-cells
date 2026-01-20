@@ -50,7 +50,7 @@ func SetVersionInfo(version, commit string) {
 // AppModel is the main application model
 type AppModel struct {
 	ctx            context.Context // App-level context for cancellation
-	manager        *workstream.Manager
+	manager        *workstream.PersistentManager
 	panes          []PaneModel
 	focusedPane    int
 	nextPaneIndex  int        // Counter for assigning permanent pane indices
@@ -91,7 +91,7 @@ func NewAppModel(ctx context.Context) AppModel {
 
 	return AppModel{
 		ctx:                 ctx,
-		manager:             workstream.NewManager(),
+		manager:             workstream.NewPersistentManager(cwd),
 		statusBar:           NewStatusBarModel(),
 		workingDir:          cwd,
 		nextPaneIndex:       1, // Start pane numbering at 1
@@ -109,11 +109,16 @@ func (m *AppModel) projectName() string {
 	return name
 }
 
-// saveStateCmd returns a command to save current state in the background.
-// Call this after any change to workstreams (create, destroy, container started).
-func (m *AppModel) saveStateCmd() tea.Cmd {
-	workstreams := m.manager.List()
-	return SaveStateInBackgroundCmd(m.workingDir, workstreams, m.focusedPane, int(m.layout))
+// setFocusedPane updates the focused pane and syncs with persistent manager.
+func (m *AppModel) setFocusedPane(idx int) {
+	m.focusedPane = idx
+	m.manager.SetFocused(idx)
+}
+
+// setLayout updates the layout and syncs with persistent manager.
+func (m *AppModel) setLayout(layout LayoutType) {
+	m.layout = layout
+	m.manager.SetLayout(int(layout))
 }
 
 // StateLoadedMsg is sent when state has been loaded from disk
@@ -180,19 +185,6 @@ func SaveStateAndQuitCmd(dir string, workstreams []*workstream.Workstream, focus
 		// Save state synchronously before returning
 		err := workstream.SaveState(dir, workstreams, focusedIndex, layout)
 		return StateSavedMsg{Error: err}
-	}
-}
-
-// BackgroundStateSavedMsg is sent when background state save completes (ignored by default)
-type BackgroundStateSavedMsg struct{}
-
-// SaveStateInBackgroundCmd saves state without quitting - used for incremental saves
-// during normal operation to ensure state is recoverable if force-quit occurs.
-func SaveStateInBackgroundCmd(dir string, workstreams []*workstream.Workstream, focusedIndex int, layout int) tea.Cmd {
-	return func() tea.Msg {
-		// Save state in background - errors are ignored for incremental saves
-		_ = workstream.SaveState(dir, workstreams, focusedIndex, layout)
-		return BackgroundStateSavedMsg{}
 	}
 }
 
@@ -293,7 +285,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.focusedPane < len(m.panes) {
 					m.panes[m.focusedPane].SetFocused(false)
 				}
-				m.focusedPane = clickedPane
+				m.setFocusedPane(clickedPane)
 				m.panes[m.focusedPane].SetFocused(true)
 
 				// Enter input mode (cursor visibility handled in View)
@@ -383,7 +375,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						neighbor := FindNeighbor(m.layout, len(m.panes), m.focusedPane, dir)
 						if neighbor >= 0 {
 							m.panes[m.focusedPane].SetFocused(false)
-							m.focusedPane = neighbor
+							m.setFocusedPane(neighbor)
 							m.panes[m.focusedPane].SetFocused(true)
 						}
 					}
@@ -414,7 +406,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							if m.focusedPane < len(m.panes) {
 								m.panes[m.focusedPane].SetFocused(false)
 							}
-							m.focusedPane = i
+							m.setFocusedPane(i)
 							m.panes[i].SetFocused(true)
 							break
 						}
@@ -534,7 +526,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				neighbor := FindNeighbor(m.layout, len(m.panes), m.focusedPane, dir)
 				if neighbor >= 0 {
 					m.panes[m.focusedPane].SetFocused(false)
-					m.focusedPane = neighbor
+					m.setFocusedPane(neighbor)
 					m.panes[m.focusedPane].SetFocused(true)
 				}
 			}
@@ -579,14 +571,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.manager.Remove(ws.ID)
 					m.panes = append(m.panes[:m.focusedPane], m.panes[m.focusedPane+1:]...)
 					if m.focusedPane >= len(m.panes) && len(m.panes) > 0 {
-						m.focusedPane = len(m.panes) - 1
+						m.setFocusedPane(len(m.panes) - 1)
 					}
 					if len(m.panes) > 0 {
 						m.panes[m.focusedPane].SetFocused(true)
 					}
 					m.renumberPanes()
 					m.updateLayout()
-					return m, tea.Batch(StopContainerCmd(ws), m.saveStateCmd())
+					return m, StopContainerCmd(ws)
 				}
 				dialog := NewDestroyDialog(ws.BranchName, ws.ID)
 				dialog.SetSize(50, 15)
@@ -695,7 +687,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "L":
 			// Cycle through layout types
-			m.layout = m.layout.Next()
+			m.setLayout(m.layout.Next())
 			m.updateLayout()
 			m.toast = fmt.Sprintf("Layout: %s", m.layout.String())
 			m.toastExpiry = time.Now().Add(toastDuration)
@@ -732,7 +724,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					swapPos := m.focusedPane
 					m.panes[0], m.panes[swapPos] = m.panes[swapPos], m.panes[0]
 					m.panes[swapPos].SetFocused(false)
-					m.focusedPane = 0
+					m.setFocusedPane(0)
 					m.panes[0].SetFocused(true)
 					m.lastSwapPosition = swapPos // Remember for toggle back
 					m.updateLayout()
@@ -743,7 +735,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					swapPos := m.lastSwapPosition
 					m.panes[0], m.panes[swapPos] = m.panes[swapPos], m.panes[0]
 					m.panes[0].SetFocused(false)
-					m.focusedPane = swapPos
+					m.setFocusedPane(swapPos)
 					m.panes[swapPos].SetFocused(true)
 					m.lastSwapPosition = 0 // Clear after swap back
 					m.updateLayout()
@@ -757,7 +749,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Cycle focus (stay in nav mode)
 			if len(m.panes) > 0 {
 				m.panes[m.focusedPane].SetFocused(false)
-				m.focusedPane = (m.focusedPane + 1) % len(m.panes)
+				m.setFocusedPane((m.focusedPane + 1) % len(m.panes))
 				m.panes[m.focusedPane].SetFocused(true)
 			}
 			return m, nil
@@ -770,7 +762,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if m.focusedPane < len(m.panes) {
 						m.panes[m.focusedPane].SetFocused(false)
 					}
-					m.focusedPane = i
+					m.setFocusedPane(i)
 					m.panes[i].SetFocused(true)
 					break
 				}
@@ -876,7 +868,7 @@ Scroll Mode:
 			if m.focusedPane < len(m.panes)-1 && m.focusedPane < len(m.panes) {
 				m.panes[m.focusedPane].SetFocused(false)
 			}
-			m.focusedPane = len(m.panes) - 1
+			m.setFocusedPane(len(m.panes) - 1)
 			m.panes[m.focusedPane].SetFocused(true)
 			// Generate title first (container starts after title is ready)
 			return m, tea.Batch(GenerateTitleCmd(ws), spinnerTickCmd())
@@ -889,15 +881,14 @@ Scroll Mode:
 					m.manager.Remove(msg.WorkstreamID)
 					m.panes = append(m.panes[:i], m.panes[i+1:]...)
 					if m.focusedPane >= len(m.panes) && len(m.panes) > 0 {
-						m.focusedPane = len(m.panes) - 1
+						m.setFocusedPane(len(m.panes) - 1)
 					}
 					if len(m.panes) > 0 {
 						m.panes[m.focusedPane].SetFocused(true)
 					}
 					m.renumberPanes()
 					m.updateLayout()
-					// Stop container and save state (so force-quit preserves correct list)
-					return m, tea.Batch(StopContainerCmd(ws), m.saveStateCmd())
+					return m, StopContainerCmd(ws)
 				}
 			}
 
@@ -912,10 +903,10 @@ Scroll Mode:
 			}
 			// Clear all panes
 			m.panes = nil
-			m.focusedPane = 0
+			m.setFocusedPane(0)
 			m.updateLayout()
-			// Prune containers and empty branches for this project only, save state
-			return m, tea.Batch(PruneProjectContainersAndBranchesCmd(m.projectName()), m.saveStateCmd())
+			// Prune containers and empty branches for this project only
+			return m, PruneProjectContainersAndBranchesCmd(m.projectName())
 
 		case DialogPruneAllConfirm:
 			// User typed "destroy" - close all panes, prune ALL containers globally
@@ -928,10 +919,10 @@ Scroll Mode:
 			}
 			// Clear all panes
 			m.panes = nil
-			m.focusedPane = 0
+			m.setFocusedPane(0)
 			m.updateLayout()
-			// Prune all containers and empty branches (globally!), save state
-			return m, tea.Batch(PruneAllContainersAndBranchesCmd(), m.saveStateCmd())
+			// Prune all containers and empty branches (globally!)
+			return m, PruneAllContainersAndBranchesCmd()
 
 		case DialogPostMergeDestroy:
 			// Value is "0" for "Yes, destroy container", "1" for "No, keep container"
@@ -943,7 +934,7 @@ Scroll Mode:
 						m.manager.Remove(msg.WorkstreamID)
 						m.panes = append(m.panes[:i], m.panes[i+1:]...)
 						if m.focusedPane >= len(m.panes) && len(m.panes) > 0 {
-							m.focusedPane = len(m.panes) - 1
+							m.setFocusedPane(len(m.panes) - 1)
 						}
 						if len(m.panes) > 0 {
 							m.panes[m.focusedPane].SetFocused(true)
@@ -951,7 +942,7 @@ Scroll Mode:
 						m.updateLayout()
 						m.toast = "Destroying merged container..."
 						m.toastExpiry = time.Now().Add(toastDuration)
-						return m, tea.Batch(StopContainerCmd(ws), m.saveStateCmd())
+						return m, StopContainerCmd(ws)
 					}
 				}
 			}
@@ -996,9 +987,11 @@ Scroll Mode:
 					}
 				}
 				m.quitting = true
+				m.manager.Close() // Final flush before quit
 				return m, PauseAllAndSaveCmd(m.workingDir, workstreams, m.focusedPane, int(m.layout))
 			}
 			m.quitting = true
+			m.manager.Close() // Final flush before quit
 			// Save empty state (no panes) so next startup is clean
 			return m, SaveStateAndQuitCmd(m.workingDir, nil, 0, int(m.layout))
 		}
@@ -1010,6 +1003,7 @@ Scroll Mode:
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
 				ws := m.panes[i].Workstream()
 				ws.SetContainerID(msg.ContainerID)
+				m.manager.UpdateWorkstream(ws.ID)
 				if msg.IsResume {
 					m.panes[i].SetInitStatus("Resuming Claude Code...")
 				} else {
@@ -1210,8 +1204,9 @@ Scroll Mode:
 				ws.SetState(workstream.StateRunning)
 				m.panes[i].SetPTY(msg.Session)
 				m.panes[i].SetInitStatus("Starting Claude Code...")
-				// Save state now that workstream is running (recoverable if force-quit)
-				return m, m.saveStateCmd()
+				// PersistentManager auto-saves state
+				m.manager.UpdateWorkstream(ws.ID)
+				return m, nil
 			}
 		}
 		return m, nil
@@ -1356,12 +1351,7 @@ Scroll Mode:
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
 				ws := m.panes[i].Workstream()
 				ws.SetClaudeSessionID(msg.SessionID)
-				// Save state immediately to persist the session ID
-				var workstreams []*workstream.Workstream
-				for _, pane := range m.panes {
-					workstreams = append(workstreams, pane.Workstream())
-				}
-				_ = workstream.SaveState(m.workingDir, workstreams, m.focusedPane, int(m.layout))
+				m.manager.UpdateWorkstream(ws.ID) // Auto-persists
 				break
 			}
 		}
@@ -1767,14 +1757,14 @@ Scroll Mode:
 
 		// Restore focus
 		if msg.State.FocusedIndex >= 0 && msg.State.FocusedIndex < len(m.panes) {
-			m.focusedPane = msg.State.FocusedIndex
+			m.setFocusedPane(msg.State.FocusedIndex)
 		}
 		if len(m.panes) > 0 {
 			m.panes[m.focusedPane].SetFocused(true)
 		}
 
 		// Restore layout
-		m.layout = LayoutType(msg.State.Layout)
+		m.setLayout(LayoutType(msg.State.Layout))
 		m.updateLayout()
 		m.toast = fmt.Sprintf("Resumed %d workstream(s)", len(msg.State.Workstreams))
 		m.toastExpiry = time.Now().Add(toastDuration)
@@ -2195,7 +2185,7 @@ func (m *AppModel) updateLayout() {
 }
 
 // Manager returns the workstream manager
-func (m *AppModel) Manager() *workstream.Manager {
+func (m *AppModel) Manager() *workstream.PersistentManager {
 	return m.manager
 }
 
