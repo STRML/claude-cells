@@ -125,10 +125,12 @@ type TitleGeneratedMsg struct {
 type UncommittedChangesMsg struct {
 	WorkstreamID string
 	HasChanges   bool
+	BranchInfo   string // Branch statistics (commits, files changed, lines)
 	Error        error
 }
 
 // CheckUncommittedChangesCmd checks if a worktree has uncommitted changes.
+// Also fetches branch statistics for the merge dialog.
 func CheckUncommittedChangesCmd(ws *workstream.Workstream) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -158,9 +160,13 @@ func CheckUncommittedChangesCmd(ws *workstream.Workstream) tea.Cmd {
 			}
 		}
 
+		// Fetch branch statistics for the merge dialog
+		branchInfo, _ := gitRepo.GetBranchInfo(ctx, ws.BranchName)
+
 		return UncommittedChangesMsg{
 			WorkstreamID: ws.ID,
 			HasChanges:   hasChanges,
+			BranchInfo:   branchInfo,
 		}
 	}
 }
