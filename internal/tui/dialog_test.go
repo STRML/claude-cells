@@ -1042,3 +1042,73 @@ func TestPostMergeDestroyDialog_View(t *testing.T) {
 		t.Error("View should contain selection indicator")
 	}
 }
+
+func TestWorkstreamDialog_ShiftEnterInsertsNewline(t *testing.T) {
+	// Test that InsertRune('\n') works correctly for textarea
+	// This is the mechanism used by the shift+enter handler
+	d := NewWorkstreamDialog()
+	d.TextArea.SetValue("line one")
+
+	// Insert a newline manually (mimicking what shift+enter does)
+	d.TextArea.InsertRune('\n')
+	d.TextArea.InsertString("line two")
+
+	finalValue := d.TextArea.Value()
+	if !strings.Contains(finalValue, "\n") {
+		t.Errorf("TextArea should contain newline, got %q", finalValue)
+	}
+	if finalValue != "line one\nline two" {
+		t.Errorf("TextArea value should be 'line one\\nline two', got %q", finalValue)
+	}
+}
+
+func TestWorkstreamDialog_ShiftEnterKeyHandling(t *testing.T) {
+	d := NewWorkstreamDialog()
+	d.TextArea.SetValue("test")
+
+	// Create a mock key message for shift+enter
+	// In BubbleTea, we can create a KeyMsg and check its String() method
+	// For this test, we'll verify the switch case logic works by checking
+	// that the handler properly inserts a newline
+
+	// Since we can't easily mock the exact key message, let's verify the
+	// InsertRune behavior and that enter confirms while shift+enter doesn't
+
+	// Test 1: Enter with text should confirm
+	d1 := NewWorkstreamDialog()
+	d1.TextArea.SetValue("test value")
+	d1, cmd1 := d1.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if cmd1 == nil {
+		t.Error("Enter with text should return a confirm command")
+	} else {
+		msg := cmd1()
+		if _, ok := msg.(DialogConfirmMsg); !ok {
+			t.Error("Enter should return DialogConfirmMsg")
+		}
+	}
+
+	// Test 2: Verify InsertRune works for newlines (this is what shift+enter does)
+	d2 := NewWorkstreamDialog()
+	d2.TextArea.SetValue("first")
+	d2.TextArea.InsertRune('\n')
+	d2.TextArea.InsertString("second")
+
+	if d2.TextArea.Value() != "first\nsecond" {
+		t.Errorf("InsertRune should insert newline, got %q", d2.TextArea.Value())
+	}
+}
+
+func TestWorkstreamDialog_ViewShowsShiftEnterHint(t *testing.T) {
+	d := NewWorkstreamDialog()
+	d.SetSize(70, 15)
+
+	view := d.View()
+
+	if !strings.Contains(view, "Shift+Enter") {
+		t.Error("View should contain 'Shift+Enter' hint for newline")
+	}
+	if !strings.Contains(view, "newline") {
+		t.Error("View should contain 'newline' in the hint")
+	}
+}

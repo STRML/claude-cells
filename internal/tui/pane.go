@@ -280,7 +280,8 @@ func (p PaneModel) Update(msg tea.Msg) (PaneModel, tea.Cmd) {
 				case "enter":
 					data = []byte("\r")
 				case "shift+enter":
-					data = []byte("\n") // Insert literal newline (multiline input)
+					// Kitty keyboard protocol: CSI 13;2u (13=Enter codepoint, 2=Shift modifier)
+					data = []byte{27, '[', '1', '3', ';', '2', 'u'}
 				case "backspace":
 					data = []byte{127}
 				case "tab":
