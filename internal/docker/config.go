@@ -143,9 +143,10 @@ func CreateContainerConfig(containerName string) (*ConfigPaths, error) {
 		return nil, fmt.Errorf("failed to create container config directory: %w", err)
 	}
 
-	// Copy .claude directory if it exists
+	// Copy .claude directory selectively (exclude projects/ to avoid copying
+	// sessions from all other repos - we only need this container's sessions)
 	if _, err := os.Stat(srcClaudeDir); err == nil {
-		if err := copyDir(srcClaudeDir, dstClaudeDir); err != nil {
+		if err := copyClaudeDirSelective(srcClaudeDir, dstClaudeDir); err != nil {
 			return nil, fmt.Errorf("failed to copy .claude directory: %w", err)
 		}
 	}
@@ -265,11 +266,12 @@ func InitClaudeConfig() (*ConfigPaths, error) {
 		return nil, fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	// Copy .claude directory if it exists
+	// Copy .claude directory selectively (exclude projects/ to avoid copying
+	// sessions from all other repos - we only need this container's sessions)
 	// First try to remove the destination dir to ensure a clean copy
 	_ = removeAllSafe(dstClaudeDir)
 	if _, err := os.Stat(srcClaudeDir); err == nil {
-		if err := copyDir(srcClaudeDir, dstClaudeDir); err != nil {
+		if err := copyClaudeDirSelective(srcClaudeDir, dstClaudeDir); err != nil {
 			return nil, fmt.Errorf("failed to copy .claude directory: %w", err)
 		}
 	}
@@ -390,6 +392,58 @@ func copyFileForce(src, dst string) error {
 	// Try to remove destination first
 	_ = os.Remove(dst)
 	return copyFile(src, dst)
+}
+
+// copyClaudeDirSelective copies the .claude directory but excludes the projects/
+// subdirectory. This prevents copying sessions from all other repos into each
+// container, which can be very large and is unnecessary.
+func copyClaudeDirSelective(src, dst string) error {
+	srcInfo, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+
+	// Create destination directory
+	if err := os.MkdirAll(dst, srcInfo.Mode()); err != nil {
+		return err
+	}
+
+	entries, err := os.ReadDir(src)
+	if err != nil {
+		return err
+	}
+
+	for _, entry := range entries {
+		srcPath := filepath.Join(src, entry.Name())
+		dstPath := filepath.Join(dst, entry.Name())
+
+		// Skip projects directory - it contains sessions from ALL repos
+		// which can be hundreds of MB. Each container will create its own
+		// sessions in -workspace/ as it runs.
+		if entry.Name() == "projects" {
+			// Just create an empty projects directory
+			_ = os.MkdirAll(dstPath, 0755)
+			continue
+		}
+
+		// Skip other directories that aren't needed
+		switch entry.Name() {
+		case "debug", "cache", "image-cache":
+			continue
+		}
+
+		if entry.IsDir() {
+			if err := copyDir(srcPath, dstPath); err != nil {
+				continue // Skip dirs with permission issues
+			}
+		} else {
+			if err := copyFile(srcPath, dstPath); err != nil {
+				continue // Skip files with permission issues
+			}
+		}
+	}
+
+	return nil
 }
 
 // copyDir recursively copies a directory from src to dst
