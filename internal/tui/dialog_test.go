@@ -694,3 +694,109 @@ func TestWorkstreamDialog_NonTextAreaDialogUnaffectedBySetSize(t *testing.T) {
 		t.Errorf("width should be 70, got %d", d.width)
 	}
 }
+
+func TestNewFirstRunIntroductionDialog(t *testing.T) {
+	d := NewFirstRunIntroductionDialog()
+
+	if d.Type != DialogFirstRunIntroduction {
+		t.Error("Type should be DialogFirstRunIntroduction")
+	}
+	if d.Title != "Getting Started" {
+		t.Errorf("Title should be 'Getting Started', got %q", d.Title)
+	}
+	if !strings.Contains(d.Body, "Welcome to Claude Cells") {
+		t.Error("Body should contain welcome message")
+	}
+	if !strings.Contains(d.Body, "NAV mode") {
+		t.Error("Body should contain NAV mode explanation")
+	}
+	if !strings.Contains(d.Body, "INPUT mode") {
+		t.Error("Body should contain INPUT mode explanation")
+	}
+	if !strings.Contains(d.Body, "github.com/STRML/claude-cells") {
+		t.Error("Body should contain GitHub link")
+	}
+}
+
+func TestFirstRunIntroductionDialog_DismissOnEnter(t *testing.T) {
+	d := NewFirstRunIntroductionDialog()
+	_, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if cmd == nil {
+		t.Fatal("Should return a command on enter")
+	}
+
+	msg := cmd()
+	confirmMsg, ok := msg.(DialogConfirmMsg)
+	if !ok {
+		t.Fatal("Should return DialogConfirmMsg on enter")
+	}
+	if confirmMsg.Type != DialogFirstRunIntroduction {
+		t.Errorf("DialogConfirmMsg type should be DialogFirstRunIntroduction, got %d", confirmMsg.Type)
+	}
+}
+
+func TestFirstRunIntroductionDialog_DismissOnEscape(t *testing.T) {
+	d := NewFirstRunIntroductionDialog()
+	_, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+	if cmd == nil {
+		t.Fatal("Should return a command on escape")
+	}
+
+	msg := cmd()
+	if _, ok := msg.(DialogCancelMsg); !ok {
+		t.Error("Should return DialogCancelMsg on escape")
+	}
+}
+
+func TestFirstRunIntroductionDialog_Scrolling(t *testing.T) {
+	d := NewFirstRunIntroductionDialog()
+	d.SetSize(60, 15) // Small height to ensure scrolling is needed
+
+	// Initial scroll offset should be 0
+	if d.scrollOffset != 0 {
+		t.Errorf("Initial scrollOffset should be 0, got %d", d.scrollOffset)
+	}
+
+	// Scroll down
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if d.scrollOffset != 1 {
+		t.Errorf("scrollOffset should be 1 after down, got %d", d.scrollOffset)
+	}
+
+	// Scroll down with j
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if d.scrollOffset != 2 {
+		t.Errorf("scrollOffset should be 2 after 'j', got %d", d.scrollOffset)
+	}
+
+	// Scroll up
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if d.scrollOffset != 1 {
+		t.Errorf("scrollOffset should be 1 after up, got %d", d.scrollOffset)
+	}
+
+	// Scroll up with k
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	if d.scrollOffset != 0 {
+		t.Errorf("scrollOffset should be 0 after 'k', got %d", d.scrollOffset)
+	}
+}
+
+func TestFirstRunIntroductionDialog_View(t *testing.T) {
+	d := NewFirstRunIntroductionDialog()
+	d.SetSize(70, 30)
+
+	view := d.View()
+
+	if !strings.Contains(view, "Getting Started") {
+		t.Error("View should contain title")
+	}
+	if !strings.Contains(view, "Welcome") {
+		t.Error("View should contain welcome message")
+	}
+	if !strings.Contains(view, "Enter") {
+		t.Error("View should contain continue hint")
+	}
+}

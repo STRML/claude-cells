@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/STRML/claude-cells/internal/config"
 	"github.com/STRML/claude-cells/internal/docker"
 	"github.com/STRML/claude-cells/internal/workstream"
 	tea "github.com/charmbracelet/bubbletea"
@@ -850,6 +851,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 			}
 			// User chose to cancel - do nothing
+
+		case DialogFirstRunIntroduction:
+			// Mark introduction as shown and persist
+			if err := config.MarkIntroductionShown(); err != nil {
+				// Log error but don't fail - user can still use the app
+				m.toast = "Note: Could not save introduction state"
+				m.toastExpiry = time.Now().Add(toastDuration)
+			}
 		}
 		return m, nil
 
@@ -1558,6 +1567,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toastExpiry = time.Now().Add(toastDuration * 2)
 			return m, nil
 		}
+
+		// Check for first run and show introduction dialog
+		if config.IsFirstRun() {
+			dialog := NewFirstRunIntroductionDialog()
+			dialog.SetSize(70, m.height-4)
+			m.dialog = &dialog
+		}
+
 		if msg.State == nil || len(msg.State.Workstreams) == 0 {
 			// No saved state
 			return m, nil
