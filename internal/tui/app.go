@@ -317,6 +317,16 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					return m, nil
 				}
+				// In scroll mode, arrow keys scroll instead of going to pane
+				if len(m.panes) > 0 && m.focusedPane < len(m.panes) && m.panes[m.focusedPane].IsScrollMode() {
+					switch msg.String() {
+					case "up":
+						m.panes[m.focusedPane].ScrollLineUp()
+					case "down":
+						m.panes[m.focusedPane].ScrollLineDown()
+					}
+					return m, nil
+				}
 				// Not a tmux sequence - pass to pane
 				m.tmuxPrefix = false
 				var cmd tea.Cmd
@@ -354,6 +364,20 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 						} else {
 							m.panes[m.focusedPane].ScrollPageDown()
 						}
+					}
+					return m, nil
+				}
+				// Not a tmux sequence - pass to pane
+				m.tmuxPrefix = false
+				var cmd tea.Cmd
+				m.panes[m.focusedPane], cmd = m.panes[m.focusedPane].Update(msg)
+				return m, cmd
+			case "[":
+				// Check for tmux-style prefix (ctrl-b + [) - enter scroll/copy mode
+				if m.tmuxPrefix && time.Since(m.tmuxPrefixTime) < tmuxPrefixTimeout {
+					m.tmuxPrefix = false
+					if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
+						m.panes[m.focusedPane].EnterScrollMode()
 					}
 					return m, nil
 				}
@@ -433,8 +457,20 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, nil
 
 		case "left", "right", "up", "down":
-			// Arrow keys use spatial navigation based on layout
 			m.tmuxPrefix = false
+			// In scroll mode, up/down arrows scroll instead of navigating panes
+			if len(m.panes) > 0 && m.focusedPane < len(m.panes) && m.panes[m.focusedPane].IsScrollMode() {
+				switch msg.String() {
+				case "up":
+					m.panes[m.focusedPane].ScrollLineUp()
+					return m, nil
+				case "down":
+					m.panes[m.focusedPane].ScrollLineDown()
+					return m, nil
+				}
+				// left/right fall through to navigate panes
+			}
+			// Arrow keys use spatial navigation based on layout
 			if len(m.panes) > 1 {
 				var dir Direction
 				switch msg.String() {
@@ -468,6 +504,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Scroll focused pane down
 			if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
 				m.panes[m.focusedPane].ScrollPageDown()
+			}
+			return m, nil
+
+		case "[":
+			// Enter scroll/copy mode (tmux-style)
+			if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
+				m.panes[m.focusedPane].EnterScrollMode()
 			}
 			return m, nil
 
@@ -1787,15 +1830,15 @@ func (m AppModel) renderTitleBar() string {
 	var hints string
 	if m.inputMode {
 		if scrollIndicator != "" {
-			hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [Ctrl+B PgUp/Dn] scroll  [Esc] exit scroll")
+			hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [↑↓/PgUp/Dn] scroll  [Esc] exit scroll")
 		} else {
-			hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [Esc Esc] nav  [Ctrl+B ←→] switch  [Ctrl+B PgUp/Dn] scroll")
+			hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [Esc Esc] nav  [Ctrl+B ←→] switch  [Ctrl+B [] scroll")
 		}
 	} else {
 		if scrollIndicator != "" {
-			hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [PgUp/Dn] scroll  [Esc] exit scroll  [i]nput")
+			hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [↑↓/PgUp/Dn] scroll  [Esc] exit scroll  [i]nput")
 		} else {
-			hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [←→]panes  [n]ew  [m]erge  [d]estroy  [l]ogs  [`]panel  [i]nput  [?]help")
+			hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [←→]panes  [n]ew  [m]erge  [d]estroy  [l]ogs  [`]panel  [[]scroll  [i]nput  [?]help")
 		}
 	}
 

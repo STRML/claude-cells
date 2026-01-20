@@ -427,7 +427,16 @@ func (p PaneModel) View() string {
 	// Mode indicator for focused pane
 	var modeIndicator string
 	if p.focused && !p.initializing {
-		if p.inputMode {
+		if p.scrollMode {
+			// Scroll mode - orange background
+			colorOrange := "#D97706"
+			modeIndicator = lipgloss.NewStyle().
+				Background(lipgloss.Color(colorOrange)).
+				Foreground(lipgloss.Color("#FFFFFF")).
+				Bold(true).
+				Padding(0, 1).
+				Render("SCROLL")
+		} else if p.inputMode {
 			// Input mode - bright cyan background (also fades in)
 			var modeBg lipgloss.Color
 			if p.fading {
@@ -1067,6 +1076,26 @@ func (p *PaneModel) ScrollPageDown() {
 	if p.viewport.AtBottom() {
 		p.scrollMode = false
 	}
+}
+
+// ScrollLineUp scrolls the viewport up by one line
+func (p *PaneModel) ScrollLineUp() {
+	p.scrollMode = true
+	p.viewport.LineUp(1)
+}
+
+// ScrollLineDown scrolls the viewport down by one line
+func (p *PaneModel) ScrollLineDown() {
+	p.viewport.LineDown(1)
+	// Exit scroll mode if at bottom
+	if p.viewport.AtBottom() {
+		p.scrollMode = false
+	}
+}
+
+// EnterScrollMode enters scroll mode without changing position
+func (p *PaneModel) EnterScrollMode() {
+	p.scrollMode = true
 }
 
 // ScrollToBottom scrolls to the bottom and exits scroll mode
