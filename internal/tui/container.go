@@ -495,6 +495,13 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 
 		gitRepo := git.New(repoPath)
 
+		// Auto-pull main before creating branch to avoid stale base
+		// This updates local main to match origin/main without checking it out
+		// Errors are non-fatal (e.g., no network, no remote, local changes)
+		if !useExistingBranch {
+			_ = gitRepo.UpdateMainBranch(ctx)
+		}
+
 		// Determine worktree path for this container
 		worktreePath := getWorktreePath(ws.BranchName)
 

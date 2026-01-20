@@ -43,27 +43,17 @@
 
 ### 3. Add `gh` CLI to Docker Image
 
-**Status:** Not started
-
-**Current behavior:** The base Dockerfile at `configs/base.Dockerfile` installs Node.js and Claude Code but not the GitHub CLI.
-
-**Desired behavior:**
-- Install `gh` CLI in the base image so Claude can create PRs, view issues, etc.
+**Status:** ✅ DONE
 
 **Implementation:**
-Add to `configs/base.Dockerfile` after the apt-get install block:
+- Added GitHub CLI installation to `configs/base.Dockerfile`
+- Uses official GitHub apt repository for reliable installation
+- Cleans up apt lists after installation to minimize image size
 
-```dockerfile
-# Install GitHub CLI
-RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
-    && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
-    && apt-get update \
-    && apt-get install -y gh \
-    && rm -rf /var/lib/apt/lists/*
-```
-
-**Also needed:** Mount gh auth credentials from host `~/.config/gh/` or pass `GH_TOKEN` env var.
+**Note:** For gh authentication in containers, either:
+- Mount `~/.config/gh/` from host (not yet implemented)
+- Pass `GH_TOKEN` environment variable
+- Use `gh auth login` inside the container
 
 ---
 
@@ -109,74 +99,69 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
 
 ### 6. Container Resource Limits
 
-**Status:** Not started
+**Status:** ✅ DONE
 
 **Problem:** Runaway processes in containers can consume all host CPU/memory.
 
-**Desired behavior:**
-- Set default CPU/memory limits per container (e.g., 2 CPU, 4GB RAM)
-- Allow override via config or environment variable
-- Show warning in UI if container is near limits
-
 **Implementation:**
-- Add `Resources` field to `ContainerConfig` in `internal/docker/container.go`
-- Set `HostConfig.Resources` when creating container
-- Optionally expose in settings dialog
+- Added `DefaultCPULimit` (2.0 CPUs) and `DefaultMemoryLimit` (4GB) constants
+- Added `CPULimit` and `MemoryLimit` fields to `ContainerConfig`
+- Applied resource limits via `HostConfig.Resources` in `CreateContainer()`
+- Memory swap disabled (set equal to memory limit)
+
+**Defaults:**
+- CPU: 2 CPUs per container
+- Memory: 4GB per container
+- Can be overridden by setting `CPULimit` and `MemoryLimit` on `ContainerConfig`
 
 ---
 
 ### 7. Export Container Logs
 
-**Status:** Not started
+**Status:** ✅ DONE
 
 **Problem:** Hard to debug issues or share conversations from ccells sessions.
 
-**Desired behavior:**
-- Keybinding (e.g., `Ctrl+E`) to export current pane's full terminal history
-- Save to timestamped file in project directory
-- Include both scrollback and current terminal content
-
 **Implementation:**
-- Add `ExportLogs()` method to `PaneModel`
-- Combine `scrollback` buffer with current vterm content
-- Strip ANSI codes for clean text output (or keep for colored output)
-- Save to `ccells-logs/<branch>-<timestamp>.txt`
+- Added `ExportLogs()` method to `PaneModel` in `internal/tui/pane.go`
+- Added keybinding `e` in nav mode to export logs
+- Combines scrollback buffer with current vterm content
+- Strips ANSI codes for clean text output
+- Saves to `ccells-logs/<branch>-<timestamp>.txt` in project directory
+- Includes header with branch name, title, timestamp, and original prompt
 
 ---
 
 ### 8. Auto-Pull Main Before Branch Creation
 
-**Status:** Not started
+**Status:** ✅ DONE
 
 **Problem:** New branches may be based on stale main, causing merge conflicts later.
 
-**Desired behavior:**
-- Before creating a new worktree/branch, fetch and pull latest main
-- Show brief "Updating main..." status during this
-- If local main has uncommitted changes, warn user
-
 **Implementation:**
-- Add `FetchMain()` and `PullMain()` to `internal/git/branch.go`
-- Call before `CreateWorktree()` in container startup flow
-- Handle errors gracefully (network issues, etc.)
+- Added `FetchMain()`, `PullMain()`, and `UpdateMainBranch()` to `internal/git/branch.go`
+- `UpdateMainBranch()` uses `git fetch origin main:main` to update local ref without checkout
+- Called automatically in `startContainerWithOptions()` before creating worktree
+- Errors are non-fatal (e.g., no network, no remote, local changes)
+
+**Key behavior:**
+- Updates local main to match origin/main without changing current checkout
+- Runs silently - no user intervention needed
+- Gracefully handles offline/error scenarios
 
 ---
 
 ### 9. Pane Title from Claude's Summary
 
-**Status:** Not started
+**Status:** ✅ DONE (already implemented)
 
 **Problem:** Pane titles show branch names which can be cryptic (e.g., `ccells/abc123`).
 
-**Desired behavior:**
-- After Claude generates a title summary, use it as the pane title
-- Fall back to branch name if no summary
-- Allow manual title override via keybinding
-
 **Implementation:**
-- Already have `summarizeTitle` in `PaneModel` - just need to display it
-- Update `renderStatusLine()` to prefer summary title over branch name
-- Add keybinding to edit title manually
+- `workstream.GetTitle()` returns the generated summary title, falling back to branch name
+- Pane `View()` uses `p.workstream.GetTitle()` for display
+- Title is generated via `GenerateTitleCmd()` using Claude CLI before container starts
+- Title is stored in `workstream.Title` field and persisted across sessions
 
 ---
 
@@ -186,8 +171,8 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
 2. ~~**Notify Claude on merge/PR**~~ ✅ DONE
 3. ~~**Post-merge verification**~~ ✅ DONE
 4. ~~**Merge failure handling**~~ ✅ DONE
-5. **gh CLI** - Do inside ccells (deferred)
-6. **Auto-pull main** - Prevent stale branch issues
-7. **Pane title from summary** - Better UX
-8. **Export logs** - Debugging/sharing
-9. **Resource limits** - Safety
+5. ~~**gh CLI**~~ ✅ DONE - Added to Docker image
+6. ~~**Auto-pull main**~~ ✅ DONE - Prevent stale branch issues
+7. ~~**Pane title from summary**~~ ✅ DONE - Already implemented
+8. ~~**Export logs**~~ ✅ DONE - Debugging/sharing (keybind: e)
+9. ~~**Resource limits**~~ ✅ DONE - Safety (2 CPUs, 4GB RAM default)

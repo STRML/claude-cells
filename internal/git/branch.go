@@ -322,6 +322,48 @@ func (g *Git) WorktreeExistsForBranch(ctx context.Context, branchName string) (s
 	return "", false
 }
 
+// FetchMain fetches the latest main/master branch from origin.
+func (g *Git) FetchMain(ctx context.Context) error {
+	baseBranch, err := g.GetBaseBranch(ctx)
+	if err != nil {
+		baseBranch = "main" // Default to main
+	}
+	_, err = g.run(ctx, "fetch", "origin", baseBranch)
+	return err
+}
+
+// PullMain pulls the latest changes from origin into the local main/master branch.
+// This should only be called when main is checked out and clean.
+func (g *Git) PullMain(ctx context.Context) error {
+	baseBranch, err := g.GetBaseBranch(ctx)
+	if err != nil {
+		baseBranch = "main"
+	}
+
+	// First fetch
+	if _, err := g.run(ctx, "fetch", "origin", baseBranch); err != nil {
+		return err
+	}
+
+	// Fast-forward merge (will fail if there are local changes or divergence)
+	_, err = g.run(ctx, "merge", "--ff-only", "origin/"+baseBranch)
+	return err
+}
+
+// UpdateMainBranch updates the local main branch to match origin without checking it out.
+// Uses git fetch origin main:main to update the local ref directly.
+func (g *Git) UpdateMainBranch(ctx context.Context) error {
+	baseBranch, err := g.GetBaseBranch(ctx)
+	if err != nil {
+		baseBranch = "main"
+	}
+
+	// This updates local main to match origin/main without needing to checkout
+	// Will fail if main has local commits not on origin (which is fine)
+	_, err = g.run(ctx, "fetch", "origin", baseBranch+":"+baseBranch)
+	return err
+}
+
 // GetBranchInfo returns a summary of commits and diff stats for a branch.
 func (g *Git) GetBranchInfo(ctx context.Context, branchName string) (string, error) {
 	baseBranch, err := g.GetBaseBranch(ctx)
