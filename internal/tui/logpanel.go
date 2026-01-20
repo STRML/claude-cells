@@ -2,6 +2,8 @@ package tui
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -50,6 +52,7 @@ type LogPanelModel struct {
 	width        int
 	height       int
 	visible      bool
+	fullscreen   bool     // Whether panel is in fullscreen mode
 	filterLevel  LogLevel // Show this level and above
 	scrollOffset int      // Lines scrolled from bottom (0 = at bottom)
 }
@@ -103,6 +106,17 @@ func (m *LogPanelModel) Toggle() {
 // IsVisible returns whether the panel is visible
 func (m *LogPanelModel) IsVisible() bool {
 	return m.visible
+}
+
+// IsFullscreen returns whether the panel is in fullscreen mode
+func (m *LogPanelModel) IsFullscreen() bool {
+	return m.fullscreen
+}
+
+// ToggleFullscreen toggles fullscreen mode
+func (m *LogPanelModel) ToggleFullscreen() {
+	m.fullscreen = !m.fullscreen
+	m.scrollOffset = 0 // Reset scroll when toggling
 }
 
 // CycleFilter cycles through filter levels
@@ -243,23 +257,43 @@ func (m *LogPanelModel) View() string {
 		headerStyle.Render(header) +
 		borderStyle.Render(strings.Repeat(horizontal, rightPadding)+topRight)
 
-	// Build bottom border with scroll indicator if needed
+	// Build bottom border with hints and scroll indicator
+	hintStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#666666"))
+	keyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Bold(true)
+
+	// Build hints section
+	hints := keyStyle.Render("~") + hintStyle.Render(":filter ") +
+		keyStyle.Render("f") + hintStyle.Render(":fullscreen ") +
+		keyStyle.Render("E") + hintStyle.Render(":export")
+	hintsWidth := lipgloss.Width(hints)
+
 	var bottomBorder string
+	bottomInnerWidth := m.width - 2
+
 	if len(filtered) > contentHeight {
+		// Show scroll indicator
 		scrollInfo := fmt.Sprintf(" %d/%d ", len(filtered)-m.scrollOffset, len(filtered))
 		scrollVisualWidth := lipgloss.Width(scrollInfo)
-		bottomInnerWidth := m.width - 2
-		// Position scroll info near right side
-		rightMargin := 2
-		leftWidth := bottomInnerWidth - scrollVisualWidth - rightMargin
-		if leftWidth < 0 {
-			leftWidth = 0
+
+		// Calculate spacing: hints on left, scroll on right
+		availableMiddle := bottomInnerWidth - hintsWidth - scrollVisualWidth - 4 // 4 for padding
+		if availableMiddle < 0 {
+			availableMiddle = 0
 		}
-		bottomBorder = borderStyle.Render(bottomLeft+strings.Repeat(horizontal, leftWidth)) +
+		bottomBorder = borderStyle.Render(bottomLeft+" ") +
+			hints +
+			borderStyle.Render(strings.Repeat(horizontal, availableMiddle)) +
 			scrollInfo +
-			borderStyle.Render(strings.Repeat(horizontal, rightMargin)+bottomRight)
+			borderStyle.Render(" "+bottomRight)
 	} else {
-		bottomBorder = borderStyle.Render(bottomLeft + strings.Repeat(horizontal, m.width-2) + bottomRight)
+		// No scroll indicator, just hints
+		availableRight := bottomInnerWidth - hintsWidth - 2 // 2 for padding
+		if availableRight < 0 {
+			availableRight = 0
+		}
+		bottomBorder = borderStyle.Render(bottomLeft+" ") +
+			hints +
+			borderStyle.Render(strings.Repeat(horizontal, availableRight)+" "+bottomRight)
 	}
 
 	// Build content lines with side borders
@@ -317,6 +351,46 @@ func (m *LogPanelModel) formatEntry(entry LogEntry, maxWidth int) string {
 	}
 
 	return line
+}
+
+// Export writes all log entries to a file in the specified directory
+// Returns the path to the exported file
+func (m *LogPanelModel) Export(dir string) (string, error) {
+	m.mu.RLock()
+	entries := make([]LogEntry, len(m.entries))
+	copy(entries, m.entries)
+	m.mu.RUnlock()
+
+	// Create directory if it doesn't exist
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		return "", fmt.Errorf("create directory: %w", err)
+	}
+
+	// Generate filename with timestamp
+	timestamp := time.Now().Format("20060102-150405")
+	filename := fmt.Sprintf("system-logs-%s.txt", timestamp)
+	path := filepath.Join(dir, filename)
+
+	// Create and write to file
+	f, err := os.Create(path)
+	if err != nil {
+		return "", fmt.Errorf("create file: %w", err)
+	}
+	defer f.Close()
+
+	// Write header
+	fmt.Fprintf(f, "Claude Cells System Logs\n")
+	fmt.Fprintf(f, "Exported: %s\n", time.Now().Format(time.RFC3339))
+	fmt.Fprintf(f, "Entries: %d\n", len(entries))
+	fmt.Fprintf(f, "================================================================================\n\n")
+
+	// Write entries
+	for _, entry := range entries {
+		timestamp := entry.Time.Format("2006-01-02 15:04:05.000")
+		fmt.Fprintf(f, "%s [%-5s] %s\n", timestamp, entry.Level.String(), entry.Message)
+	}
+
+	return path, nil
 }
 
 // Clear removes all log entries

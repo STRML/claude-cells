@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -230,5 +232,149 @@ func TestLoggerFunctions(t *testing.T) {
 	}
 	if entries[3].Level != LevelErr {
 		t.Errorf("Fourth entry should be ERR, got %s", entries[3].Level.String())
+	}
+}
+
+func TestLogPanelModel_Fullscreen(t *testing.T) {
+	panel := NewLogPanelModel()
+
+	// Initially not fullscreen
+	if panel.IsFullscreen() {
+		t.Error("Panel should not be fullscreen initially")
+	}
+
+	// Toggle fullscreen
+	panel.ToggleFullscreen()
+	if !panel.IsFullscreen() {
+		t.Error("Panel should be fullscreen after toggle")
+	}
+
+	// Toggle back
+	panel.ToggleFullscreen()
+	if panel.IsFullscreen() {
+		t.Error("Panel should not be fullscreen after second toggle")
+	}
+}
+
+func TestLogPanelModel_FullscreenResetsScroll(t *testing.T) {
+	panel := NewLogPanelModel()
+	panel.SetSize(80, 10)
+	panel.Toggle()
+
+	// Add entries and scroll
+	for i := 0; i < 20; i++ {
+		panel.AddEntry(LevelInfo, "message")
+	}
+	panel.ScrollUp()
+	panel.ScrollUp()
+
+	if panel.scrollOffset != 2 {
+		t.Errorf("Expected scroll offset 2, got %d", panel.scrollOffset)
+	}
+
+	// Toggle fullscreen should reset scroll
+	panel.ToggleFullscreen()
+	if panel.scrollOffset != 0 {
+		t.Errorf("Fullscreen toggle should reset scroll, got %d", panel.scrollOffset)
+	}
+}
+
+func TestLogPanelModel_Export(t *testing.T) {
+	panel := NewLogPanelModel()
+
+	// Add some entries
+	panel.AddEntry(LevelDebug, "debug message")
+	panel.AddEntry(LevelInfo, "info message")
+	panel.AddEntry(LevelWarn, "warning message")
+	panel.AddEntry(LevelErr, "error message")
+
+	// Create temp directory
+	tmpDir := t.TempDir()
+
+	// Export
+	path, err := panel.Export(tmpDir)
+	if err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	// Verify file was created
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		t.Errorf("Export file not created: %s", path)
+	}
+
+	// Verify file contents
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("Failed to read export file: %v", err)
+	}
+
+	contentStr := string(content)
+
+	// Check header
+	if !strings.Contains(contentStr, "Claude Cells System Logs") {
+		t.Error("Export should contain header")
+	}
+	if !strings.Contains(contentStr, "Entries: 4") {
+		t.Error("Export should show entry count")
+	}
+
+	// Check entries
+	if !strings.Contains(contentStr, "[DEBUG] debug message") {
+		t.Error("Export should contain debug entry")
+	}
+	if !strings.Contains(contentStr, "[INFO ] info message") {
+		t.Error("Export should contain info entry")
+	}
+	if !strings.Contains(contentStr, "[WARN ] warning message") {
+		t.Error("Export should contain warn entry")
+	}
+	if !strings.Contains(contentStr, "[ERR  ] error message") {
+		t.Error("Export should contain error entry")
+	}
+}
+
+func TestLogPanelModel_ExportCreatesDirectory(t *testing.T) {
+	panel := NewLogPanelModel()
+	panel.AddEntry(LevelInfo, "test message")
+
+	// Export to a non-existent nested directory
+	tmpDir := t.TempDir()
+	nestedDir := filepath.Join(tmpDir, "nested", "logs")
+
+	path, err := panel.Export(nestedDir)
+	if err != nil {
+		t.Fatalf("Export failed: %v", err)
+	}
+
+	// Verify directory was created
+	if _, err := os.Stat(nestedDir); os.IsNotExist(err) {
+		t.Errorf("Export should create directory: %s", nestedDir)
+	}
+
+	// Verify file exists
+	if _, err := os.Stat(path); os.IsNotExist(err) {
+		t.Errorf("Export file not created: %s", path)
+	}
+}
+
+func TestLogPanelModel_ViewShowsHints(t *testing.T) {
+	panel := NewLogPanelModel()
+	panel.SetSize(100, 10)
+	panel.Toggle()
+
+	// Add an entry
+	panel.AddEntry(LevelInfo, "test message")
+
+	view := panel.View()
+
+	// Should show hints in bottom border
+	if !strings.Contains(view, "filter") {
+		t.Error("View should contain 'filter' hint")
+	}
+	if !strings.Contains(view, "fullscreen") {
+		t.Error("View should contain 'fullscreen' hint")
+	}
+	if !strings.Contains(view, "export") {
+		t.Error("View should contain 'export' hint")
 	}
 }
