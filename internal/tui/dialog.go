@@ -571,6 +571,36 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				}
 			}
 
+			if d.Type == DialogPostMergeDestroy {
+				// Selection 0 = "Yes, destroy container", 1 = "No, keep container"
+				selection := d.MenuSelection
+				if selection == 1 {
+					return d, func() tea.Msg { return DialogCancelMsg{} }
+				}
+				return d, func() tea.Msg {
+					return DialogConfirmMsg{
+						Type:         d.Type,
+						WorkstreamID: d.WorkstreamID,
+						Value:        fmt.Sprintf("%d", selection),
+					}
+				}
+			}
+
+			if d.Type == DialogMergeConflict {
+				// Selection 0 = "Rebase onto main", 1 = "Cancel"
+				selection := d.MenuSelection
+				if selection == 1 {
+					return d, func() tea.Msg { return DialogCancelMsg{} }
+				}
+				return d, func() tea.Msg {
+					return DialogConfirmMsg{
+						Type:         d.Type,
+						WorkstreamID: d.WorkstreamID,
+						Value:        fmt.Sprintf("%d", selection),
+					}
+				}
+			}
+
 			if d.Type == DialogDestroy || d.Type == DialogPruneAllConfirm || d.Type == DialogPruneProjectConfirm {
 				if strings.ToLower(d.Input.Value()) == d.ConfirmWord {
 					return d, func() tea.Msg {
@@ -619,7 +649,7 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				return d, nil
 			}
 			// Only handle for menu dialogs, otherwise pass to input
-			if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge {
+			if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict {
 				if d.MenuSelection > 0 {
 					d.MenuSelection--
 				}
@@ -634,7 +664,7 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				return d, nil
 			}
 			// Only handle for menu dialogs, otherwise pass to input
-			if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge {
+			if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict {
 				if d.MenuSelection < len(d.MenuItems)-1 {
 					d.MenuSelection++
 				}
@@ -682,7 +712,7 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 	}
 
 	// For menu-style, log, progress, and resource dialogs, don't pass keys to input
-	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogLog || d.Type == DialogProgress || d.Type == DialogResourceUsage {
+	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogLog || d.Type == DialogProgress || d.Type == DialogResourceUsage {
 		return d, nil
 	}
 
@@ -776,7 +806,7 @@ func (d DialogModel) View() string {
 	content.WriteString("\n\n")
 
 	// Menu-style dialogs render a selection list
-	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge {
+	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict {
 		for i, item := range d.MenuItems {
 			if i == d.MenuSelection {
 				content.WriteString("→ ")

@@ -1327,8 +1327,7 @@ Scroll Mode:
 						m.panes[i].AppendOutput(fmt.Sprintf("Merge conflict: %d files need resolution\n", len(msg.ConflictFiles)))
 						// Show merge conflict dialog
 						dialog := NewMergeConflictDialog(ws.BranchName, ws.ID, msg.ConflictFiles)
-						dialog.width = m.width
-						dialog.height = m.height
+						dialog.SetSize(60, 20)
 						m.dialog = &dialog
 					} else {
 						m.panes[i].AppendOutput(fmt.Sprintf("Merge failed: %v\n", msg.Error))
@@ -1343,8 +1342,7 @@ Scroll Mode:
 					_ = m.panes[i].SendToPTY(fmt.Sprintf("\n[ccells] ✓ Branch '%s' merged into main\n", ws.BranchName))
 					// Show post-merge destroy dialog
 					dialog := NewPostMergeDestroyDialog(ws.BranchName, ws.ID)
-					dialog.width = m.width
-					dialog.height = m.height
+					dialog.SetSize(50, 12)
 					m.dialog = &dialog
 				}
 				break
@@ -1815,8 +1813,8 @@ func (m AppModel) overlayDialog(background string) string {
 	x := (m.width - dialogWidth) / 2
 	y := (m.height - dialogHeight) / 2
 
-	// For destroy dialogs, position over the target pane
-	if m.dialog.Type == DialogDestroy && m.dialog.WorkstreamID != "" {
+	// For destroy dialogs and post-merge destroy dialogs, position over the target pane
+	if (m.dialog.Type == DialogDestroy || m.dialog.Type == DialogPostMergeDestroy) && m.dialog.WorkstreamID != "" {
 		// Find the pane with this workstream
 		titleBarHeight := 1
 		statusBarHeight := 1
