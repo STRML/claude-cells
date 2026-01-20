@@ -1,6 +1,9 @@
 {
   "name": "Claude Cells Dev",
-  "image": "golang:1.25.5",
+  "build": {
+    "dockerfile": "Dockerfile",
+    "context": ".."
+  },
   "customizations": {
     "vscode": {
       "extensions": ["golang.go"]
