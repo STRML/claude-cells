@@ -19,6 +19,16 @@ func dSpecialKey(code rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: code}
 }
 
+// dShiftKey creates a KeyPressMsg for Shift+key combinations
+func dShiftKey(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: code, Mod: tea.ModShift}
+}
+
+// dCtrlKey creates a KeyPressMsg for Ctrl+key combinations
+func dCtrlKey(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: code, Mod: tea.ModCtrl}
+}
+
 func TestNewDestroyDialog(t *testing.T) {
 	d := NewDestroyDialog("add-auth", "ws-123")
 
@@ -1094,17 +1104,6 @@ func TestWorkstreamDialog_ShiftEnterInsertsNewline(t *testing.T) {
 }
 
 func TestWorkstreamDialog_ShiftEnterKeyHandling(t *testing.T) {
-	d := NewWorkstreamDialog()
-	d.TextArea.SetValue("test")
-
-	// Create a mock key message for shift+enter
-	// In BubbleTea, we can create a KeyMsg and check its String() method
-	// For this test, we'll verify the switch case logic works by checking
-	// that the handler properly inserts a newline
-
-	// Since we can't easily mock the exact key message, let's verify the
-	// InsertRune behavior and that enter confirms while shift+enter doesn't
-
 	// Test 1: Enter with text should confirm
 	d1 := NewWorkstreamDialog()
 	d1.TextArea.SetValue("test value")
@@ -1119,14 +1118,64 @@ func TestWorkstreamDialog_ShiftEnterKeyHandling(t *testing.T) {
 		}
 	}
 
-	// Test 2: Verify InsertRune works for newlines (this is what shift+enter does)
+	// Test 2: Shift+Enter should insert newline, NOT confirm
 	d2 := NewWorkstreamDialog()
-	d2.TextArea.SetValue("first")
-	d2.TextArea.InsertRune('\n')
-	d2.TextArea.InsertString("second")
+	d2.TextArea.SetValue("first line")
+	// Move cursor to end
+	d2.TextArea.CursorEnd()
 
-	if d2.TextArea.Value() != "first\nsecond" {
-		t.Errorf("InsertRune should insert newline, got %q", d2.TextArea.Value())
+	// Verify the shift+enter KeyPressMsg has the right String() representation
+	shiftEnterMsg := dShiftKey(tea.KeyEnter)
+	if shiftEnterMsg.String() != "shift+enter" {
+		t.Errorf("Shift+Enter key should have String() == 'shift+enter', got %q", shiftEnterMsg.String())
+	}
+
+	// Send shift+enter to the dialog
+	d2, cmd2 := d2.Update(shiftEnterMsg)
+
+	// Shift+Enter should NOT return a confirm command
+	if cmd2 != nil {
+		t.Error("Shift+Enter should NOT return a command (should just insert newline)")
+	}
+
+	// The dialog should have inserted a newline
+	value := d2.TextArea.Value()
+	if !strings.Contains(value, "\n") {
+		t.Errorf("Shift+Enter should insert newline into textarea, got %q", value)
+	}
+
+	// Test 3: Multiple shift+enters should create multiple lines
+	d3 := NewWorkstreamDialog()
+	d3.TextArea.SetValue("line1")
+	d3.TextArea.CursorEnd()
+	d3, _ = d3.Update(dShiftKey(tea.KeyEnter))
+	d3.TextArea.InsertString("line2")
+	d3.TextArea.CursorEnd()
+	d3, _ = d3.Update(dShiftKey(tea.KeyEnter))
+	d3.TextArea.InsertString("line3")
+
+	expected := "line1\nline2\nline3"
+	if d3.TextArea.Value() != expected {
+		t.Errorf("Multiple shift+enters should create multiple lines, expected %q, got %q", expected, d3.TextArea.Value())
+	}
+
+	// Test 4: Ctrl+J should also insert newline (legacy terminal compatibility)
+	d4 := NewWorkstreamDialog()
+	d4.TextArea.SetValue("before")
+	d4.TextArea.CursorEnd()
+
+	ctrlJMsg := dCtrlKey('j')
+	if ctrlJMsg.String() != "ctrl+j" {
+		t.Errorf("Ctrl+J key should have String() == 'ctrl+j', got %q", ctrlJMsg.String())
+	}
+
+	d4, cmd4 := d4.Update(ctrlJMsg)
+	if cmd4 != nil {
+		t.Error("Ctrl+J should NOT return a command (should just insert newline)")
+	}
+
+	if !strings.Contains(d4.TextArea.Value(), "\n") {
+		t.Errorf("Ctrl+J should insert newline into textarea, got %q", d4.TextArea.Value())
 	}
 }
 

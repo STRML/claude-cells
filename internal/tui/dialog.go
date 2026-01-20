@@ -550,7 +550,12 @@ func (d DialogModel) Init() tea.Cmd {
 func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		switch msg.String() {
+		keyStr := msg.String()
+		// Debug: log key events in dialogs to help diagnose shift+enter issues
+		if keyStr == "enter" || keyStr == "shift+enter" {
+			LogDebug("Dialog received key: %q", keyStr)
+		}
+		switch keyStr {
 		case "esc", "ctrl+c":
 			// Progress dialog can't be dismissed while in progress
 			if d.Type == DialogProgress && d.inProgress {
@@ -590,8 +595,9 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 			if d.Type == DialogQuitConfirm {
 				return d, func() tea.Msg { return DialogCancelMsg{} }
 			}
-		case "shift+enter":
+		case "shift+enter", "ctrl+j":
 			// Insert newline in textarea dialogs
+			// ctrl+j is the legacy escape sequence some terminals send for shift+enter
 			if d.useTextArea {
 				d.TextArea.InsertRune('\n')
 				return d, nil

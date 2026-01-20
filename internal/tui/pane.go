@@ -421,8 +421,9 @@ func (p PaneModel) Update(msg tea.Msg) (PaneModel, tea.Cmd) {
 				switch keyStr {
 				case "enter":
 					data = []byte("\r")
-				case "shift+enter":
+				case "shift+enter", "ctrl+j":
 					// Kitty keyboard protocol: CSI 13;2u (13=Enter codepoint, 2=Shift modifier)
+					// ctrl+j is the legacy escape sequence some terminals send for shift+enter
 					data = []byte{27, '[', '1', '3', ';', '2', 'u'}
 				case "backspace":
 					data = []byte{127}

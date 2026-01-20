@@ -77,6 +77,8 @@ type AppModel struct {
 	lastSwapPosition int // Position to swap back to when pressing Space at main (0 = none)
 	// Log panel
 	logPanel *LogPanelModel
+	// Keyboard enhancement support (Kitty protocol)
+	keyboardEnhanced bool // True if terminal supports enhanced keyboard (shift+enter, etc.)
 }
 
 const tmuxPrefixTimeout = 2 * time.Second
@@ -313,6 +315,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		m.updateLayout()
+		return m, nil
+
+	case tea.KeyboardEnhancementsMsg:
+		// Terminal responded with keyboard enhancement capabilities
+		// This means the terminal supports Kitty keyboard protocol
+		// If we get this message, shift+enter should work
+		m.keyboardEnhanced = true
+		LogDebug("Keyboard enhancements enabled - Shift+Enter will work")
 		return m, nil
 
 	case tea.MouseClickMsg:
@@ -879,14 +889,17 @@ Input Mode:
   Ctrl+B ←→   Switch pane (without exiting input mode)
   Ctrl+B 1-9  Switch pane by number
   Ctrl+B PgUp/Dn  Scroll pane (enters scroll mode)
-  Shift+Enter Insert newline
+  Shift+Enter Insert newline*
   All other keys sent to Claude Code
+
+* Shift+Enter requires a terminal with Kitty keyboard
+  protocol support (kitty, WezTerm, Ghostty, foot, etc.)
 
 Scroll Mode:
   PgUp/PgDn   Continue scrolling
   Esc         Exit scroll mode (return to live)`, versionInfo, commitHash)
 			dialog := NewLogDialog("Help", helpText)
-			dialog.SetSize(60, 36)
+			dialog.SetSize(60, 40)
 			m.dialog = &dialog
 			return m, nil
 
