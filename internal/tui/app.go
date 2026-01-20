@@ -1759,7 +1759,7 @@ func (m AppModel) renderTitleBar() string {
 		if scrollIndicator != "" {
 			hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [PgUp/Dn] scroll  [Esc] exit scroll  [i]nput")
 		} else {
-			hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [←→]panes  [n]ew  [m]erge  [d]estroy  [l]ogs  [i]nput  [?]help  [Esc Esc]quit")
+			hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [←→]panes  [n]ew  [m]erge  [d]estroy  [l]ogs  [`]panel  [i]nput  [?]help")
 		}
 	}
 

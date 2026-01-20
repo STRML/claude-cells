@@ -74,6 +74,7 @@ func (s StatusBarModel) View() string {
 		KeyHint("p", "air"),
 		KeyHint("m", "erge/PR"),
 		KeyHint("d", "estroy"),
+		KeyHint("`", "logs"),
 		KeyHint("i", "nput"),
 		KeyHint("?", "help"),
 	}
