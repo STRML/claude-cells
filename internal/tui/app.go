@@ -186,10 +186,23 @@ type escapeTimeoutMsg struct {
 // pairingHealthTickMsg is sent periodically to check pairing sync health
 type pairingHealthTickMsg struct{}
 
+// autoContinueMsg is sent when we need to auto-continue an interrupted session
+type autoContinueMsg struct {
+	WorkstreamID string
+}
+
 // pairingHealthTickCmd returns a command that sends a health tick after a delay
 func pairingHealthTickCmd() tea.Cmd {
 	return tea.Tick(pairingHealthCheckInterval, func(t time.Time) tea.Msg {
 		return pairingHealthTickMsg{}
+	})
+}
+
+// autoContinueCmd returns a command that sends an auto-continue message after a short delay
+// The delay gives Claude time to fully initialize before we send the continue command
+func autoContinueCmd(workstreamID string) tea.Cmd {
+	return tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
+		return autoContinueMsg{WorkstreamID: workstreamID}
 	})
 }
 
@@ -1017,13 +1030,14 @@ Scroll Mode:
 			// User confirmed quit - pause containers and save state
 			if len(m.panes) > 0 {
 				var workstreams []*workstream.Workstream
-				for _, pane := range m.panes {
-					ws := pane.Workstream()
-					workstreams = append(workstreams, ws)
-					// Close PTY session if active
-					if pane.HasPTY() {
-						pane.PTY().Close()
+				for i := range m.panes {
+					ws := m.panes[i].Workstream()
+					// Check if Claude was working before closing PTY (need vterm content)
+					if m.panes[i].HasPTY() {
+						ws.WasInterrupted = m.panes[i].IsClaudeWorking()
+						m.panes[i].PTY().Close()
 					}
+					workstreams = append(workstreams, ws)
 				}
 				m.quitting = true
 				m.manager.Close() // Final flush before quit
@@ -1337,6 +1351,7 @@ Scroll Mode:
 						strings.Contains(outputStr, "\r> ")
 					if claudeReady {
 						m.panes[i].SetInitializing(false)
+						ws := m.panes[i].Workstream()
 						// Start fade animation and auto-enter input mode if focused
 						var cmds []tea.Cmd
 						if m.panes[i].IsFading() {
@@ -1345,6 +1360,11 @@ Scroll Mode:
 						if i == m.focusedPane {
 							m.inputMode = true
 							cmds = append(cmds, nil)
+						}
+						// Check if we need to auto-continue an interrupted session
+						if ws.WasInterrupted {
+							ws.WasInterrupted = false // Clear flag so we don't continue again
+							cmds = append(cmds, autoContinueCmd(ws.ID))
 						}
 						if len(cmds) > 0 {
 							return m, tea.Batch(cmds...)
@@ -1378,6 +1398,19 @@ Scroll Mode:
 				// Start fade animation if needed
 				if m.panes[i].IsFading() {
 					return m, fadeTickCmd()
+				}
+				break
+			}
+		}
+		return m, nil
+
+	case autoContinueMsg:
+		// Auto-continue an interrupted session by sending "continue" to Claude
+		for i := range m.panes {
+			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				if m.panes[i].HasPTY() {
+					// Send "continue" followed by enter to resume the interrupted task
+					_ = m.panes[i].SendToPTY("continue\n")
 				}
 				break
 			}
@@ -1775,6 +1808,7 @@ Scroll Mode:
 			ws.CreatedAt = saved.CreatedAt
 			ws.Title = saved.Title                     // Restore generated title
 			ws.ClaudeSessionID = saved.ClaudeSessionID // Restore session ID for --resume
+			ws.WasInterrupted = saved.WasInterrupted   // Restore interrupted state for auto-continue
 			if err := m.manager.Add(ws); err != nil {
 				// Skip workstreams that exceed the limit during restore
 				continue

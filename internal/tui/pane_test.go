@@ -584,3 +584,76 @@ func TestMuteANSI_GrayscaleMode(t *testing.T) {
 		t.Error("expected grayscale mode to produce true color output")
 	}
 }
+
+func TestPaneModel_IsClaudeWorking(t *testing.T) {
+	tests := []struct {
+		name     string
+		output   string
+		expected bool
+	}{
+		{
+			name:     "no output",
+			output:   "",
+			expected: false,
+		},
+		{
+			name:     "regular output",
+			output:   "Hello World\r\nSome text\r\n",
+			expected: false,
+		},
+		{
+			name:     "claude working indicator with dot",
+			output:   "Processing...\r\n(ctrl+c to interrupt · 5s)\r\n",
+			expected: true,
+		},
+		{
+			name:     "claude working indicator hyphen with dot",
+			output:   "Working on task\r\n(ctrl-c to interrupt · 10s)\r\n",
+			expected: true,
+		},
+		{
+			name:     "indicator without dot - not matched",
+			output:   "Fake indicator\r\n(ctrl+c to interrupt)\r\n",
+			expected: false,
+		},
+		{
+			name:     "indicator in middle of output",
+			output:   "Line 1\r\nLine 2\r\n(ctrl+c to interrupt · 3s)\r\nLine 4\r\n",
+			expected: true,
+		},
+		{
+			name:     "user typed similar text without dot",
+			output:   "User said: press ctrl+c to interrupt the process\r\n",
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ws := workstream.New("test")
+			pane := NewPaneModel(ws)
+			pane.SetSize(80, 24)
+
+			if tt.output != "" {
+				pane.WritePTYOutput([]byte(tt.output))
+			}
+
+			result := pane.IsClaudeWorking()
+			if result != tt.expected {
+				t.Errorf("IsClaudeWorking() = %v, want %v for output %q", result, tt.expected, tt.output)
+			}
+		})
+	}
+}
+
+func TestPaneModel_IsClaudeWorking_NilVterm(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	// Don't initialize vterm size - vterm exists but is empty
+
+	// Should not panic and should return false
+	result := pane.IsClaudeWorking()
+	if result {
+		t.Error("IsClaudeWorking() should return false when vterm has no content")
+	}
+}

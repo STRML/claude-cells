@@ -557,3 +557,59 @@ func TestSaveStateAllTitleGenerationSessionsExcluded(t *testing.T) {
 		t.Errorf("Expected 0 workstreams (all title-gen excluded), got %d", len(state.Workstreams))
 	}
 }
+
+func TestSaveStatePreservesWasInterrupted(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create workstream that was interrupted
+	ws := New("test prompt")
+	ws.ContainerID = "container-123"
+	ws.WasInterrupted = true
+
+	err = SaveState(tmpDir, []*Workstream{ws}, 0, 0)
+	if err != nil {
+		t.Fatalf("SaveState() error = %v", err)
+	}
+
+	state, err := LoadState(tmpDir)
+	if err != nil {
+		t.Fatalf("LoadState() error = %v", err)
+	}
+
+	saved := state.Workstreams[0]
+	if !saved.WasInterrupted {
+		t.Error("WasInterrupted should be true after load")
+	}
+}
+
+func TestSaveStateWasInterruptedFalse(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create workstream that was NOT interrupted (default)
+	ws := New("test prompt")
+	ws.ContainerID = "container-123"
+	// WasInterrupted is false by default
+
+	err = SaveState(tmpDir, []*Workstream{ws}, 0, 0)
+	if err != nil {
+		t.Fatalf("SaveState() error = %v", err)
+	}
+
+	state, err := LoadState(tmpDir)
+	if err != nil {
+		t.Fatalf("LoadState() error = %v", err)
+	}
+
+	saved := state.Workstreams[0]
+	if saved.WasInterrupted {
+		t.Error("WasInterrupted should be false when not set")
+	}
+}
