@@ -2082,15 +2082,15 @@ func TestAppModel_ScrollMode_TitleBarIndicator(t *testing.T) {
 	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
 	app = model.(AppModel)
 
-	// Not in scroll mode
-	view := app.View()
+	// Not in scroll mode - just call View() to verify it doesn't crash
+	_ = app.View()
 	// The title bar SCROLL indicator should not be present
 	// (Note: we can't easily test this without parsing the view, but we can at least
 	// verify it doesn't crash)
 
 	// Enter scroll mode
 	app.panes[0].EnterScrollMode()
-	view = app.View()
+	view := app.View()
 
 	// Should contain SCROLL indicator
 	if !strings.Contains(view, "SCROLL") {

@@ -70,32 +70,3 @@ func InitLogging() {
 	log.SetOutput(io.Discard)
 	log.SetFlags(0)
 }
-
-// parseLogLevel attempts to parse a log level from a message prefix
-// Returns the level and the message with prefix removed
-func parseLogLevel(msg string) (LogLevel, string) {
-	msg = strings.TrimSpace(msg)
-
-	// Check for [LEVEL] prefix
-	if strings.HasPrefix(msg, "[DEBUG]") {
-		return LevelDebug, strings.TrimSpace(msg[7:])
-	}
-	if strings.HasPrefix(msg, "[INFO]") {
-		return LevelInfo, strings.TrimSpace(msg[6:])
-	}
-	if strings.HasPrefix(msg, "[WARN]") {
-		return LevelWarn, strings.TrimSpace(msg[6:])
-	}
-	if strings.HasPrefix(msg, "[WARNING]") {
-		return LevelWarn, strings.TrimSpace(msg[9:])
-	}
-	if strings.HasPrefix(msg, "[ERR]") {
-		return LevelErr, strings.TrimSpace(msg[5:])
-	}
-	if strings.HasPrefix(msg, "[ERROR]") {
-		return LevelErr, strings.TrimSpace(msg[7:])
-	}
-
-	// Default to info if no prefix found
-	return LevelInfo, msg
-}
