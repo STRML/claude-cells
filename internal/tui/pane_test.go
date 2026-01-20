@@ -340,7 +340,7 @@ func TestMuteANSI(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Test that muteANSI doesn't panic and returns something
-			result := muteANSI(tt.input, 0.25, 0.6)
+			result := muteANSI(tt.input, 0.25, 0.6, [3]int{85, 85, 85})
 			if result == "" && tt.input != "" {
 				t.Errorf("muteANSI(%q) returned empty string", tt.input)
 			}
@@ -368,7 +368,7 @@ func TestMuteANSI_PreservesNonColorCodes(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := muteANSI(tt.input, 0.25, 0.6)
+			result := muteANSI(tt.input, 0.25, 0.6, [3]int{85, 85, 85})
 			// Should not crash and should preserve text
 			plain := stripANSI(tt.input)
 			resultPlain := stripANSI(result)
@@ -458,7 +458,7 @@ func TestMuteANSI_ColorTransformation(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := muteANSI(tt.input, tt.saturation, tt.brightness)
+			result := muteANSI(tt.input, tt.saturation, tt.brightness, [3]int{85, 85, 85})
 
 			// The result should contain true color sequences (38;2; for fg, 48;2; for bg)
 			// because muteANSI converts all colors to true color for precise muting
@@ -507,7 +507,7 @@ func TestMuteANSI_PlainTextPassthrough(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := muteANSI(tt.input, 0.25, 0.6)
+			result := muteANSI(tt.input, 0.25, 0.6, [3]int{85, 85, 85})
 
 			// Plain text should pass through completely unchanged
 			// (no ANSI codes to transform)
@@ -546,7 +546,7 @@ func TestMuteANSI_MixedContent(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := muteANSI(tt.input, 0.25, 0.6)
+			result := muteANSI(tt.input, 0.25, 0.6, [3]int{85, 85, 85})
 
 			// Plain text content must be preserved
 			inputPlain := stripANSI(tt.input)
@@ -570,7 +570,7 @@ func TestMuteANSI_MixedContent(t *testing.T) {
 // TestMuteANSI_GrayscaleMode verifies that saturation=0 produces grayscale output.
 func TestMuteANSI_GrayscaleMode(t *testing.T) {
 	input := "\x1b[31mRed\x1b[0m \x1b[32mGreen\x1b[0m \x1b[34mBlue\x1b[0m"
-	result := muteANSI(input, 0.0, 1.0) // Zero saturation = grayscale
+	result := muteANSI(input, 0.0, 1.0, [3]int{85, 85, 85}) // Zero saturation = grayscale
 
 	// Should still preserve text
 	inputPlain := stripANSI(input)
@@ -582,6 +582,97 @@ func TestMuteANSI_GrayscaleMode(t *testing.T) {
 	// Result should contain true color codes (converted from basic colors)
 	if !strings.Contains(result, "38;2;") {
 		t.Error("expected grayscale mode to produce true color output")
+	}
+}
+
+// TestMuteANSI_ResetAndDefaultForeground verifies that reset codes and default
+// foreground codes are replaced with the muted default color. This is critical
+// for handling terminal output that resets to the user's configured default
+// foreground color (e.g., bright green on dark background).
+func TestMuteANSI_ResetAndDefaultForeground(t *testing.T) {
+	mutedDefault := [3]int{85, 85, 85} // #555555
+
+	tests := []struct {
+		name           string
+		input          string
+		shouldContain  string
+		shouldNotMatch string
+		description    string
+	}{
+		{
+			name:          "empty reset sequence",
+			input:         "\x1b[mText after reset",
+			shouldContain: "38;2;85;85;85",
+			description:   "Empty reset \\x1b[m should be replaced with muted default foreground",
+		},
+		{
+			name:          "full reset code 0",
+			input:         "\x1b[0mText after reset",
+			shouldContain: "38;2;85;85;85",
+			description:   "Reset code 0 should add muted default foreground after reset",
+		},
+		{
+			name:          "default foreground code 39",
+			input:         "\x1b[39mText with default fg",
+			shouldContain: "38;2;85;85;85",
+			description:   "Default foreground code 39 should be replaced with muted default",
+		},
+		{
+			name:          "color then reset",
+			input:         "\x1b[31mRed\x1b[0mDefault",
+			shouldContain: "38;2;85;85;85",
+			description:   "Text after reset should use muted default, not terminal default",
+		},
+		{
+			name:          "color then default fg",
+			input:         "\x1b[32mGreen\x1b[39mDefault",
+			shouldContain: "38;2;85;85;85",
+			description:   "Switching to default fg should use muted default color",
+		},
+		{
+			name:          "bold with reset preserves reset",
+			input:         "\x1b[1mBold\x1b[0mNormal",
+			shouldContain: "0;38;2;85;85;85",
+			description:   "Reset should still reset attributes but add muted default fg",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := muteANSI(tt.input, 0.25, 0.6, mutedDefault)
+
+			// Should contain the muted default color
+			if !strings.Contains(result, tt.shouldContain) {
+				t.Errorf("%s\nInput:    %q\nExpected to contain: %s\nGot:      %q",
+					tt.description, tt.input, tt.shouldContain, result)
+			}
+
+			// Plain text should be preserved
+			inputPlain := stripANSI(tt.input)
+			resultPlain := stripANSI(result)
+			if resultPlain != inputPlain {
+				t.Errorf("muteANSI altered text content: %q -> %q", inputPlain, resultPlain)
+			}
+		})
+	}
+}
+
+// TestMuteANSI_DefaultForegroundNotPassedThrough verifies that code 39 (default fg)
+// is NOT passed through unchanged, which would cause the terminal to use its
+// configured default color (e.g., user's bright green).
+func TestMuteANSI_DefaultForegroundNotPassedThrough(t *testing.T) {
+	mutedDefault := [3]int{100, 100, 100}
+	input := "\x1b[39mText"
+	result := muteANSI(input, 0.25, 0.6, mutedDefault)
+
+	// Should NOT contain the original [39m sequence
+	if strings.Contains(result, "[39m") {
+		t.Errorf("muteANSI should replace [39m with muted color, but [39m still present in: %q", result)
+	}
+
+	// Should contain the muted default color
+	if !strings.Contains(result, "38;2;100;100;100") {
+		t.Errorf("muteANSI should use muted default (100,100,100), got: %q", result)
 	}
 }
 
