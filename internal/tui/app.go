@@ -109,6 +109,13 @@ func (m *AppModel) projectName() string {
 	return name
 }
 
+// saveStateCmd returns a command to save current state in the background.
+// Call this after any change to workstreams (create, destroy, container started).
+func (m *AppModel) saveStateCmd() tea.Cmd {
+	workstreams := m.manager.List()
+	return SaveStateInBackgroundCmd(m.workingDir, workstreams, m.focusedPane, int(m.layout))
+}
+
 // StateLoadedMsg is sent when state has been loaded from disk
 type StateLoadedMsg struct {
 	State *workstream.AppState
@@ -173,6 +180,19 @@ func SaveStateAndQuitCmd(dir string, workstreams []*workstream.Workstream, focus
 		// Save state synchronously before returning
 		err := workstream.SaveState(dir, workstreams, focusedIndex, layout)
 		return StateSavedMsg{Error: err}
+	}
+}
+
+// BackgroundStateSavedMsg is sent when background state save completes (ignored by default)
+type BackgroundStateSavedMsg struct{}
+
+// SaveStateInBackgroundCmd saves state without quitting - used for incremental saves
+// during normal operation to ensure state is recoverable if force-quit occurs.
+func SaveStateInBackgroundCmd(dir string, workstreams []*workstream.Workstream, focusedIndex int, layout int) tea.Cmd {
+	return func() tea.Msg {
+		// Save state in background - errors are ignored for incremental saves
+		_ = workstream.SaveState(dir, workstreams, focusedIndex, layout)
+		return BackgroundStateSavedMsg{}
 	}
 }
 
@@ -566,7 +586,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					m.renumberPanes()
 					m.updateLayout()
-					return m, StopContainerCmd(ws)
+					return m, tea.Batch(StopContainerCmd(ws), m.saveStateCmd())
 				}
 				dialog := NewDestroyDialog(ws.BranchName, ws.ID)
 				dialog.SetSize(50, 15)
@@ -876,8 +896,8 @@ Scroll Mode:
 					}
 					m.renumberPanes()
 					m.updateLayout()
-					// Stop container asynchronously
-					return m, StopContainerCmd(ws)
+					// Stop container and save state (so force-quit preserves correct list)
+					return m, tea.Batch(StopContainerCmd(ws), m.saveStateCmd())
 				}
 			}
 
@@ -894,8 +914,8 @@ Scroll Mode:
 			m.panes = nil
 			m.focusedPane = 0
 			m.updateLayout()
-			// Prune containers and empty branches for this project only
-			return m, PruneProjectContainersAndBranchesCmd(m.projectName())
+			// Prune containers and empty branches for this project only, save state
+			return m, tea.Batch(PruneProjectContainersAndBranchesCmd(m.projectName()), m.saveStateCmd())
 
 		case DialogPruneAllConfirm:
 			// User typed "destroy" - close all panes, prune ALL containers globally
@@ -910,8 +930,8 @@ Scroll Mode:
 			m.panes = nil
 			m.focusedPane = 0
 			m.updateLayout()
-			// Prune all containers and empty branches (globally!)
-			return m, PruneAllContainersAndBranchesCmd()
+			// Prune all containers and empty branches (globally!), save state
+			return m, tea.Batch(PruneAllContainersAndBranchesCmd(), m.saveStateCmd())
 
 		case DialogPostMergeDestroy:
 			// Value is "0" for "Yes, destroy container", "1" for "No, keep container"
@@ -931,7 +951,7 @@ Scroll Mode:
 						m.updateLayout()
 						m.toast = "Destroying merged container..."
 						m.toastExpiry = time.Now().Add(toastDuration)
-						return m, StopContainerCmd(ws)
+						return m, tea.Batch(StopContainerCmd(ws), m.saveStateCmd())
 					}
 				}
 			}
@@ -979,9 +999,8 @@ Scroll Mode:
 				return m, PauseAllAndSaveCmd(m.workingDir, workstreams, m.focusedPane, int(m.layout))
 			}
 			m.quitting = true
-			// Delete state file if no panes (clean exit)
-			_ = workstream.DeleteState(m.workingDir)
-			return m, tea.Quit
+			// Save empty state (no panes) so next startup is clean
+			return m, SaveStateAndQuitCmd(m.workingDir, nil, 0, int(m.layout))
 		}
 		return m, nil
 
@@ -1191,7 +1210,8 @@ Scroll Mode:
 				ws.SetState(workstream.StateRunning)
 				m.panes[i].SetPTY(msg.Session)
 				m.panes[i].SetInitStatus("Starting Claude Code...")
-				break
+				// Save state now that workstream is running (recoverable if force-quit)
+				return m, m.saveStateCmd()
 			}
 		}
 		return m, nil
@@ -1759,8 +1779,9 @@ Scroll Mode:
 		m.toast = fmt.Sprintf("Resumed %d workstream(s)", len(msg.State.Workstreams))
 		m.toastExpiry = time.Now().Add(toastDuration)
 
-		// Delete state file after successful resume
-		_ = workstream.DeleteState(m.workingDir)
+		// Don't delete state file here - keep it as backup until containers are confirmed running.
+		// The state will be overwritten on next save (quit), so stale data is not a concern.
+		// This prevents state loss if resume fails (e.g., container errors, session not found).
 
 		return m, tea.Batch(cmds...)
 

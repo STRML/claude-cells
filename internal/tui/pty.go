@@ -418,6 +418,7 @@ func (p *PTYSession) StartReadLoop() {
 					// Claude Code may show different prompts:
 					// 1. "Bypass Permissions mode" - the full bypass dialog (needs down arrow + enter)
 					// 2. "Enter to confirm" - a simple confirmation prompt (just needs enter)
+					// 3. "Resume Session" picker - shown when --resume can't find the session (press Escape)
 					if !bypassHandled && time.Since(startTime) < bypassTimeout {
 						if strings.Contains(content, "Bypass Permissions mode") {
 							// Wait a moment for the full prompt to render
@@ -432,6 +433,12 @@ func (p *PTYSession) StartReadLoop() {
 							// Simple confirmation prompt - just send enter
 							time.Sleep(100 * time.Millisecond)
 							p.Write([]byte{'\r'})
+							bypassHandled = true
+						} else if strings.Contains(content, "Resume Session") {
+							// Session picker appeared - the specified session ID wasn't found
+							// Press Escape to cancel and start a fresh session
+							time.Sleep(100 * time.Millisecond)
+							p.Write([]byte{27}) // Escape key
 							bypassHandled = true
 						}
 					}
