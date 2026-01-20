@@ -242,12 +242,12 @@ func TestGetProjectImage(t *testing.T) {
 		wantErr    bool
 	}{
 		{
-			name: "returns image from devcontainer.json",
+			name: "builds derived image when devcontainer.json has image",
 			setupFiles: map[string]string{
 				".devcontainer/devcontainer.json": `{"image": "golang:1.23"}`,
 			},
-			wantImage: "golang:1.23",
-			wantBuild: false,
+			// When devcontainer.json has an image, we build a derived image with Claude Code
+			wantBuild: true,
 		},
 		{
 			name:       "fallback to default when no devcontainer.json",
