@@ -56,7 +56,9 @@ var basic16Colors = []struct{ r, g, b int }{
 // muteANSI transforms colors in ANSI sequences to be muted (desaturated)
 // saturation: 0.0 = grayscale, 1.0 = original
 // brightness: multiplier for lightness
-func muteANSI(s string, saturation, brightness float64) string {
+// mutedDefault: RGB values for the muted default foreground color (used when terminal
+// would normally show its default color, e.g., after reset or with code 39)
+func muteANSI(s string, saturation, brightness float64, mutedDefault [3]int) string {
 	return ansiSGRRegex.ReplaceAllStringFunc(s, func(match string) string {
 		// Extract the parameters between \x1b[ and m
 		submatch := ansiSGRRegex.FindStringSubmatch(match)
@@ -65,7 +67,8 @@ func muteANSI(s string, saturation, brightness float64) string {
 		}
 		params := submatch[1]
 		if params == "" {
-			return match // Reset sequence, keep as-is
+			// Reset sequence (\x1b[m) - add muted default foreground after reset
+			return fmt.Sprintf("\x1b[0;38;2;%d;%d;%dm", mutedDefault[0], mutedDefault[1], mutedDefault[2])
 		}
 
 		// Parse parameters
@@ -135,7 +138,19 @@ func muteANSI(s string, saturation, brightness float64) string {
 				continue
 			}
 
-			// Keep other codes as-is (bold, underline, reset, etc.)
+			// Handle reset (code 0) - preserve reset but add muted default foreground
+			if code == 0 {
+				result = append(result, fmt.Sprintf("0;38;2;%d;%d;%d", mutedDefault[0], mutedDefault[1], mutedDefault[2]))
+				continue
+			}
+
+			// Handle default foreground (code 39) - replace with muted default
+			if code == 39 {
+				result = append(result, fmt.Sprintf("38;2;%d;%d;%d", mutedDefault[0], mutedDefault[1], mutedDefault[2]))
+				continue
+			}
+
+			// Keep other codes as-is (bold, underline, default background, etc.)
 			result = append(result, parts[i])
 		}
 
@@ -867,10 +882,10 @@ func (p PaneModel) View() string {
 		outputView = greyStyle.Render(outputView)
 	} else if !p.focused {
 		// Unfocused panes: muted colors (very desaturated, dimmed)
-		// First mute any explicit ANSI colors
-		outputView = muteANSI(outputView, 0.25, 0.6)
-		// Apply muted default foreground for text without explicit colors
-		// (terminal default colors like user's green-on-black aren't in ANSI codes)
+		// Mute explicit ANSI colors and replace reset/default sequences with muted grey
+		// colorMidGrey (#555555) = RGB(85, 85, 85)
+		outputView = muteANSI(outputView, 0.25, 0.6, [3]int{85, 85, 85})
+		// Apply muted default foreground for text without any ANSI codes at all
 		mutedDefaultStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMidGrey))
 		outputView = mutedDefaultStyle.Render(outputView)
 	}
