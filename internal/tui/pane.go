@@ -60,6 +60,10 @@ type PaneModel struct {
 	scrollback      []string       // Scrollback buffer (lines that scrolled off top)
 	scrollMode      bool           // True when viewing scrollback (not following live output)
 
+	// Resize settling state - after resize, give terminal time to redraw before
+	// auto-scrolling to bottom, to prevent rapid scroll oscillation
+	resizeTime time.Time // When last resize happened
+
 	// Fade animation state
 	fading        bool      // True when fade animation is in progress
 	fadeStartTime time.Time // When fade started
@@ -503,11 +507,19 @@ func (p PaneModel) View() string {
 	p.viewport.SetContent(outputContent)
 
 	// Restore scroll position or go to bottom
+	// After a resize, give the terminal time to settle before auto-scrolling,
+	// to prevent rapid scroll oscillation as the terminal redraws
+	const resizeSettleTime = 500 * time.Millisecond
+	isSettling := !p.resizeTime.IsZero() && time.Since(p.resizeTime) < resizeSettleTime
+
 	if p.scrollMode {
 		// In scroll mode - try to maintain position
 		p.viewport.SetYOffset(yOffset)
-	} else if wasAtBottom || !p.scrollMode {
-		// Follow live output
+	} else if isSettling {
+		// During resize settling - maintain position to prevent oscillation
+		p.viewport.SetYOffset(yOffset)
+	} else if wasAtBottom {
+		// Follow live output (was at bottom, stay at bottom)
 		p.viewport.GotoBottom()
 	}
 
@@ -917,6 +929,9 @@ func (p *PaneModel) renderVTerm() (result string) {
 
 // SetSize sets the pane dimensions
 func (p *PaneModel) SetSize(width, height int) {
+	// Track if size is actually changing (to trigger resize settling)
+	sizeChanged := p.width != width || p.height != height
+
 	p.width = width
 	p.height = height
 	p.viewport.Width = width - 4   // Account for border and padding
@@ -938,6 +953,11 @@ func (p *PaneModel) SetSize(width, height int) {
 	// Resize PTY if active
 	if p.pty != nil && !p.pty.IsClosed() {
 		_ = p.pty.Resize(innerWidth, innerHeight)
+		// Mark resize time so View() can wait for terminal to settle
+		// before auto-scrolling (prevents rapid scroll oscillation)
+		if sizeChanged {
+			p.resizeTime = time.Now()
+		}
 	}
 }
 
