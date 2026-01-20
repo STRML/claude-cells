@@ -191,8 +191,8 @@ Task: %s`, ws.Prompt)
 		title := strings.TrimSpace(string(output))
 
 		// Limit title length to prevent UI issues
-		if len(title) > 50 {
-			title = title[:47] + "..."
+		if len(title) > 80 {
+			title = title[:77] + "..."
 		}
 
 		return TitleGeneratedMsg{
