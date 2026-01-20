@@ -696,17 +696,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				ws := pane.Workstream()
 				// Skip confirmation for errored workstreams - nothing to lose
 				if ws.GetState() == workstream.StateError {
-					// Same logic as DialogDestroy handler
-					m.manager.Remove(ws.ID)
-					m.panes = append(m.panes[:m.focusedPane], m.panes[m.focusedPane+1:]...)
-					if m.focusedPane >= len(m.panes) && len(m.panes) > 0 {
-						m.setFocusedPane(len(m.panes) - 1)
-					}
-					if len(m.panes) > 0 {
-						m.panes[m.focusedPane].SetFocused(true)
-					}
-					m.renumberPanes()
-					m.updateLayout()
+					ws := m.removePane(m.focusedPane)
 					return m, StopContainerCmd(ws)
 				}
 				dialog := NewDestroyDialog(ws.BranchName, ws.ID)
@@ -1051,50 +1041,20 @@ Scroll Mode:
 			// Destroy workstream
 			for i, pane := range m.panes {
 				if pane.Workstream().ID == msg.WorkstreamID {
-					ws := pane.Workstream()
-					m.manager.Remove(msg.WorkstreamID)
-					m.panes = append(m.panes[:i], m.panes[i+1:]...)
-					if m.focusedPane >= len(m.panes) && len(m.panes) > 0 {
-						m.setFocusedPane(len(m.panes) - 1)
-					}
-					if len(m.panes) > 0 {
-						m.panes[m.focusedPane].SetFocused(true)
-					}
-					m.renumberPanes()
-					m.updateLayout()
+					ws := m.removePane(i)
 					return m, StopContainerCmd(ws)
 				}
 			}
 
 		case DialogPruneProjectConfirm:
 			// User typed "destroy" - close panes for this project, prune project containers and branches
-			// Close all PTY sessions first (they're all for this project)
-			for _, pane := range m.panes {
-				if pty := pane.PTY(); pty != nil {
-					pty.Close()
-				}
-				m.manager.Remove(pane.Workstream().ID)
-			}
-			// Clear all panes
-			m.panes = nil
-			m.setFocusedPane(0)
-			m.updateLayout()
+			m.clearAllPanes()
 			// Prune containers and empty branches for this project only
 			return m, PruneProjectContainersAndBranchesCmd(m.projectName())
 
 		case DialogPruneAllConfirm:
 			// User typed "destroy" - close all panes, prune ALL containers globally
-			// Close all PTY sessions first
-			for _, pane := range m.panes {
-				if pty := pane.PTY(); pty != nil {
-					pty.Close()
-				}
-				m.manager.Remove(pane.Workstream().ID)
-			}
-			// Clear all panes
-			m.panes = nil
-			m.setFocusedPane(0)
-			m.updateLayout()
+			m.clearAllPanes()
 			// Prune all containers and empty branches (globally!)
 			return m, PruneAllContainersAndBranchesCmd()
 
@@ -1104,16 +1064,7 @@ Scroll Mode:
 				// User chose to destroy
 				for i, pane := range m.panes {
 					if pane.Workstream().ID == msg.WorkstreamID {
-						ws := pane.Workstream()
-						m.manager.Remove(msg.WorkstreamID)
-						m.panes = append(m.panes[:i], m.panes[i+1:]...)
-						if m.focusedPane >= len(m.panes) && len(m.panes) > 0 {
-							m.setFocusedPane(len(m.panes) - 1)
-						}
-						if len(m.panes) > 0 {
-							m.panes[m.focusedPane].SetFocused(true)
-						}
-						m.updateLayout()
+						ws := m.removePane(i)
 						m.toast = "Destroying merged container..."
 						m.toastExpiry = time.Now().Add(toastDuration)
 						return m, StopContainerCmd(ws)
@@ -2404,6 +2355,42 @@ func (m *AppModel) renumberPanes() {
 	m.nextPaneIndex = len(m.panes) + 1
 	// Reset swap position to avoid invalid indices after destruction
 	m.lastSwapPosition = 0
+}
+
+// removePane removes a pane at the given index and handles all bookkeeping:
+// removes from slice, adjusts focus, renumbers remaining panes, and updates layout.
+// Returns the removed workstream so caller can issue StopContainerCmd if needed.
+func (m *AppModel) removePane(index int) *workstream.Workstream {
+	if index < 0 || index >= len(m.panes) {
+		return nil
+	}
+	ws := m.panes[index].Workstream()
+	m.manager.Remove(ws.ID)
+	m.panes = append(m.panes[:index], m.panes[index+1:]...)
+	if m.focusedPane >= len(m.panes) && len(m.panes) > 0 {
+		m.setFocusedPane(len(m.panes) - 1)
+	}
+	if len(m.panes) > 0 {
+		m.panes[m.focusedPane].SetFocused(true)
+	}
+	m.renumberPanes()
+	m.updateLayout()
+	return ws
+}
+
+// clearAllPanes removes all panes and resets state.
+// Closes PTY sessions and removes workstreams from manager.
+func (m *AppModel) clearAllPanes() {
+	for _, pane := range m.panes {
+		if pty := pane.PTY(); pty != nil {
+			pty.Close()
+		}
+		m.manager.Remove(pane.Workstream().ID)
+	}
+	m.panes = nil
+	m.setFocusedPane(0)
+	m.renumberPanes()
+	m.updateLayout()
 }
 
 // getContainerIDs returns the container IDs for all current panes

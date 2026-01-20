@@ -137,11 +137,7 @@ func CheckUncommittedChangesCmd(ws *workstream.Workstream) tea.Cmd {
 		defer cancel()
 
 		// Use the worktree path if set, otherwise compute it
-		worktreePath := ws.WorktreePath
-		if worktreePath == "" && ws.BranchName != "" {
-			worktreePath = getWorktreePath(ws.BranchName)
-		}
-
+		worktreePath := resolveWorktreePath(ws)
 		if worktreePath == "" {
 			return UncommittedChangesMsg{
 				WorkstreamID: ws.ID,
@@ -291,9 +287,7 @@ func DeleteAndRestartContainerCmd(ws *workstream.Workstream) tea.Cmd {
 
 		// With worktrees, the branch may be checked out in a worktree
 		// First remove any worktree using this branch
-		worktreePath := getWorktreePath(ws.BranchName)
-		_ = gitRepo.RemoveWorktree(ctx, worktreePath)
-		_ = os.RemoveAll(worktreePath)
+		cleanupWorktree(ctx, gitRepo, ws.BranchName)
 
 		// Now we can delete the branch (it's no longer checked out anywhere)
 		if err := gitRepo.DeleteBranch(ctx, ws.BranchName); err != nil {
@@ -484,6 +478,48 @@ func getWorktreePath(branchName string) string {
 	return fmt.Sprintf("/tmp/ccells/worktrees/%s", safeName)
 }
 
+// resolveWorktreePath returns the worktree path for a workstream,
+// using the stored path if available, otherwise computing from branch name.
+func resolveWorktreePath(ws *workstream.Workstream) string {
+	if ws.WorktreePath != "" {
+		return ws.WorktreePath
+	}
+	if ws.BranchName != "" {
+		return getWorktreePath(ws.BranchName)
+	}
+	return ""
+}
+
+// cleanupWorktree removes a worktree and its directory.
+// Errors are logged but not returned since cleanup is best-effort.
+func cleanupWorktree(ctx context.Context, gitRepo git.GitClient, branchName string) {
+	worktreePath := getWorktreePath(branchName)
+	if err := gitRepo.RemoveWorktree(ctx, worktreePath); err != nil {
+		LogDebug("RemoveWorktree warning: %v", err)
+	}
+	if err := os.RemoveAll(worktreePath); err != nil {
+		LogDebug("RemoveAll warning: %v", err)
+	}
+}
+
+// pruneEmptyBranches deletes branches that have no commits beyond the base branch.
+// Returns the count of branches successfully deleted.
+func pruneEmptyBranches(ctx context.Context, g git.GitClient, branches []string) int {
+	pruned := 0
+	for _, branch := range branches {
+		hasCommits, err := g.BranchHasCommits(ctx, branch)
+		if err != nil {
+			continue // Skip on error
+		}
+		if !hasCommits {
+			if err := g.DeleteBranch(ctx, branch); err == nil {
+				pruned++
+			}
+		}
+	}
+	return pruned
+}
+
 // startContainerWithOptions is the internal implementation for starting containers.
 // It uses git worktrees to avoid modifying the host repo's checked out branch.
 func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool) tea.Cmd {
@@ -553,8 +589,7 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 		}
 
 		// Now safe to clean up any stale worktree at this path (no active worktree for this branch)
-		_ = gitRepo.RemoveWorktree(ctx, worktreePath)
-		_ = os.RemoveAll(worktreePath)
+		cleanupWorktree(ctx, gitRepo, ws.BranchName)
 
 		if useExistingBranch {
 			// Create worktree from existing branch (don't create new branch)
@@ -581,7 +616,7 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 		dockerClient, err := docker.NewClient()
 		if err != nil {
 			// Clean up worktree on failure
-			_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+			cleanupWorktree(ctx, gitRepo, ws.BranchName)
 			return ContainerErrorMsg{
 				WorkstreamID: ws.ID,
 				Error:        err,
@@ -597,7 +632,7 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 		// Load devcontainer config and determine image
 		devCfg, err := docker.LoadDevcontainerConfig(repoPath)
 		if err != nil {
-			_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+			cleanupWorktree(ctx, gitRepo, ws.BranchName)
 			return ContainerErrorMsg{
 				WorkstreamID: ws.ID,
 				Error:        fmt.Errorf("failed to load devcontainer config: %w", err),
@@ -607,7 +642,7 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 		// Get the image to use
 		imageName, needsBuild, err := docker.GetProjectImage(repoPath)
 		if err != nil {
-			_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+			cleanupWorktree(ctx, gitRepo, ws.BranchName)
 			return ContainerErrorMsg{
 				WorkstreamID: ws.ID,
 				Error:        fmt.Errorf("failed to determine project image: %w", err),
@@ -617,7 +652,7 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 		// Check if image exists
 		imageExists, err := dockerClient.ImageExists(ctx, imageName)
 		if err != nil {
-			_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+			cleanupWorktree(ctx, gitRepo, ws.BranchName)
 			return ContainerErrorMsg{
 				WorkstreamID: ws.ID,
 				Error:        fmt.Errorf("failed to check image existence: %w", err),
@@ -635,7 +670,7 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 			if cliStatus.Available {
 				baseImage, err := docker.BuildWithDevcontainerCLI(buildCtx, repoPath, io.Discard)
 				if err != nil {
-					_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+					cleanupWorktree(ctx, gitRepo, ws.BranchName)
 					return ContainerErrorMsg{
 						WorkstreamID: ws.ID,
 						Error:        fmt.Errorf("failed to build with devcontainer CLI: %w", err),
@@ -643,7 +678,7 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 				}
 				// Build enhanced image with Claude Code on top
 				if err := docker.BuildEnhancedImage(buildCtx, baseImage, imageName, io.Discard); err != nil {
-					_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+					cleanupWorktree(ctx, gitRepo, ws.BranchName)
 					return ContainerErrorMsg{
 						WorkstreamID: ws.ID,
 						Error:        fmt.Errorf("failed to build enhanced image: %w", err),
@@ -652,7 +687,7 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 			} else {
 				// Fall back to simple docker build (handles both Dockerfile and image-only configs)
 				if err := docker.BuildProjectImage(buildCtx, repoPath, devCfg, io.Discard); err != nil {
-					_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+					cleanupWorktree(ctx, gitRepo, ws.BranchName)
 					return ContainerErrorMsg{
 						WorkstreamID: ws.ID,
 						Error:        fmt.Errorf("failed to build project image: %w", err),
@@ -661,7 +696,7 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 			}
 		} else if !imageExists && !needsBuild {
 			// Image doesn't exist and doesn't need building - should pull
-			_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+			cleanupWorktree(ctx, gitRepo, ws.BranchName)
 			return ContainerErrorMsg{
 				WorkstreamID: ws.ID,
 				Error:        fmt.Errorf("image '%s' not found. Run: docker pull %s", imageName, imageName),
@@ -680,7 +715,7 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 		configPaths, err := docker.CreateContainerConfig(cfg.Name)
 		if err != nil {
 			// Clean up worktree on failure
-			_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+			cleanupWorktree(ctx, gitRepo, ws.BranchName)
 			return ContainerErrorMsg{
 				WorkstreamID: ws.ID,
 				Error:        fmt.Errorf("failed to create container config: %w", err),
@@ -696,7 +731,7 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 		containerID, err := dockerClient.CreateContainer(ctx, cfg)
 		if err != nil {
 			// Clean up worktree on failure
-			_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+			cleanupWorktree(ctx, gitRepo, ws.BranchName)
 			return ContainerErrorMsg{
 				WorkstreamID: ws.ID,
 				Error:        err,
@@ -708,7 +743,7 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 		if err != nil {
 			// Clean up created container and worktree on start failure
 			_ = dockerClient.RemoveContainer(ctx, containerID)
-			_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+			cleanupWorktree(ctx, gitRepo, ws.BranchName)
 			return ContainerErrorMsg{
 				WorkstreamID: ws.ID,
 				Error:        err,
@@ -822,11 +857,7 @@ func StopContainerCmd(ws *workstream.Workstream) tea.Cmd {
 		LogDebug("Container cleanup done")
 
 		// Clean up the worktree
-		// Compute path from branch name if not set (e.g., restored from state)
-		worktreePath := ws.WorktreePath
-		if worktreePath == "" && ws.BranchName != "" {
-			worktreePath = getWorktreePath(ws.BranchName)
-		}
+		worktreePath := resolveWorktreePath(ws)
 		LogDebug("Worktree path: %s", worktreePath)
 
 		// Get repo path once for all git operations
@@ -1029,17 +1060,7 @@ func PruneAllContainersAndBranchesCmd() tea.Cmd {
 			}
 		}
 
-		for _, branch := range branches {
-			hasCommits, err := g.BranchHasCommits(ctx, branch)
-			if err != nil {
-				continue // Skip on error
-			}
-			if !hasCommits {
-				if err := g.DeleteBranch(ctx, branch); err == nil {
-					branchesPruned++
-				}
-			}
-		}
+		branchesPruned = pruneEmptyBranches(ctx, g, branches)
 
 		return PruneAllResultMsg{
 			ContainersPruned: containersPruned,
@@ -1094,17 +1115,7 @@ func PruneProjectContainersAndBranchesCmd(projectName string) tea.Cmd {
 			}
 		}
 
-		for _, branch := range branches {
-			hasCommits, err := g.BranchHasCommits(ctx, branch)
-			if err != nil {
-				continue // Skip on error
-			}
-			if !hasCommits {
-				if err := g.DeleteBranch(ctx, branch); err == nil {
-					branchesPruned++
-				}
-			}
-		}
+		branchesPruned = pruneEmptyBranches(ctx, g, branches)
 
 		return PruneAllResultMsg{
 			ContainersPruned: containersPruned,
@@ -1238,11 +1249,7 @@ func PushBranchCmd(ws *workstream.Workstream) tea.Cmd {
 		defer cancel()
 
 		// Use worktree path for git operations
-		worktreePath := ws.WorktreePath
-		if worktreePath == "" && ws.BranchName != "" {
-			worktreePath = getWorktreePath(ws.BranchName)
-		}
-
+		worktreePath := resolveWorktreePath(ws)
 		if worktreePath == "" {
 			return PushBranchResultMsg{WorkstreamID: ws.ID, Error: fmt.Errorf("no worktree path for branch")}
 		}
@@ -1271,11 +1278,7 @@ func CreatePRCmd(ws *workstream.Workstream) tea.Cmd {
 		defer cancel()
 
 		// Use worktree path for git operations - that's where the branch is checked out
-		worktreePath := ws.WorktreePath
-		if worktreePath == "" && ws.BranchName != "" {
-			worktreePath = getWorktreePath(ws.BranchName)
-		}
-
+		worktreePath := resolveWorktreePath(ws)
 		if worktreePath == "" {
 			return PRCreatedMsg{WorkstreamID: ws.ID, Error: fmt.Errorf("no worktree path for branch")}
 		}
@@ -1372,11 +1375,7 @@ func RebaseBranchCmd(ws *workstream.Workstream) tea.Cmd {
 		defer cancel()
 
 		// Use the worktree path if available
-		worktreePath := ws.WorktreePath
-		if worktreePath == "" {
-			worktreePath = getWorktreePath(ws.BranchName)
-		}
-
+		worktreePath := resolveWorktreePath(ws)
 		gitRepo := GitClientFactory(worktreePath)
 
 		// Rebase the branch onto main
