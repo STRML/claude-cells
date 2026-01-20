@@ -42,13 +42,17 @@ func newSpinner(message string) *spinner {
 	}
 }
 
-func (s *spinner) Start() {
+func (s *spinner) Start(ctx context.Context) {
 	go func() {
 		ticker := time.NewTicker(80 * time.Millisecond)
 		defer ticker.Stop()
 
 		for {
 			select {
+			case <-ctx.Done():
+				// Context cancelled - clear spinner and exit
+				fmt.Print("\r\033[K")
+				return
 			case <-s.done:
 				// Clear the spinner line
 				fmt.Print("\r\033[K")
@@ -334,7 +338,7 @@ func validatePrerequisites() error {
 			// Use devcontainer CLI if available for proper feature support
 			if cliStatus.Available {
 				spin := newSpinner(fmt.Sprintf("Building image '%s' with devcontainer CLI...", result.ImageName))
-				spin.Start()
+				spin.Start(buildCtx)
 				baseImage, err := docker.BuildWithDevcontainerCLI(buildCtx, projectPath, &buildOutput)
 				spin.Stop()
 				if err != nil {
@@ -343,7 +347,7 @@ func validatePrerequisites() error {
 				}
 				// Build enhanced image with Claude Code on top
 				spin = newSpinner("Adding Claude Code to image...")
-				spin.Start()
+				spin.Start(buildCtx)
 				err = docker.BuildEnhancedImage(buildCtx, baseImage, result.ImageName, &buildOutput)
 				spin.Stop()
 				if err != nil {
@@ -358,7 +362,7 @@ func validatePrerequisites() error {
 				}
 
 				spin := newSpinner(fmt.Sprintf("Building image '%s'...", result.ImageName))
-				spin.Start()
+				spin.Start(buildCtx)
 				err = docker.BuildProjectImage(buildCtx, projectPath, devCfg, &buildOutput)
 				spin.Stop()
 				if err != nil {
@@ -375,7 +379,7 @@ func validatePrerequisites() error {
 			defer buildCancel()
 
 			spin := newSpinner(fmt.Sprintf("Building image '%s'...", docker.DefaultImage))
-			spin.Start()
+			spin.Start(buildCtx)
 			err := docker.BuildImage(buildCtx, &buildOutput)
 			spin.Stop()
 			if err != nil {
