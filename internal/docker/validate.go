@@ -14,7 +14,7 @@ import (
 )
 
 // DefaultImage is the fallback Docker image when no devcontainer.json is found
-const DefaultImage = "claude-code-base:latest"
+const DefaultImage = "ccells-base"
 
 // RequiredImage is kept for backward compatibility
 // Deprecated: Use DefaultImage or GetProjectImage instead

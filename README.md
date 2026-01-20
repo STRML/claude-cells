@@ -85,27 +85,22 @@ go install github.com/STRML/claude-cells/cmd/ccells@latest
 
 ## Quick Start
 
-1. **Build the base Docker image** (first time only):
-   ```bash
-   docker build -t ccells-base -f configs/base.Dockerfile .
-   ```
-
-2. **Run ccells** from your project directory:
+1. **Run ccells** from your project directory (the Docker image is built automatically on first run):
    ```bash
    ccells
    ```
 
-3. **Create a workstream** by pressing `n` and entering a prompt for Claude:
+2. **Create a workstream** by pressing `n` and entering a prompt for Claude:
    ```
    add user authentication with JWT tokens
    ```
 
-4. **Watch Claude work** - the workstream will automatically:
+3. **Watch Claude work** - the workstream will automatically:
    - Create a branch named `add-user-authentication-jwt-tokens`
    - Start a Docker container with your project mounted
    - Launch Claude Code with your prompt
 
-5. **Create more workstreams** - press `n` again to add parallel tasks
+4. **Create more workstreams** - press `n` again to add parallel tasks
 
 ## Keybindings
 
@@ -286,7 +281,7 @@ Claude Cells stores data in:
 
 ### Container fails to start
 
-Make sure you've built the base image:
+The base image is built automatically on first run. If you need to manually rebuild it:
 ```bash
 docker build -t ccells-base -f configs/base.Dockerfile .
 ```
