@@ -136,10 +136,19 @@ if test -n "$CREDS_SRC"; then
   cp "$CREDS_SRC" "$HOME/.claude/.credentials.json" 2>/dev/null
 fi
 
-# Also copy .claude directory contents if mounted at /home/claude
+# Copy essential .claude files (NOT the whole directory - it's huge!)
 if test -d "/home/claude/.claude" && test "$HOME" != "/home/claude"; then
   echo "[ccells] Copying .claude config from /home/claude..."
-  cp -r /home/claude/.claude/* "$HOME/.claude/" 2>/dev/null || true
+  # Only copy essential config files, not session data/cache/telemetry
+  for f in settings.json CLAUDE.md; do
+    test -f "/home/claude/.claude/$f" && cp "/home/claude/.claude/$f" "$HOME/.claude/" 2>/dev/null
+  done
+  # Copy plugins config if it exists
+  if test -d "/home/claude/.claude/plugins"; then
+    mkdir -p "$HOME/.claude/plugins"
+    test -f "/home/claude/.claude/plugins/installed_plugins.json" && \
+      cp "/home/claude/.claude/plugins/installed_plugins.json" "$HOME/.claude/plugins/" 2>/dev/null
+  fi
 fi
 
 # Copy .claude.json (onboarding state, settings) if mounted at /home/claude
