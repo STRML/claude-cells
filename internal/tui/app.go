@@ -768,6 +768,34 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case "f":
+			// Toggle log panel fullscreen (when visible)
+			if m.logPanel != nil && m.logPanel.IsVisible() {
+				m.logPanel.ToggleFullscreen()
+				m.updateLayout()
+				if m.logPanel.IsFullscreen() {
+					m.toast = "Logs: fullscreen"
+				} else {
+					m.toast = "Logs: normal"
+				}
+				m.toastExpiry = time.Now().Add(toastDuration)
+				return m, nil
+			}
+
+		case "E":
+			// Export system logs (when log panel is visible)
+			if m.logPanel != nil && m.logPanel.IsVisible() {
+				logsDir := filepath.Join(m.workingDir, "ccells-logs")
+				exportPath, err := m.logPanel.Export(logsDir)
+				if err != nil {
+					m.toast = fmt.Sprintf("Export failed: %v", err)
+				} else {
+					m.toast = fmt.Sprintf("Logs exported: %s", filepath.Base(exportPath))
+				}
+				m.toastExpiry = time.Now().Add(toastDuration * 2) // Longer for export
+				return m, nil
+			}
+
 		case "space":
 			// Toggle focused pane with main pane (position 0)
 			if len(m.panes) > 1 {
@@ -866,6 +894,8 @@ Navigation Mode:
   L           Cycle layout
   `+"`"+`           Toggle log panel (system logs)
   ~           Cycle log filter (DEBUG/INFO/WARN/ERR)
+  f           Fullscreen log panel (when visible)
+  E           Export system logs (when visible)
   Space       Move focused pane to main (largest) position
   1-9         Focus pane by number
   Tab         Cycle focus
@@ -2225,6 +2255,10 @@ func (m AppModel) overlayDialog(background string) string {
 // logPanelHeight returns the height of the log panel (0 if hidden)
 func (m *AppModel) logPanelHeight() int {
 	if m.logPanel != nil && m.logPanel.IsVisible() {
+		if m.logPanel.IsFullscreen() {
+			// In fullscreen, take all available space except title bar (1) and status bar (1)
+			return m.height - 2
+		}
 		return DefaultLogPanelHeight
 	}
 	return 0
