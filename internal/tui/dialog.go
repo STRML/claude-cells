@@ -549,6 +549,19 @@ func (d DialogModel) Init() tea.Cmd {
 // Update handles dialog input
 func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.PasteMsg:
+		// Handle paste into dialog input fields
+		if d.useTextArea {
+			d.TextArea.InsertString(msg.Content)
+		} else {
+			// For textinput, insert pasted content at cursor position
+			val := d.Input.Value()
+			pos := d.Input.Position()
+			newVal := val[:pos] + msg.Content + val[pos:]
+			d.Input.SetValue(newVal)
+			d.Input.SetCursor(pos + len(msg.Content))
+		}
+		return d, nil
 	case tea.KeyMsg:
 		keyStr := msg.String()
 		// Debug: log key events in dialogs to help diagnose shift+enter issues

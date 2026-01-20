@@ -359,6 +359,19 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.PasteMsg:
 		// Handle paste from clipboard (cmd+v / ctrl+shift+v)
+		// If dialog is active, forward paste to dialog
+		if m.dialog != nil {
+			newDialog, cmd := m.dialog.Update(msg)
+			m.dialog = &newDialog
+			return m, cmd
+		}
+		// If focused pane has an in-pane dialog, forward paste to that dialog
+		if len(m.panes) > 0 && m.focusedPane < len(m.panes) && m.panes[m.focusedPane].HasInPaneDialog() {
+			dialog := m.panes[m.focusedPane].GetInPaneDialog()
+			newDialog, cmd := dialog.Update(msg)
+			m.panes[m.focusedPane].SetInPaneDialog(&newDialog)
+			return m, cmd
+		}
 		// Forward pasted content to the focused pane when in input mode
 		if m.inputMode && len(m.panes) > 0 && m.focusedPane < len(m.panes) {
 			if m.panes[m.focusedPane].HasPTY() {
