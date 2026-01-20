@@ -107,18 +107,38 @@ func NewPTYSession(ctx context.Context, dockerClient *client.Client, containerID
 	//    - If resuming, use --continue to resume the previous session
 	//    - If new session with prompt, pass the prompt as argument
 	setupScript := `
+echo "[ccells] Starting container setup..."
+echo "[ccells] User: $(whoami), Home: $HOME"
+
 # Ensure PATH includes user's local bin directories
 export PATH="$HOME/.local/bin:$HOME/.claude/local/bin:$PATH"
+echo "[ccells] PATH: $PATH"
 
-test -f "$HOME/.claude-credentials" && cp "$HOME/.claude-credentials" "$HOME/.claude/.credentials.json" 2>/dev/null
+# Setup credentials
+if test -f "$HOME/.claude-credentials"; then
+  echo "[ccells] Copying credentials..."
+  mkdir -p "$HOME/.claude" 2>/dev/null
+  cp "$HOME/.claude-credentials" "$HOME/.claude/.credentials.json" 2>/dev/null
+fi
+
 mkdir -p "$HOME/.local/bin" 2>/dev/null
 test ! -f "$HOME/.local/bin/claude" && which claude >/dev/null 2>&1 && ln -sf "$(which claude)" "$HOME/.local/bin/claude" 2>/dev/null
 
 # Install Claude Code if not available
 if ! which claude >/dev/null 2>&1; then
-  echo "Claude Code not found in container, installing..."
+  echo "[ccells] Claude Code not found, installing..."
   curl -fsSL https://claude.ai/install.sh | bash 2>&1
+  export PATH="$HOME/.claude/local/bin:$PATH"
+  if ! which claude >/dev/null 2>&1; then
+    echo "[ccells] ERROR: Claude Code installation failed!"
+    echo "[ccells] Checking install location..."
+    ls -la "$HOME/.claude/local/bin/" 2>&1 || echo "[ccells] Install dir not found"
+    exit 1
+  fi
 fi
+
+echo "[ccells] Claude Code found at: $(which claude)"
+echo "[ccells] Starting Claude Code..."
 `
 	var setupCmd string
 	if opts != nil && opts.IsResume {
