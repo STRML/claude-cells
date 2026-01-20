@@ -737,3 +737,118 @@ func TestPaneBoundsNonNegativeDimensions(t *testing.T) {
 		}
 	}
 }
+
+// ============================================================================
+// Uneven Width/Height Distribution Tests
+// ============================================================================
+
+func TestCalculateLayout_UnevenWidthDistribution(t *testing.T) {
+	// Test that total widths always sum to totalWidth (no pixels lost)
+	testCases := []struct {
+		name      string
+		layout    LayoutType
+		paneCount int
+		width     int
+		height    int
+	}{
+		// Columns layout - width should be fully distributed
+		{"Columns 2 panes odd width", LayoutColumns, 2, 101, 50},
+		{"Columns 3 panes odd width", LayoutColumns, 3, 100, 50},
+		{"Columns 4 panes odd width", LayoutColumns, 4, 123, 50},
+
+		// Grid layout - width should be fully distributed per row
+		{"Grid 2 panes odd width", LayoutGrid, 2, 101, 50},
+		{"Grid 3 panes odd width", LayoutGrid, 3, 101, 50},
+		{"Grid 4 panes odd width", LayoutGrid, 4, 101, 50},
+		{"Grid 5 panes odd width", LayoutGrid, 5, 101, 60},
+		{"Grid 6 panes odd width", LayoutGrid, 6, 101, 60},
+
+		// MainTop layout - bottom panes should fill width
+		{"MainTop 3 panes odd width", LayoutMainTop, 3, 101, 50},
+		{"MainTop 4 panes odd width", LayoutMainTop, 4, 100, 50},
+
+		// MainLeft layout - side width should be remainder
+		{"MainLeft 3 panes odd width", LayoutMainLeft, 3, 101, 50},
+
+		// Rows layout - all panes should have full width
+		{"Rows 2 panes", LayoutRows, 2, 101, 50},
+		{"Rows 3 panes", LayoutRows, 3, 101, 60},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			sizes := CalculateLayout(tc.layout, tc.paneCount, tc.width, tc.height)
+
+			if len(sizes) != tc.paneCount {
+				t.Fatalf("Expected %d sizes, got %d", tc.paneCount, len(sizes))
+			}
+
+			// For non-grid layouts that arrange horizontally, sum widths
+			switch tc.layout {
+			case LayoutColumns:
+				totalWidth := 0
+				for _, s := range sizes {
+					totalWidth += s.Width
+				}
+				if totalWidth != tc.width {
+					t.Errorf("Total width %d != expected %d (sizes: %v)", totalWidth, tc.width, sizesToWidths(sizes))
+				}
+
+			case LayoutRows:
+				// All rows should have full width
+				for i, s := range sizes {
+					if s.Width != tc.width {
+						t.Errorf("Pane %d width %d != expected %d", i, s.Width, tc.width)
+					}
+				}
+
+			case LayoutMainTop:
+				// Main pane (first) should have full width
+				if sizes[0].Width != tc.width {
+					t.Errorf("Main pane width %d != expected %d", sizes[0].Width, tc.width)
+				}
+				// Bottom panes should sum to full width
+				bottomWidth := 0
+				for i := 1; i < len(sizes); i++ {
+					bottomWidth += sizes[i].Width
+				}
+				if bottomWidth != tc.width {
+					t.Errorf("Bottom panes total width %d != expected %d", bottomWidth, tc.width)
+				}
+
+			case LayoutMainLeft:
+				// Main + side should equal total width
+				mainWidth := sizes[0].Width
+				sideWidth := sizes[1].Width // All side panes have same width
+				if mainWidth+sideWidth != tc.width {
+					t.Errorf("Main (%d) + Side (%d) = %d != expected %d",
+						mainWidth, sideWidth, mainWidth+sideWidth, tc.width)
+				}
+
+			case LayoutGrid:
+				// Verify each row sums to total width using bounds
+				bounds := CalculatePaneBounds(tc.layout, tc.paneCount, tc.width, tc.height, 0)
+				cols, rows := calculateGridDimensions(tc.paneCount)
+				for row := 0; row < rows; row++ {
+					rowWidth := 0
+					for i, b := range bounds {
+						if i/cols == row {
+							rowWidth += b.Width
+						}
+					}
+					if rowWidth != tc.width {
+						t.Errorf("Row %d total width %d != expected %d", row, rowWidth, tc.width)
+					}
+				}
+			}
+		})
+	}
+}
+
+func sizesToWidths(sizes []PaneSize) []int {
+	widths := make([]int, len(sizes))
+	for i, s := range sizes {
+		widths[i] = s.Width
+	}
+	return widths
+}
