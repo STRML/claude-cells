@@ -768,11 +768,11 @@ func (p PaneModel) View() string {
 		var borderColor lipgloss.Color
 		var targetBorderColor string
 		if p.inputMode {
-			// Input mode - bright cyan border (more noticeable)
+			// Input mode - bright cyan border
 			targetBorderColor = colorCyan
 		} else {
-			// Nav mode - dim border to reinforce "inactive" feel
-			targetBorderColor = "#666666"
+			// Nav mode - green border to match header highlight
+			targetBorderColor = colorGreen
 		}
 		// Fade border color during animation
 		if p.fading {
