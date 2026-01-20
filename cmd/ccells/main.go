@@ -410,7 +410,7 @@ func validatePrerequisites() error {
 // It uses the container tracker (if available), state file, and worktree existence to find which containers should be kept.
 // IMPORTANT: Never removes containers that have corresponding worktrees (work in progress).
 func cleanupOrphanedContainers(tracker *docker.ContainerTracker) {
-	// Get current working directory for state file
+	// Get current working directory for project name
 	cwd, err := os.Getwd()
 	if err != nil {
 		return // Silently skip if we can't get cwd
@@ -419,12 +419,15 @@ func cleanupOrphanedContainers(tracker *docker.ContainerTracker) {
 	// Get project name from directory
 	projectName := filepath.Base(cwd)
 
+	// Use the new state directory
+	stateDir := getStateDir()
+
 	// Collect known container IDs from multiple sources
 
 	// 1. From state file (for graceful shutdown resume)
 	var knownIDs []string
-	if workstream.StateExists(cwd) {
-		state, err := workstream.LoadState(cwd)
+	if workstream.StateExists(stateDir) {
+		state, err := workstream.LoadState(stateDir)
 		if err == nil {
 			for _, ws := range state.Workstreams {
 				if ws.ContainerID != "" {
@@ -487,19 +490,17 @@ func listExistingWorktrees() []string {
 
 // runStateRepair validates and repairs the state file by extracting session IDs from running containers
 func runStateRepair() error {
-	cwd, err := os.Getwd()
-	if err != nil {
-		return fmt.Errorf("failed to get current directory: %w", err)
-	}
+	// Use the same state directory logic as the main app
+	stateDir := getStateDir()
 
 	// Check if state file exists
-	if !workstream.StateExists(cwd) {
-		fmt.Println("No state file found. Nothing to repair.")
+	if !workstream.StateExists(stateDir) {
+		fmt.Printf("No state file found at %s. Nothing to repair.\n", stateDir)
 		return nil
 	}
 
 	// Load current state
-	state, err := workstream.LoadState(cwd)
+	state, err := workstream.LoadState(stateDir)
 	if err != nil {
 		return fmt.Errorf("failed to load state: %w", err)
 	}
@@ -547,7 +548,7 @@ func runStateRepair() error {
 
 	if result.WasRepaired() {
 		// Save the repaired state
-		if err := workstream.SaveState(cwd, workstreams, state.FocusedIndex, state.Layout); err != nil {
+		if err := workstream.SaveState(stateDir, workstreams, state.FocusedIndex, state.Layout); err != nil {
 			return fmt.Errorf("failed to save repaired state: %w", err)
 		}
 		fmt.Println("State file updated successfully.")
