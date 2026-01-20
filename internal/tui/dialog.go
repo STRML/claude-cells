@@ -515,6 +515,12 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				d.Body = "Loading..."
 				return d, func() tea.Msg { return ResourceStatsRefreshMsg{IsGlobal: d.isGlobalView} }
 			}
+		case "shift+enter":
+			// Insert newline in textarea dialogs
+			if d.useTextArea {
+				d.TextArea.InsertRune('\n')
+				return d, nil
+			}
 		case "enter":
 			// Progress dialog: dismiss only if complete
 			if d.Type == DialogProgress {
@@ -894,7 +900,7 @@ func (d DialogModel) View() string {
 	} else if d.useTextArea {
 		content.WriteString(inputStyle.Render(d.TextArea.View()))
 		content.WriteString("\n\n")
-		content.WriteString(KeyHint("Enter", " create") + "  " + KeyHintStyle.Render("[Esc] Cancel"))
+		content.WriteString(KeyHint("Shift+Enter", " newline") + "  " + KeyHint("Enter", " create") + "  " + KeyHintStyle.Render("[Esc] Cancel"))
 	} else {
 		content.WriteString(inputStyle.Render(d.Input.View()))
 		content.WriteString("\n\n")
