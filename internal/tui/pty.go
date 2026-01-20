@@ -62,7 +62,6 @@ type PTYSession struct {
 	dockerClient *client.Client
 	width        int
 	height       int
-	isResume     bool // If true, skip bypass prompt detection (already accepted)
 }
 
 // PTYOutputMsg is sent when there's output from the PTY.
@@ -224,7 +223,6 @@ echo "[ccells] Starting Claude Code..."
 	// Create a cancellable context for this session
 	sessionCtx, sessionCancel := context.WithCancel(context.Background())
 
-	isResume := opts != nil && opts.IsResume
 	session := &PTYSession{
 		containerID:  containerID,
 		execID:       execResp.ID,
@@ -237,7 +235,6 @@ echo "[ccells] Starting Claude Code..."
 		dockerClient: dockerClient,
 		width:        width,
 		height:       height,
-		isResume:     isResume,
 	}
 
 	// Start the read loop immediately - it will handle both:
@@ -278,9 +275,9 @@ func (p *PTYSession) StartReadLoop() {
 	buf := make([]byte, 4096)
 
 	// For detecting the bypass permissions prompt during startup
-	// Skip if resuming (--continue) since bypass was already accepted
+	// Always check - even with --continue, fresh containers show the prompt
 	var accumulated strings.Builder
-	bypassHandled := p.isResume // Skip bypass detection if resuming
+	bypassHandled := false
 	startTime := time.Now()
 	const bypassTimeout = 10 * time.Second
 
