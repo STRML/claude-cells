@@ -15,6 +15,7 @@ Claude Cells is a terminal multiplexer specifically designed for AI-assisted dev
 - **Parallel Development**: Work on multiple features/bugs simultaneously without context switching
 - **Complete Isolation**: Each Claude instance runs in its own Docker container with a dedicated git branch
 - **No Conflicts**: Changes in one workstream can't interfere with another
+- **Permission-Free Iteration**: Because each container is fully isolated, Claude Code can work autonomously without constant permission prompts - let it edit files, run commands, and iterate freely while you focus on other workstreams
 - **Session Persistence**: Close ccells and come back later - containers pause and resume exactly where you left off
 - **Real-time Collaboration**: Pairing mode syncs your local filesystem with any container for live editing
 
