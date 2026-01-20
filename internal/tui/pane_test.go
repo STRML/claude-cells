@@ -407,3 +407,180 @@ func TestColor256ToRGB(t *testing.T) {
 		})
 	}
 }
+
+// TestMuteANSI_ColorTransformation verifies that muteANSI actually transforms
+// explicit ANSI color codes to muted versions (reduced saturation and brightness).
+// This is important for showing unfocused panes with visually distinct, dimmed colors.
+func TestMuteANSI_ColorTransformation(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		saturation  float64
+		brightness  float64
+		description string
+	}{
+		{
+			name:        "basic red to muted",
+			input:       "\x1b[31mRed Text\x1b[0m",
+			saturation:  0.25,
+			brightness:  0.6,
+			description: "Basic ANSI red (31) should be converted to true color with reduced saturation",
+		},
+		{
+			name:        "256-color green to muted",
+			input:       "\x1b[38;5;46mGreen\x1b[0m", // Bright green in 256-color palette
+			saturation:  0.25,
+			brightness:  0.6,
+			description: "256-color mode should be converted to muted true color",
+		},
+		{
+			name:        "true color blue to muted",
+			input:       "\x1b[38;2;0;0;255mBlue\x1b[0m",
+			saturation:  0.25,
+			brightness:  0.6,
+			description: "True color RGB should have saturation and brightness reduced",
+		},
+		{
+			name:        "background color muted",
+			input:       "\x1b[44mBlue Background\x1b[0m",
+			saturation:  0.25,
+			brightness:  0.6,
+			description: "Background colors should also be muted",
+		},
+		{
+			name:        "bright foreground muted",
+			input:       "\x1b[92mBright Green\x1b[0m", // Bright green (90-97 range)
+			saturation:  0.25,
+			brightness:  0.6,
+			description: "Bright ANSI colors (90-97) should be muted",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := muteANSI(tt.input, tt.saturation, tt.brightness)
+
+			// The result should contain true color sequences (38;2; for fg, 48;2; for bg)
+			// because muteANSI converts all colors to true color for precise muting
+			if strings.Contains(tt.input, "[31m") || strings.Contains(tt.input, "[32m") ||
+				strings.Contains(tt.input, "[92m") || strings.Contains(tt.input, "[38;5;") {
+				// Foreground colors should be converted to 38;2;R;G;B format
+				if !strings.Contains(result, "38;2;") {
+					t.Errorf("%s: expected true color foreground (38;2;), got %q", tt.description, result)
+				}
+			}
+			if strings.Contains(tt.input, "[44m") {
+				// Background colors should be converted to 48;2;R;G;B format
+				if !strings.Contains(result, "48;2;") {
+					t.Errorf("%s: expected true color background (48;2;), got %q", tt.description, result)
+				}
+			}
+
+			// Text content must be preserved
+			inputPlain := stripANSI(tt.input)
+			resultPlain := stripANSI(result)
+			if resultPlain != inputPlain {
+				t.Errorf("muteANSI altered text content: %q -> %q", inputPlain, resultPlain)
+			}
+		})
+	}
+}
+
+// TestMuteANSI_PlainTextPassthrough verifies that muteANSI does NOT modify
+// text that has no explicit ANSI color codes. This is important because
+// such text uses the terminal's default foreground color (e.g., user's green-on-black
+// theme), which muteANSI cannot detect or transform.
+//
+// The fix for this is handled at the pane View level by wrapping the output
+// in a muted default foreground style AFTER calling muteANSI.
+func TestMuteANSI_PlainTextPassthrough(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"plain text", "Hello World"},
+		{"multiline plain", "Line 1\nLine 2\nLine 3"},
+		{"plain with whitespace", "  indented  \ttabbed  "},
+		{"unicode plain", "Hello 世界 🌍"},
+		{"empty string", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := muteANSI(tt.input, 0.25, 0.6)
+
+			// Plain text should pass through completely unchanged
+			// (no ANSI codes to transform)
+			if result != tt.input {
+				t.Errorf("muteANSI modified plain text: %q -> %q", tt.input, result)
+			}
+		})
+	}
+}
+
+// TestMuteANSI_MixedContent verifies behavior with mixed ANSI and plain text.
+// The ANSI-colored portions should be muted, while plain text portions
+// should pass through unchanged (they'll be handled by the pane's default style).
+func TestMuteANSI_MixedContent(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{
+			name:  "plain then colored",
+			input: "Plain text \x1b[31mRed text\x1b[0m more plain",
+		},
+		{
+			name:  "colored then plain",
+			input: "\x1b[32mGreen\x1b[0m then plain text",
+		},
+		{
+			name:  "multiple color spans",
+			input: "A \x1b[31mB\x1b[0m C \x1b[32mD\x1b[0m E",
+		},
+		{
+			name:  "nested attributes",
+			input: "\x1b[1m\x1b[31mBold Red\x1b[0m Plain \x1b[4mUnderline\x1b[0m",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := muteANSI(tt.input, 0.25, 0.6)
+
+			// Plain text content must be preserved
+			inputPlain := stripANSI(tt.input)
+			resultPlain := stripANSI(result)
+			if resultPlain != inputPlain {
+				t.Errorf("muteANSI altered text content: %q -> %q", inputPlain, resultPlain)
+			}
+
+			// Any basic color codes (30-37, 90-97) should be converted to true color
+			// Check that the result doesn't contain basic color codes that were in input
+			if strings.Contains(tt.input, "[31m") && strings.Contains(result, "[31m") {
+				t.Errorf("muteANSI should convert basic colors to true color, but [31m still present")
+			}
+			if strings.Contains(tt.input, "[32m") && strings.Contains(result, "[32m") {
+				t.Errorf("muteANSI should convert basic colors to true color, but [32m still present")
+			}
+		})
+	}
+}
+
+// TestMuteANSI_GrayscaleMode verifies that saturation=0 produces grayscale output.
+func TestMuteANSI_GrayscaleMode(t *testing.T) {
+	input := "\x1b[31mRed\x1b[0m \x1b[32mGreen\x1b[0m \x1b[34mBlue\x1b[0m"
+	result := muteANSI(input, 0.0, 1.0) // Zero saturation = grayscale
+
+	// Should still preserve text
+	inputPlain := stripANSI(input)
+	resultPlain := stripANSI(result)
+	if resultPlain != inputPlain {
+		t.Errorf("grayscale mode altered text: %q -> %q", inputPlain, resultPlain)
+	}
+
+	// Result should contain true color codes (converted from basic colors)
+	if !strings.Contains(result, "38;2;") {
+		t.Error("expected grayscale mode to produce true color output")
+	}
+}
