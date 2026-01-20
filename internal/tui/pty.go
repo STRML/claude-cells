@@ -78,10 +78,11 @@ type PTYClosedMsg struct {
 
 // PTYOptions holds options for creating a PTY session.
 type PTYOptions struct {
-	Width    int
-	Height   int
-	EnvVars  []string // Additional environment variables in "KEY=value" format
-	IsResume bool     // If true, use 'claude --continue' instead of starting new session
+	Width           int
+	Height          int
+	EnvVars         []string // Additional environment variables in "KEY=value" format
+	IsResume        bool     // If true, use 'claude --continue' instead of starting new session
+	HostProjectPath string   // Host project path for finding session data (encoded for .claude/projects/)
 }
 
 // NewPTYSession creates a new PTY session for running Claude Code in a container.
@@ -149,11 +150,21 @@ if test -d "/home/claude/.claude" && test "$HOME" != "/home/claude"; then
     test -f "/home/claude/.claude/plugins/installed_plugins.json" && \
       cp "/home/claude/.claude/plugins/installed_plugins.json" "$HOME/.claude/plugins/" 2>/dev/null
   fi
-  # Copy session data for /workspace project (needed for --continue)
-  if test -d "/home/claude/.claude/projects/-workspace"; then
-    echo "[ccells] Copying session data for --continue..."
-    mkdir -p "$HOME/.claude/projects"
-    cp -r "/home/claude/.claude/projects/-workspace" "$HOME/.claude/projects/" 2>/dev/null
+  # Copy session data for --continue
+  # Session data on host is stored under encoded HOST path (e.g., -Users-samuelreed-git-oss-docker-tui)
+  # But container runs in /workspace, so Claude looks for -workspace
+  # We need to copy from host-encoded path to -workspace
+  if test -n "$HOST_PROJECT_PATH"; then
+    # Encode host path: replace / with -
+    HOST_ENCODED=$(echo "$HOST_PROJECT_PATH" | sed 's|/|-|g')
+    HOST_SESSION_DIR="/home/claude/.claude/projects/$HOST_ENCODED"
+    if test -d "$HOST_SESSION_DIR"; then
+      echo "[ccells] Copying session data from $HOST_ENCODED to -workspace..."
+      mkdir -p "$HOME/.claude/projects/-workspace"
+      cp -r "$HOST_SESSION_DIR"/* "$HOME/.claude/projects/-workspace/" 2>/dev/null
+    else
+      echo "[ccells] No session data found at $HOST_SESSION_DIR"
+    fi
   fi
 fi
 
@@ -203,8 +214,14 @@ echo "[ccells] Starting Claude Code..."
 		"COLORTERM=truecolor",
 		"IS_SANDBOX=1",
 	}
-	if opts != nil && len(opts.EnvVars) > 0 {
-		env = append(env, opts.EnvVars...)
+	if opts != nil {
+		if len(opts.EnvVars) > 0 {
+			env = append(env, opts.EnvVars...)
+		}
+		// Pass host project path for session data copying
+		if opts.HostProjectPath != "" {
+			env = append(env, "HOST_PROJECT_PATH="+opts.HostProjectPath)
+		}
 	}
 
 	// Create exec with TTY and terminal size
