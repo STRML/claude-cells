@@ -33,6 +33,7 @@ type ContainerConfig struct {
 	ClaudeCfg   string            // Path to ~/.claude directory on host
 	ClaudeJSON  string            // Path to ~/.claude.json file on host (session state)
 	GitConfig   string            // Path to ~/.gitconfig file on host (git identity)
+	GitIdentity *GitIdentity      // Git user identity (name/email) for commits
 	Credentials string            // Path to credentials file (OAuth tokens from keychain)
 	ExtraEnv    map[string]string // Additional environment variables from devcontainer.json
 	ExtraMounts []mount.Mount     // Additional mounts from devcontainer.json
@@ -70,6 +71,19 @@ func (c *Client) CreateContainer(ctx context.Context, cfg *ContainerConfig) (str
 	var env []string
 	for k, v := range cfg.ExtraEnv {
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
+	}
+
+	// Add git identity environment variables if provided
+	// These ensure commits are attributed to the user even without .gitconfig
+	if cfg.GitIdentity != nil {
+		if cfg.GitIdentity.Name != "" {
+			env = append(env, fmt.Sprintf("GIT_AUTHOR_NAME=%s", cfg.GitIdentity.Name))
+			env = append(env, fmt.Sprintf("GIT_COMMITTER_NAME=%s", cfg.GitIdentity.Name))
+		}
+		if cfg.GitIdentity.Email != "" {
+			env = append(env, fmt.Sprintf("GIT_AUTHOR_EMAIL=%s", cfg.GitIdentity.Email))
+			env = append(env, fmt.Sprintf("GIT_COMMITTER_EMAIL=%s", cfg.GitIdentity.Email))
+		}
 	}
 
 	containerCfg := &container.Config{

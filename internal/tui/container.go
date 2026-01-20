@@ -442,6 +442,7 @@ func RebuildContainerCmd(ws *workstream.Workstream) tea.Cmd {
 		cfg.ClaudeCfg = configPaths.ClaudeDir
 		cfg.ClaudeJSON = configPaths.ClaudeJSON
 		cfg.GitConfig = configPaths.GitConfig
+		cfg.GitIdentity = docker.GetGitIdentity()
 		cfg.Credentials = configPaths.Credentials
 
 		containerID, err := dockerClient.CreateContainer(ctx, cfg)
@@ -688,6 +689,7 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 		cfg.ClaudeCfg = configPaths.ClaudeDir
 		cfg.ClaudeJSON = configPaths.ClaudeJSON
 		cfg.GitConfig = configPaths.GitConfig
+		cfg.GitIdentity = docker.GetGitIdentity()
 		cfg.Credentials = configPaths.Credentials
 
 		// Create container

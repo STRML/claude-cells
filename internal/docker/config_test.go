@@ -213,3 +213,38 @@ func TestContainerConfig(t *testing.T) {
 		})
 	}
 }
+
+// TestGetGitIdentity tests the git identity detection function.
+func TestGetGitIdentity(t *testing.T) {
+	// This test verifies GetGitIdentity doesn't crash and returns sensible values.
+	// The actual identity values depend on the host system's git configuration.
+	identity := GetGitIdentity()
+
+	// GetGitIdentity can return nil if git is not configured
+	if identity == nil {
+		t.Log("No git identity configured on this system")
+		return
+	}
+
+	// If we got an identity, at least one of name or email should be set
+	if identity.Name == "" && identity.Email == "" {
+		t.Error("GetGitIdentity returned non-nil but both Name and Email are empty")
+	}
+
+	t.Logf("Git identity: Name=%q, Email=%q", identity.Name, identity.Email)
+}
+
+// TestGitIdentityStruct tests the GitIdentity struct fields.
+func TestGitIdentityStruct(t *testing.T) {
+	identity := &GitIdentity{
+		Name:  "Test User",
+		Email: "test@example.com",
+	}
+
+	if identity.Name != "Test User" {
+		t.Errorf("Name = %q, want %q", identity.Name, "Test User")
+	}
+	if identity.Email != "test@example.com" {
+		t.Errorf("Email = %q, want %q", identity.Email, "test@example.com")
+	}
+}

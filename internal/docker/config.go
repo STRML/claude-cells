@@ -4,7 +4,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -27,8 +29,45 @@ const (
 type ConfigPaths struct {
 	ClaudeDir   string // Path to copied .claude directory
 	ClaudeJSON  string // Path to copied .claude.json file
-	GitConfig   string // Path to copied .gitconfig file
+	GitConfig   string // Path to copied .gitconfig file (empty if no .gitconfig exists)
 	Credentials string // Path to credentials file (from keychain)
+}
+
+// GitIdentity holds the user's git identity
+type GitIdentity struct {
+	Name  string
+	Email string
+}
+
+// GetGitIdentity reads the user's git identity from the host system.
+// It first tries git config --global, then falls back to git config (local).
+// Returns nil if no identity is configured.
+func GetGitIdentity() *GitIdentity {
+	var name, email string
+
+	// Try to get user.name from git config
+	if out, err := exec.Command("git", "config", "--global", "user.name").Output(); err == nil {
+		name = strings.TrimSpace(string(out))
+	} else if out, err := exec.Command("git", "config", "user.name").Output(); err == nil {
+		name = strings.TrimSpace(string(out))
+	}
+
+	// Try to get user.email from git config
+	if out, err := exec.Command("git", "config", "--global", "user.email").Output(); err == nil {
+		email = strings.TrimSpace(string(out))
+	} else if out, err := exec.Command("git", "config", "user.email").Output(); err == nil {
+		email = strings.TrimSpace(string(out))
+	}
+
+	// Return nil if neither name nor email is configured
+	if name == "" && email == "" {
+		return nil
+	}
+
+	return &GitIdentity{
+		Name:  name,
+		Email: email,
+	}
 }
 
 var (
@@ -118,11 +157,13 @@ func CreateContainerConfig(containerName string) (*ConfigPaths, error) {
 		}
 	}
 
-	// Copy .gitconfig if it exists
+	// Copy .gitconfig if it exists - track whether it was copied
+	gitConfigCopied := false
 	if _, err := os.Stat(srcGitConfig); err == nil {
 		if err := copyFileForce(srcGitConfig, dstGitConfig); err != nil {
 			return nil, fmt.Errorf("failed to copy .gitconfig: %w", err)
 		}
+		gitConfigCopied = true
 	}
 
 	// Extract and save OAuth credentials
@@ -157,10 +198,16 @@ func CreateContainerConfig(containerName string) (*ConfigPaths, error) {
 		return nil, fmt.Errorf("failed to write CLAUDE.md: %w", err)
 	}
 
+	// Only include GitConfig path if file was actually copied
+	gitConfigPath := ""
+	if gitConfigCopied {
+		gitConfigPath = dstGitConfig
+	}
+
 	return &ConfigPaths{
 		ClaudeDir:   dstClaudeDir,
 		ClaudeJSON:  dstClaudeJSON,
-		GitConfig:   dstGitConfig,
+		GitConfig:   gitConfigPath,
 		Credentials: dstCredentials,
 	}, nil
 }
@@ -234,11 +281,13 @@ func InitClaudeConfig() (*ConfigPaths, error) {
 		}
 	}
 
-	// Copy .gitconfig if it exists (for git identity in containers)
+	// Copy .gitconfig if it exists (for git identity in containers) - track whether it was copied
+	gitConfigCopied := false
 	if _, err := os.Stat(srcGitConfig); err == nil {
 		if err := copyFileForce(srcGitConfig, dstGitConfig); err != nil {
 			return nil, fmt.Errorf("failed to copy .gitconfig: %w", err)
 		}
+		gitConfigCopied = true
 	}
 
 	// Extract and save OAuth credentials from keychain
@@ -267,10 +316,16 @@ func InitClaudeConfig() (*ConfigPaths, error) {
 		}
 	}
 
+	// Only include GitConfig path if file was actually copied
+	gitConfigPath := ""
+	if gitConfigCopied {
+		gitConfigPath = dstGitConfig
+	}
+
 	return &ConfigPaths{
 		ClaudeDir:   dstClaudeDir,
 		ClaudeJSON:  dstClaudeJSON,
-		GitConfig:   dstGitConfig,
+		GitConfig:   gitConfigPath,
 		Credentials: dstCredentials,
 	}, nil
 }
