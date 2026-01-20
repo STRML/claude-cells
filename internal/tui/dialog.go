@@ -25,6 +25,7 @@ const (
 	DialogBranchConflict
 	DialogPruneAllConfirm
 	DialogCommitBeforeMerge
+	DialogResourceUsage
 )
 
 // DialogModel represents a modal dialog
@@ -47,6 +48,10 @@ type DialogModel struct {
 	scrollMax    int
 	// Progress dialog
 	inProgress bool
+	// Resource usage dialog
+	isGlobalView bool   // True for global (all ccells), false for project only
+	statsLoading bool   // True while fetching stats
+	statsError   string // Error message if stats fetch failed
 }
 
 // NewDestroyDialog creates a destroy confirmation dialog
@@ -280,6 +285,22 @@ Type "destroy" to confirm:`
 	}
 }
 
+// NewResourceUsageDialog creates a resource usage dialog
+func NewResourceUsageDialog(isGlobal bool) DialogModel {
+	title := "Resource Usage (Project)"
+	if isGlobal {
+		title = "Resource Usage (Global)"
+	}
+
+	return DialogModel{
+		Type:         DialogResourceUsage,
+		Title:        title,
+		Body:         "Loading...",
+		isGlobalView: isGlobal,
+		statsLoading: true,
+	}
+}
+
 // NewLogDialog creates a log viewer dialog with scrollable content
 func NewLogDialog(branchName string, logContent string) DialogModel {
 	// Calculate scroll max based on content lines
@@ -319,6 +340,25 @@ func (d *DialogModel) AppendBody(text string) {
 	d.Body += text
 }
 
+// SetStatsContent updates the resource dialog with stats data
+func (d *DialogModel) SetStatsContent(body string) {
+	d.Body = body
+	d.statsLoading = false
+	d.statsError = ""
+}
+
+// SetStatsError updates the resource dialog with an error message
+func (d *DialogModel) SetStatsError(err string) {
+	d.Body = "Error: " + err
+	d.statsLoading = false
+	d.statsError = err
+}
+
+// IsGlobalView returns whether the dialog shows global (all ccells) or project stats
+func (d *DialogModel) IsGlobalView() bool {
+	return d.isGlobalView
+}
+
 // Init initializes the dialog
 func (d DialogModel) Init() tea.Cmd {
 	if d.useTextArea {
@@ -337,7 +377,28 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 			if d.Type == DialogProgress && d.inProgress {
 				return d, nil
 			}
+			// Resource dialog can be dismissed even while loading
 			return d, func() tea.Msg { return DialogCancelMsg{} }
+		case "tab":
+			// Tab toggles view in resource usage dialog
+			if d.Type == DialogResourceUsage {
+				d.isGlobalView = !d.isGlobalView
+				d.statsLoading = true
+				if d.isGlobalView {
+					d.Title = "Resource Usage (Global)"
+				} else {
+					d.Title = "Resource Usage (Project)"
+				}
+				d.Body = "Loading..."
+				return d, func() tea.Msg { return ResourceStatsToggleMsg{IsGlobal: d.isGlobalView} }
+			}
+		case "r":
+			// 'r' refreshes in resource usage dialog
+			if d.Type == DialogResourceUsage && !d.statsLoading {
+				d.statsLoading = true
+				d.Body = "Loading..."
+				return d, func() tea.Msg { return ResourceStatsRefreshMsg{IsGlobal: d.isGlobalView} }
+			}
 		case "enter":
 			// Progress dialog: dismiss only if complete
 			if d.Type == DialogProgress {
@@ -348,6 +409,10 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 			}
 			// Log dialog dismisses on enter
 			if d.Type == DialogLog {
+				return d, func() tea.Msg { return DialogCancelMsg{} }
+			}
+			// Resource usage dialog dismisses on enter
+			if d.Type == DialogResourceUsage {
 				return d, func() tea.Msg { return DialogCancelMsg{} }
 			}
 			// Handle menu-style dialogs
@@ -537,8 +602,8 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 		}
 	}
 
-	// For menu-style, log, and progress dialogs, don't pass keys to input
-	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogLog || d.Type == DialogProgress {
+	// For menu-style, log, progress, and resource dialogs, don't pass keys to input
+	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogLog || d.Type == DialogProgress || d.Type == DialogResourceUsage {
 		return d, nil
 	}
 
@@ -556,6 +621,30 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 func (d DialogModel) View() string {
 	titleStyle := DialogTitle
 	inputStyle := DialogInputFocused.Width(d.width - 10)
+
+	// Resource usage dialog renders stats with custom header
+	if d.Type == DialogResourceUsage {
+		var content strings.Builder
+		// Show toggle hint in title area
+		toggleHint := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("[Tab] toggle view")
+		titleLine := titleStyle.Render(d.Title) + "  " + toggleHint
+		content.WriteString(titleLine)
+		content.WriteString("\n")
+		content.WriteString(strings.Repeat("═", d.width-8))
+		content.WriteString("\n\n")
+
+		// Body contains the stats table (or loading/error message)
+		content.WriteString(d.Body)
+		content.WriteString("\n\n")
+
+		// Footer hints
+		if d.statsLoading {
+			content.WriteString(KeyHintStyle.Render("Loading..."))
+		} else {
+			content.WriteString(KeyHint("r", " Refresh") + "    " + KeyHint("Esc", " Close"))
+		}
+		return DialogBox.Width(d.width).Render(content.String())
+	}
 
 	var content strings.Builder
 	content.WriteString(titleStyle.Render(d.Title))
@@ -712,4 +801,14 @@ type CommitBeforeMergeConfirmMsg struct {
 type BranchConflictConfirmMsg struct {
 	Action       BranchConflictAction
 	WorkstreamID string
+}
+
+// ResourceStatsToggleMsg is sent when the resource dialog view is toggled
+type ResourceStatsToggleMsg struct {
+	IsGlobal bool
+}
+
+// ResourceStatsRefreshMsg is sent when the resource dialog needs to refresh stats
+type ResourceStatsRefreshMsg struct {
+	IsGlobal bool
 }
