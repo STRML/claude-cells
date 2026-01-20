@@ -224,6 +224,9 @@ func main() {
 	// Clean up orphaned containers from crashed sessions
 	cleanupOrphanedContainers(tracker)
 
+	// Clean up orphaned worktrees (conservative - only removes empty/clean ones)
+	cleanupOrphanedWorktrees(stateDir)
+
 	// Start heartbeat goroutine to detect crashes
 	if tracker != nil {
 		go runHeartbeat(appCtx, tracker)
@@ -499,6 +502,145 @@ func listExistingWorktrees() []string {
 		}
 	}
 	return worktrees
+}
+
+// cleanupOrphanedWorktrees removes worktrees that are no longer associated with any workstream.
+// This is very conservative - only removes worktrees that:
+// 1. Are NOT in the state file (no workstream references them)
+// 2. Have no corresponding running container
+// 3. Have a clean working tree (no uncommitted changes)
+// 4. Branch has no commits beyond the base branch
+func cleanupOrphanedWorktrees(stateDir string) {
+	worktreeDir := "/tmp/ccells/worktrees"
+	entries, err := os.ReadDir(worktreeDir)
+	if err != nil {
+		return // No worktrees directory
+	}
+
+	// Load state to see which worktrees are known
+	knownWorktrees := make(map[string]bool)
+	if workstream.StateExists(stateDir) {
+		state, err := workstream.LoadState(stateDir)
+		if err == nil {
+			for _, ws := range state.Workstreams {
+				// Mark by sanitized branch name (worktree directory name)
+				if ws.BranchName != "" {
+					safeName := strings.ReplaceAll(ws.BranchName, "/", "-")
+					safeName = strings.ReplaceAll(safeName, " ", "-")
+					knownWorktrees[safeName] = true
+				}
+			}
+		}
+	}
+
+	// Get current working directory for git operations
+	cwd, err := os.Getwd()
+	if err != nil {
+		return
+	}
+	projectName := filepath.Base(cwd)
+
+	// Get list of running ccells containers for this project
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	runningContainerBranches := make(map[string]bool)
+	client, err := docker.NewClient()
+	if err == nil {
+		containers, err := client.ListDockerTUIContainersForProject(ctx, projectName)
+		if err == nil {
+			for _, cont := range containers {
+				// Container names are like "ccells-projectname-branchname"
+				branchName := extractBranchFromContainerName(cont.Name, projectName)
+				if branchName != "" {
+					runningContainerBranches[branchName] = true
+				}
+			}
+		}
+		client.Close()
+	}
+
+	mainRepo := git.New(cwd)
+	var cleaned int
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		worktreeName := entry.Name()
+		worktreePath := filepath.Join(worktreeDir, worktreeName)
+
+		// Safety check 1: Skip if in state file
+		if knownWorktrees[worktreeName] {
+			continue
+		}
+
+		// Safety check 2: Skip if there's a running container for this branch
+		if runningContainerBranches[worktreeName] {
+			continue
+		}
+
+		// Safety check 3: Check if worktree has uncommitted changes
+		worktreeGit := git.New(worktreePath)
+		hasChanges, err := worktreeGit.HasUncommittedChanges(ctx)
+		if err != nil {
+			continue // Error checking - skip to be safe
+		}
+		if hasChanges {
+			continue // Has uncommitted changes - skip
+		}
+
+		// Safety check 4: Check if branch has commits beyond base
+		// First, get the branch name from the worktree
+		branchName, err := worktreeGit.CurrentBranch(ctx)
+		if err != nil {
+			continue // Can't determine branch - skip to be safe
+		}
+
+		hasCommits, err := mainRepo.BranchHasCommits(ctx, branchName)
+		if err != nil {
+			continue // Error checking - skip to be safe
+		}
+		if hasCommits {
+			continue // Has commits - skip (user may want to keep)
+		}
+
+		// All safety checks passed - safe to remove
+		// First remove from git worktree list
+		if err := mainRepo.RemoveWorktree(ctx, worktreePath); err != nil {
+			// Log but continue - the directory removal might still work
+		}
+
+		// Then remove the directory
+		if err := os.RemoveAll(worktreePath); err == nil {
+			cleaned++
+		}
+
+		// Also delete the empty branch
+		if err := mainRepo.DeleteBranch(ctx, branchName); err != nil {
+			// Ignore - branch might not exist or be the current branch
+		}
+	}
+
+	if cleaned > 0 {
+		fmt.Printf("Cleaned up %d orphaned worktree(s)\n", cleaned)
+	}
+}
+
+// extractBranchFromContainerName extracts the branch name from a container name.
+// Container names follow the pattern: ccells-<projectname>-<branchname>
+func extractBranchFromContainerName(containerName, projectName string) string {
+	prefix := "ccells-" + projectName + "-"
+	if strings.HasPrefix(containerName, prefix) {
+		return strings.TrimPrefix(containerName, prefix)
+	}
+	// Also try with leading slash (Docker sometimes includes it)
+	prefix = "/ccells-" + projectName + "-"
+	if strings.HasPrefix(containerName, prefix) {
+		return strings.TrimPrefix(containerName, prefix)
+	}
+	return ""
 }
 
 // runStateRepair validates and repairs the state file by extracting session IDs from running containers
