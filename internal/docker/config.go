@@ -49,21 +49,24 @@ func GetClaudeConfig() (*ConfigPaths, error) {
 }
 
 // CCellsInstructions is the CLAUDE.md content for ccells containers
-const CCellsInstructions = `# CCells Session
+const CCellsInstructions = `# Claude Cells Session
 
-You are running inside a **ccells container** - an isolated Docker environment for parallel Claude Code development.
+You are in an isolated container with a dedicated git worktree. **Commit your work** - this is the most important thing. A dirty worktree means lost work.
 
-## Environment
-- **Isolated git worktree**: Your changes are in a separate worktree, not the main repo
-- **Independent branch**: You have your own feature branch
-- **Safe to experiment**: Changes here don't affect other workstreams
+## Constraints
 
-## Workflow
-When you've completed the task from the initial prompt:
-1. **Commit your changes** with a descriptive commit message
-2. Let the user know the task is complete
+- **No pushing** - remote access is disabled; attempts will fail
+- **No branch switching** - you're locked to this worktree's branch
+- **No merging** - the user handles integration across workstreams
 
-Remember: Each ccells session is focused on a single task. Stay focused on the original prompt.
+## When Done
+
+Commit all changes, then provide:
+
+1. **Summary**: What you implemented/changed (2-3 sentences)
+2. **Status** (required): ` + "`Ready for merge`" + ` | ` + "`Needs review`" + ` | ` + "`Incomplete`" + ` (and why)
+
+The user is running multiple containers in parallel and relies on Status to triage.
 `
 
 // CreateContainerConfig creates an isolated config directory for a specific container.
