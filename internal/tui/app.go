@@ -1394,36 +1394,30 @@ Scroll Mode:
 		return m, nil
 
 	case MergeConfirmMsg:
-		// Find the workstream and show progress dialog
+		// Find the workstream and show progress dialog inside the pane
 		for i := range m.panes {
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
-				// Clear in-pane dialog before starting action
-				m.panes[i].ClearInPaneDialog()
 				ws := m.panes[i].Workstream()
 				switch msg.Action {
 				case MergeActionCreatePR:
 					m.panes[i].AppendOutput("\nCreating pull request...\n")
 					dialog := NewProgressDialog("Creating Pull Request", fmt.Sprintf("Branch: %s\n\nPushing and creating PR...", ws.BranchName), ws.ID)
-					dialog.SetSize(80, 15) // Wide enough for PR URLs to be cmd-clickable
-					m.dialog = &dialog
+					m.panes[i].SetInPaneDialog(&dialog)
 					return m, CreatePRCmd(ws)
 				case MergeActionMergeMain:
 					m.panes[i].AppendOutput("\nMerging branch into main...\n")
 					dialog := NewProgressDialog("Merging Branch", fmt.Sprintf("Branch: %s\n\nMerging into main...", ws.BranchName), ws.ID)
-					dialog.SetSize(60, 15)
-					m.dialog = &dialog
+					m.panes[i].SetInPaneDialog(&dialog)
 					return m, MergeBranchCmd(ws)
 				case MergeActionPush:
 					m.panes[i].AppendOutput("\nPushing branch to origin...\n")
 					dialog := NewProgressDialog("Pushing Branch", fmt.Sprintf("Branch: %s\n\nPushing to origin...", ws.BranchName), ws.ID)
-					dialog.SetSize(60, 15)
-					m.dialog = &dialog
+					m.panes[i].SetInPaneDialog(&dialog)
 					return m, PushBranchCmd(ws)
 				}
 				break
 			}
 		}
-		m.dialog = nil
 		return m, nil
 
 	case PushBranchResultMsg:
@@ -1431,15 +1425,15 @@ Scroll Mode:
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
 				if msg.Error != nil {
 					m.panes[i].AppendOutput(fmt.Sprintf("Push failed: %v\n", msg.Error))
-					// Update progress dialog if open
-					if m.dialog != nil && m.dialog.Type == DialogProgress && m.dialog.WorkstreamID == msg.WorkstreamID {
-						m.dialog.SetComplete(fmt.Sprintf("Push Failed\n\n%v", msg.Error))
+					// Update in-pane progress dialog if open
+					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
+						dialog.SetComplete(fmt.Sprintf("Push Failed\n\n%v", msg.Error))
 					}
 				} else {
 					m.panes[i].AppendOutput("Branch pushed successfully!\n")
-					// Update progress dialog if open
-					if m.dialog != nil && m.dialog.Type == DialogProgress && m.dialog.WorkstreamID == msg.WorkstreamID {
-						m.dialog.SetComplete("Branch pushed successfully!\n\nPress Enter or Esc to close.")
+					// Update in-pane progress dialog if open
+					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
+						dialog.SetComplete("Branch pushed successfully!\n\nPress Enter or Esc to close.")
 					}
 				}
 				break
@@ -1452,17 +1446,17 @@ Scroll Mode:
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
 				if msg.Error != nil {
 					m.panes[i].AppendOutput(fmt.Sprintf("PR creation failed: %v\n", msg.Error))
-					// Update progress dialog if open
-					if m.dialog != nil && m.dialog.Type == DialogProgress && m.dialog.WorkstreamID == msg.WorkstreamID {
-						m.dialog.SetComplete(fmt.Sprintf("PR Creation Failed\n\n%v", msg.Error))
+					// Update in-pane progress dialog if open
+					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
+						dialog.SetComplete(fmt.Sprintf("PR Creation Failed\n\n%v", msg.Error))
 					}
 				} else {
 					m.panes[i].AppendOutput(fmt.Sprintf("PR created: %s\n", msg.PRURL))
 					// Notify Claude Code about the PR creation (use \r to simulate Enter keypress)
 					_ = m.panes[i].SendToPTY(fmt.Sprintf("[ccells] ✓ PR #%d created: %s\r", msg.PRNumber, msg.PRURL))
-					// Update progress dialog if open
-					if m.dialog != nil && m.dialog.Type == DialogProgress && m.dialog.WorkstreamID == msg.WorkstreamID {
-						m.dialog.SetComplete(fmt.Sprintf("Pull Request Created!\n\nPR #%d: %s\n\nPress Enter or Esc to close.", msg.PRNumber, msg.PRURL))
+					// Update in-pane progress dialog if open
+					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
+						dialog.SetComplete(fmt.Sprintf("Pull Request Created!\n\nPR #%d: %s\n\nPress Enter or Esc to close.", msg.PRNumber, msg.PRURL))
 					}
 				}
 				break
@@ -1478,25 +1472,23 @@ Scroll Mode:
 					// Check if this is a conflict error
 					if len(msg.ConflictFiles) > 0 {
 						m.panes[i].AppendOutput(fmt.Sprintf("Merge conflict: %d files need resolution\n", len(msg.ConflictFiles)))
-						// Show merge conflict dialog
+						// Show merge conflict dialog in pane
 						dialog := NewMergeConflictDialog(ws.BranchName, ws.ID, msg.ConflictFiles)
-						dialog.SetSize(60, 20)
-						m.dialog = &dialog
+						m.panes[i].SetInPaneDialog(&dialog)
 					} else {
 						m.panes[i].AppendOutput(fmt.Sprintf("Merge failed: %v\n", msg.Error))
-						// Update progress dialog if open
-						if m.dialog != nil && m.dialog.Type == DialogProgress && m.dialog.WorkstreamID == msg.WorkstreamID {
-							m.dialog.SetComplete(fmt.Sprintf("Merge Failed\n\n%v", msg.Error))
+						// Update in-pane progress dialog if open
+						if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
+							dialog.SetComplete(fmt.Sprintf("Merge Failed\n\n%v", msg.Error))
 						}
 					}
 				} else {
 					m.panes[i].AppendOutput("Branch merged into main successfully!\n")
 					// Notify Claude Code about the merge (use \r to simulate Enter keypress)
 					_ = m.panes[i].SendToPTY(fmt.Sprintf("[ccells] ✓ Branch '%s' merged into main\r", ws.BranchName))
-					// Show post-merge destroy dialog
+					// Show post-merge destroy dialog in pane
 					dialog := NewPostMergeDestroyDialog(ws.BranchName, ws.ID)
-					dialog.SetSize(50, 12)
-					m.dialog = &dialog
+					m.panes[i].SetInPaneDialog(&dialog)
 				}
 				break
 			}
