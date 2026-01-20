@@ -800,3 +800,245 @@ func TestFirstRunIntroductionDialog_View(t *testing.T) {
 		t.Error("View should contain continue hint")
 	}
 }
+
+func TestNewMergeConflictDialog(t *testing.T) {
+	conflictFiles := []string{"file1.go", "file2.go"}
+	d := NewMergeConflictDialog("feature-branch", "ws-123", conflictFiles)
+
+	if d.Type != DialogMergeConflict {
+		t.Error("Type should be DialogMergeConflict")
+	}
+	if !strings.Contains(d.Title, "Merge Conflict") {
+		t.Error("Title should contain 'Merge Conflict'")
+	}
+	if d.WorkstreamID != "ws-123" {
+		t.Errorf("WorkstreamID should be 'ws-123', got %q", d.WorkstreamID)
+	}
+	if len(d.MenuItems) != 2 {
+		t.Errorf("Should have 2 menu items, got %d", len(d.MenuItems))
+	}
+	if d.MenuSelection != 0 {
+		t.Error("Initial selection should be 0")
+	}
+	if !strings.Contains(d.Body, "file1.go") {
+		t.Error("Body should contain conflict file names")
+	}
+}
+
+func TestMergeConflictDialog_Navigation(t *testing.T) {
+	d := NewMergeConflictDialog("feature-branch", "ws-123", []string{"file1.go"})
+
+	// Initial selection should be 0
+	if d.MenuSelection != 0 {
+		t.Errorf("Initial selection should be 0, got %d", d.MenuSelection)
+	}
+
+	// Navigate down
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if d.MenuSelection != 1 {
+		t.Errorf("Selection should be 1 after down, got %d", d.MenuSelection)
+	}
+
+	// Navigate down at bottom - should stay at 1
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if d.MenuSelection != 1 {
+		t.Errorf("Selection should stay at 1 at bottom, got %d", d.MenuSelection)
+	}
+
+	// Navigate up
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if d.MenuSelection != 0 {
+		t.Errorf("Selection should be 0 after up, got %d", d.MenuSelection)
+	}
+
+	// Navigate up at top - should stay at 0
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if d.MenuSelection != 0 {
+		t.Errorf("Selection should stay at 0 at top, got %d", d.MenuSelection)
+	}
+}
+
+func TestMergeConflictDialog_VimNavigation(t *testing.T) {
+	d := NewMergeConflictDialog("feature-branch", "ws-123", []string{"file1.go"})
+
+	// Navigate with j (down)
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if d.MenuSelection != 1 {
+		t.Errorf("Selection should be 1 after 'j', got %d", d.MenuSelection)
+	}
+
+	// Navigate with k (up)
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	if d.MenuSelection != 0 {
+		t.Errorf("Selection should be 0 after 'k', got %d", d.MenuSelection)
+	}
+}
+
+func TestMergeConflictDialog_EnterRebase(t *testing.T) {
+	d := NewMergeConflictDialog("feature-branch", "ws-123", []string{"file1.go"})
+	// Selection 0 = Rebase onto main
+	d.MenuSelection = 0
+	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if cmd == nil {
+		t.Fatal("Should return a command on enter")
+	}
+
+	msg := cmd()
+	confirmMsg, ok := msg.(DialogConfirmMsg)
+	if !ok {
+		t.Fatalf("Should return DialogConfirmMsg, got %T", msg)
+	}
+	if confirmMsg.Type != DialogMergeConflict {
+		t.Error("Type should be DialogMergeConflict")
+	}
+	if confirmMsg.WorkstreamID != "ws-123" {
+		t.Errorf("WorkstreamID should be 'ws-123', got %q", confirmMsg.WorkstreamID)
+	}
+	if confirmMsg.Value != "0" {
+		t.Errorf("Value should be '0' for rebase, got %q", confirmMsg.Value)
+	}
+}
+
+func TestMergeConflictDialog_EnterCancel(t *testing.T) {
+	d := NewMergeConflictDialog("feature-branch", "ws-123", []string{"file1.go"})
+	// Selection 1 = Cancel
+	d.MenuSelection = 1
+	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if cmd == nil {
+		t.Fatal("Should return a command on enter")
+	}
+
+	msg := cmd()
+	if _, ok := msg.(DialogCancelMsg); !ok {
+		t.Errorf("Should return DialogCancelMsg on cancel selection, got %T", msg)
+	}
+}
+
+func TestMergeConflictDialog_View(t *testing.T) {
+	d := NewMergeConflictDialog("feature-branch", "ws-123", []string{"file1.go", "file2.go"})
+	d.SetSize(60, 20)
+
+	view := d.View()
+
+	if !strings.Contains(view, "Merge Conflict") {
+		t.Error("View should contain 'Merge Conflict'")
+	}
+	if !strings.Contains(view, "Rebase") {
+		t.Error("View should contain 'Rebase' menu item")
+	}
+	if !strings.Contains(view, "Cancel") {
+		t.Error("View should contain 'Cancel' menu item")
+	}
+	if !strings.Contains(view, "→") {
+		t.Error("View should contain selection indicator")
+	}
+	if !strings.Contains(view, "↑/↓") {
+		t.Error("View should contain navigation hint")
+	}
+}
+
+func TestNewPostMergeDestroyDialog(t *testing.T) {
+	d := NewPostMergeDestroyDialog("feature-branch", "ws-123")
+
+	if d.Type != DialogPostMergeDestroy {
+		t.Error("Type should be DialogPostMergeDestroy")
+	}
+	if !strings.Contains(d.Title, "Merge Successful") {
+		t.Error("Title should contain 'Merge Successful'")
+	}
+	if d.WorkstreamID != "ws-123" {
+		t.Errorf("WorkstreamID should be 'ws-123', got %q", d.WorkstreamID)
+	}
+	if len(d.MenuItems) != 2 {
+		t.Errorf("Should have 2 menu items, got %d", len(d.MenuItems))
+	}
+	if d.MenuSelection != 0 {
+		t.Error("Initial selection should be 0")
+	}
+}
+
+func TestPostMergeDestroyDialog_Navigation(t *testing.T) {
+	d := NewPostMergeDestroyDialog("feature-branch", "ws-123")
+
+	// Navigate down
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if d.MenuSelection != 1 {
+		t.Errorf("Selection should be 1 after down, got %d", d.MenuSelection)
+	}
+
+	// Navigate down at bottom - should stay at 1
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if d.MenuSelection != 1 {
+		t.Errorf("Selection should stay at 1 at bottom, got %d", d.MenuSelection)
+	}
+
+	// Navigate up
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if d.MenuSelection != 0 {
+		t.Errorf("Selection should be 0 after up, got %d", d.MenuSelection)
+	}
+}
+
+func TestPostMergeDestroyDialog_EnterDestroy(t *testing.T) {
+	d := NewPostMergeDestroyDialog("feature-branch", "ws-123")
+	// Selection 0 = Yes, destroy container
+	d.MenuSelection = 0
+	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if cmd == nil {
+		t.Fatal("Should return a command on enter")
+	}
+
+	msg := cmd()
+	confirmMsg, ok := msg.(DialogConfirmMsg)
+	if !ok {
+		t.Fatalf("Should return DialogConfirmMsg, got %T", msg)
+	}
+	if confirmMsg.Type != DialogPostMergeDestroy {
+		t.Error("Type should be DialogPostMergeDestroy")
+	}
+	if confirmMsg.WorkstreamID != "ws-123" {
+		t.Errorf("WorkstreamID should be 'ws-123', got %q", confirmMsg.WorkstreamID)
+	}
+	if confirmMsg.Value != "0" {
+		t.Errorf("Value should be '0' for destroy, got %q", confirmMsg.Value)
+	}
+}
+
+func TestPostMergeDestroyDialog_EnterKeep(t *testing.T) {
+	d := NewPostMergeDestroyDialog("feature-branch", "ws-123")
+	// Selection 1 = No, keep container
+	d.MenuSelection = 1
+	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if cmd == nil {
+		t.Fatal("Should return a command on enter")
+	}
+
+	msg := cmd()
+	if _, ok := msg.(DialogCancelMsg); !ok {
+		t.Errorf("Should return DialogCancelMsg on keep selection, got %T", msg)
+	}
+}
+
+func TestPostMergeDestroyDialog_View(t *testing.T) {
+	d := NewPostMergeDestroyDialog("feature-branch", "ws-123")
+	d.SetSize(50, 12)
+
+	view := d.View()
+
+	if !strings.Contains(view, "Merge Successful") {
+		t.Error("View should contain 'Merge Successful'")
+	}
+	if !strings.Contains(view, "destroy") {
+		t.Error("View should contain 'destroy' menu item")
+	}
+	if !strings.Contains(view, "keep") {
+		t.Error("View should contain 'keep' menu item")
+	}
+	if !strings.Contains(view, "→") {
+		t.Error("View should contain selection indicator")
+	}
+}
