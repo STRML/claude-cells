@@ -3,27 +3,27 @@ package docker
 import (
 	"testing"
 
-	"github.com/docker/docker/api/types/container"
+	"github.com/docker/docker/api/types"
 )
 
 func TestCalculateCPUPercent(t *testing.T) {
 	tests := []struct {
 		name     string
-		stats    *container.StatsResponse
+		stats    *types.Stats
 		expected float64
 	}{
 		{
 			name: "zero system delta returns zero",
-			stats: &container.StatsResponse{
-				CPUStats: container.CPUStats{
-					CPUUsage: container.CPUUsage{
+			stats: &types.Stats{
+				CPUStats: types.CPUStats{
+					CPUUsage: types.CPUUsage{
 						TotalUsage: 1000,
 					},
 					SystemUsage: 1000,
 					OnlineCPUs:  4,
 				},
-				PreCPUStats: container.CPUStats{
-					CPUUsage: container.CPUUsage{
+				PreCPUStats: types.CPUStats{
+					CPUUsage: types.CPUUsage{
 						TotalUsage: 500,
 					},
 					SystemUsage: 1000, // Same as current - zero delta
@@ -33,16 +33,16 @@ func TestCalculateCPUPercent(t *testing.T) {
 		},
 		{
 			name: "negative cpu delta returns zero",
-			stats: &container.StatsResponse{
-				CPUStats: container.CPUStats{
-					CPUUsage: container.CPUUsage{
+			stats: &types.Stats{
+				CPUStats: types.CPUStats{
+					CPUUsage: types.CPUUsage{
 						TotalUsage: 500, // Less than previous
 					},
 					SystemUsage: 2000,
 					OnlineCPUs:  4,
 				},
-				PreCPUStats: container.CPUStats{
-					CPUUsage: container.CPUUsage{
+				PreCPUStats: types.CPUStats{
+					CPUUsage: types.CPUUsage{
 						TotalUsage: 1000,
 					},
 					SystemUsage: 1000,
@@ -52,16 +52,16 @@ func TestCalculateCPUPercent(t *testing.T) {
 		},
 		{
 			name: "50% cpu usage with 4 cpus",
-			stats: &container.StatsResponse{
-				CPUStats: container.CPUStats{
-					CPUUsage: container.CPUUsage{
+			stats: &types.Stats{
+				CPUStats: types.CPUStats{
+					CPUUsage: types.CPUUsage{
 						TotalUsage: 1500,
 					},
 					SystemUsage: 2000,
 					OnlineCPUs:  4,
 				},
-				PreCPUStats: container.CPUStats{
-					CPUUsage: container.CPUUsage{
+				PreCPUStats: types.CPUStats{
+					CPUUsage: types.CPUUsage{
 						TotalUsage: 1000,
 					},
 					SystemUsage: 1000,
@@ -71,17 +71,17 @@ func TestCalculateCPUPercent(t *testing.T) {
 		},
 		{
 			name: "uses percpu length when online cpus is zero",
-			stats: &container.StatsResponse{
-				CPUStats: container.CPUStats{
-					CPUUsage: container.CPUUsage{
+			stats: &types.Stats{
+				CPUStats: types.CPUStats{
+					CPUUsage: types.CPUUsage{
 						TotalUsage:  1500,
 						PercpuUsage: []uint64{1, 2, 3, 4}, // 4 CPUs
 					},
 					SystemUsage: 2000,
 					OnlineCPUs:  0, // Not set
 				},
-				PreCPUStats: container.CPUStats{
-					CPUUsage: container.CPUUsage{
+				PreCPUStats: types.CPUStats{
+					CPUUsage: types.CPUUsage{
 						TotalUsage: 1000,
 					},
 					SystemUsage: 1000,
@@ -91,17 +91,17 @@ func TestCalculateCPUPercent(t *testing.T) {
 		},
 		{
 			name: "defaults to 1 cpu when both are zero",
-			stats: &container.StatsResponse{
-				CPUStats: container.CPUStats{
-					CPUUsage: container.CPUUsage{
+			stats: &types.Stats{
+				CPUStats: types.CPUStats{
+					CPUUsage: types.CPUUsage{
 						TotalUsage:  1500,
 						PercpuUsage: []uint64{}, // Empty
 					},
 					SystemUsage: 2000,
 					OnlineCPUs:  0, // Not set
 				},
-				PreCPUStats: container.CPUStats{
-					CPUUsage: container.CPUUsage{
+				PreCPUStats: types.CPUStats{
+					CPUUsage: types.CPUUsage{
 						TotalUsage: 1000,
 					},
 					SystemUsage: 1000,
@@ -190,7 +190,7 @@ func TestContainerStats(t *testing.T) {
 		ContainerID:   "abc123",
 		ContainerName: "test-container",
 		CPUPercent:    25.5,
-		MemoryUsage:   256 * 1024 * 1024, // 256 MB
+		MemoryUsage:   256 * 1024 * 1024,  // 256 MB
 		MemoryLimit:   1024 * 1024 * 1024, // 1 GB
 		MemoryPercent: 25.0,
 		State:         "running",
@@ -270,13 +270,13 @@ func TestFormatBytesInt64(t *testing.T) {
 func TestDiskUsage(t *testing.T) {
 	// Test that DiskUsage struct has all expected fields
 	du := DiskUsage{
-		ContainersSize:      1024 * 1024 * 100,  // 100 MB
+		ContainersSize:      1024 * 1024 * 100, // 100 MB
 		ContainersCount:     5,
 		CCellsContainerSize: 1024 * 1024 * 50,   // 50 MB
 		ImagesSize:          1024 * 1024 * 1024, // 1 GB
 		ImagesCount:         10,
-		ImagesSharedSize:    1024 * 1024 * 500,  // 500 MB
-		VolumesSize:         1024 * 1024 * 200,  // 200 MB
+		ImagesSharedSize:    1024 * 1024 * 500, // 500 MB
+		VolumesSize:         1024 * 1024 * 200, // 200 MB
 		VolumesCount:        3,
 		BuildCacheSize:      1024 * 1024 * 50,   // 50 MB
 		TotalSize:           1024 * 1024 * 1400, // ~1.4 GB

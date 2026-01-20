@@ -8,8 +8,11 @@ A terminal UI for running parallel Claude Code instances in isolated Docker cont
 go test ./...                         # Run all tests
 go test -v -race ./...                # Run with race detector
 go test -cover ./...                  # Run with coverage
-go build ./cmd/ccells                 # Build binary
+go build ./cmd/ccells                 # Build binary (dev version)
 ./ccells                              # Run
+
+# Build with version info (for releases)
+go build -ldflags "-X main.CommitHash=$(git rev-parse --short HEAD)" ./cmd/ccells
 ```
 
 ## Architecture

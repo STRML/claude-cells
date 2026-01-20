@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -17,6 +18,18 @@ import (
 const escapeTimeout = 300 * time.Millisecond
 
 const toastDuration = 2 * time.Second
+
+// Version info - set by main via SetVersionInfo
+var (
+	versionInfo = "dev"
+	commitHash  = "unknown"
+)
+
+// SetVersionInfo sets the version info displayed in the help dialog
+func SetVersionInfo(version, commit string) {
+	versionInfo = version
+	commitHash = commit
+}
 
 // AppModel is the main application model
 type AppModel struct {
@@ -60,6 +73,15 @@ func NewAppModel(ctx context.Context) AppModel {
 		workingDir:    cwd,
 		nextPaneIndex: 1, // Start pane numbering at 1
 	}
+}
+
+// projectName returns the project name derived from the working directory
+func (m *AppModel) projectName() string {
+	name := filepath.Base(m.workingDir)
+	if name == "" || name == "." {
+		return "workspace"
+	}
+	return name
 }
 
 // StateLoadedMsg is sent when state has been loaded from disk
@@ -576,7 +598,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "r":
 			// Resource usage dialog
 			dialog := NewResourceUsageDialog(false) // Start with project view
-			dialog.SetSize(65, 30) // Taller to accommodate disk usage section
+			dialog.SetSize(65, 30)                  // Taller to accommodate disk usage section
 			m.dialog = &dialog
 			return m, FetchResourceStatsCmd(false, m.getContainerIDs())
 
@@ -586,7 +608,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "?":
 			// Show help dialog
-			helpText := `Navigation Mode:
+			helpText := fmt.Sprintf(`Claude Cells %s (%s)
+
+Navigation Mode:
   ←→ ↑↓       Switch between panes
   i, Enter    Enter input mode (interact with Claude)
   n           New workstream
@@ -615,9 +639,9 @@ Input Mode:
 
 Scroll Mode:
   PgUp/PgDn   Continue scrolling
-  Esc         Exit scroll mode (return to live)`
+  Esc         Exit scroll mode (return to live)`, versionInfo, commitHash)
 			dialog := NewLogDialog("Help", helpText)
-			dialog.SetSize(60, 32)
+			dialog.SetSize(60, 34)
 			m.dialog = &dialog
 			return m, nil
 
@@ -682,8 +706,24 @@ Scroll Mode:
 				}
 			}
 
+		case DialogPruneProjectConfirm:
+			// User typed "destroy" - close panes for this project, prune project containers and branches
+			// Close all PTY sessions first (they're all for this project)
+			for _, pane := range m.panes {
+				if pty := pane.PTY(); pty != nil {
+					pty.Close()
+				}
+				m.manager.Remove(pane.Workstream().ID)
+			}
+			// Clear all panes
+			m.panes = nil
+			m.focusedPane = 0
+			m.updateLayout()
+			// Prune containers and empty branches for this project only
+			return m, PruneProjectContainersAndBranchesCmd(m.projectName())
+
 		case DialogPruneAllConfirm:
-			// User typed "destroy" - close all panes, prune containers and branches
+			// User typed "destroy" - close all panes, prune ALL containers globally
 			// Close all PTY sessions first
 			for _, pane := range m.panes {
 				if pty := pane.PTY(); pty != nil {
@@ -695,7 +735,7 @@ Scroll Mode:
 			m.panes = nil
 			m.focusedPane = 0
 			m.updateLayout()
-			// Prune all containers and empty branches
+			// Prune all containers and empty branches (globally!)
 			return m, PruneAllContainersAndBranchesCmd()
 		}
 		return m, nil
@@ -1003,12 +1043,12 @@ Scroll Mode:
 		// Show settings dialog with container count
 		if msg.Error != nil {
 			// Still show dialog with count of 0 on error
-			dialog := NewSettingsDialog(0)
-			dialog.SetSize(50, 15)
+			dialog := NewSettingsDialog(0, m.projectName())
+			dialog.SetSize(55, 17)
 			m.dialog = &dialog
 		} else {
-			dialog := NewSettingsDialog(msg.Count)
-			dialog.SetSize(50, 15)
+			dialog := NewSettingsDialog(msg.Count, m.projectName())
+			dialog.SetSize(55, 17)
 			m.dialog = &dialog
 		}
 		return m, nil
@@ -1018,10 +1058,16 @@ Scroll Mode:
 		switch msg.Action {
 		case SettingsActionPruneStopped:
 			return m, PruneStoppedContainersCmd()
+		case SettingsActionPruneProject:
+			// Show project-scoped destroy confirmation dialog
+			dialog := NewPruneProjectConfirmDialog(m.projectName())
+			dialog.SetSize(55, 17)
+			m.dialog = &dialog
+			return m, nil
 		case SettingsActionPruneAll:
-			// Show destroy confirmation dialog instead of directly pruning
+			// Show global destroy confirmation dialog
 			dialog := NewPruneAllConfirmDialog()
-			dialog.SetSize(50, 15)
+			dialog.SetSize(55, 17)
 			m.dialog = &dialog
 			return m, nil
 		}

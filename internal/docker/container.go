@@ -284,6 +284,57 @@ func (c *Client) PruneAllDockerTUIContainers(ctx context.Context) (int, error) {
 	return pruned, nil
 }
 
+// ListDockerTUIContainersForProject lists containers created by ccells for a specific project
+func (c *Client) ListDockerTUIContainersForProject(ctx context.Context, projectName string) ([]ContainerInfo, error) {
+	// Filter by project-specific prefix: ccells-<projectName>-
+	projectPrefix := fmt.Sprintf("%s%s-", ContainerPrefix, projectName)
+	filterArgs := filters.NewArgs()
+	filterArgs.Add("name", projectPrefix)
+
+	containers, err := c.cli.ContainerList(ctx, container.ListOptions{
+		All:     true,
+		Filters: filterArgs,
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	var result []ContainerInfo
+	for _, c := range containers {
+		name := ""
+		if len(c.Names) > 0 {
+			name = strings.TrimPrefix(c.Names[0], "/")
+		}
+		result = append(result, ContainerInfo{
+			ID:      c.ID,
+			Name:    name,
+			State:   c.State,
+			Created: time.Unix(c.Created, 0),
+		})
+	}
+	return result, nil
+}
+
+// PruneAllDockerTUIContainersForProject removes ALL ccells containers for a specific project
+func (c *Client) PruneAllDockerTUIContainersForProject(ctx context.Context, projectName string) (int, error) {
+	containers, err := c.ListDockerTUIContainersForProject(ctx, projectName)
+	if err != nil {
+		return 0, err
+	}
+
+	pruned := 0
+	for _, cont := range containers {
+		// Stop if running
+		if cont.State == "running" {
+			_ = c.StopContainer(ctx, cont.ID)
+		}
+		if err := c.RemoveContainer(ctx, cont.ID); err == nil {
+			pruned++
+		}
+	}
+	return pruned, nil
+}
+
 // SignalProcess sends a signal to processes matching a pattern inside a container.
 // This uses pkill to find and signal processes by name.
 func (c *Client) SignalProcess(ctx context.Context, containerID, processName, signal string) error {

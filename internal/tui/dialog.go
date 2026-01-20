@@ -24,6 +24,7 @@ const (
 	DialogProgress
 	DialogBranchConflict
 	DialogPruneAllConfirm
+	DialogPruneProjectConfirm
 	DialogCommitBeforeMerge
 	DialogResourceUsage
 )
@@ -145,6 +146,7 @@ type SettingsAction string
 
 const (
 	SettingsActionPruneStopped SettingsAction = "prune_stopped"
+	SettingsActionPruneProject SettingsAction = "prune_project"
 	SettingsActionPruneAll     SettingsAction = "prune_all"
 	SettingsActionCancel       SettingsAction = "cancel"
 )
@@ -239,7 +241,7 @@ func NewCommitBeforeMergeDialog(branchName, workstreamID string) DialogModel {
 }
 
 // NewSettingsDialog creates a settings menu dialog
-func NewSettingsDialog(containerCount int) DialogModel {
+func NewSettingsDialog(containerCount int, projectName string) DialogModel {
 	body := fmt.Sprintf("Containers managed by ccells: %d\n", containerCount)
 
 	return DialogModel{
@@ -248,14 +250,46 @@ func NewSettingsDialog(containerCount int) DialogModel {
 		Body:  body,
 		MenuItems: []string{
 			"Prune stopped ccells containers",
-			"Prune ALL ccells containers (destructive)",
+			fmt.Sprintf("Destroy all containers for %q", projectName),
+			"Destroy ALL ccells containers (all projects!)",
 			"Cancel",
 		},
 		MenuSelection: 0,
 	}
 }
 
-// NewPruneAllConfirmDialog creates a confirmation dialog for pruning all containers
+// NewPruneProjectConfirmDialog creates a confirmation dialog for pruning containers for the current project
+func NewPruneProjectConfirmDialog(projectName string) DialogModel {
+	ti := textinput.New()
+	ti.Placeholder = "type 'destroy' to confirm"
+	ti.Width = 40
+	ti.Focus()
+	ti.CharLimit = 20
+
+	// Style the textinput
+	ti.Prompt = "› "
+	ti.PromptStyle = DialogInputPrompt
+	ti.TextStyle = DialogInputText
+	ti.PlaceholderStyle = DialogInputPlaceholder
+	ti.Cursor.Style = DialogInputCursor
+
+	body := fmt.Sprintf(`This will:
+  • Stop and remove all ccells containers for %q
+  • Delete any local branches with no commits
+  • Containers for other projects are NOT affected
+
+Type "destroy" to confirm:`, projectName)
+
+	return DialogModel{
+		Type:        DialogPruneProjectConfirm,
+		Title:       fmt.Sprintf("Destroy %q Workstreams?", projectName),
+		Body:        body,
+		Input:       ti,
+		ConfirmWord: "destroy",
+	}
+}
+
+// NewPruneAllConfirmDialog creates a confirmation dialog for pruning ALL containers globally
 func NewPruneAllConfirmDialog() DialogModel {
 	ti := textinput.New()
 	ti.Placeholder = "type 'destroy' to confirm"
@@ -270,15 +304,18 @@ func NewPruneAllConfirmDialog() DialogModel {
 	ti.PlaceholderStyle = DialogInputPlaceholder
 	ti.Cursor.Style = DialogInputCursor
 
-	body := `This will:
+	body := `⚠️  WARNING: This affects ALL projects!
+
+This will:
   • Stop and remove ALL ccells containers
+    (from every repository, not just this one)
   • Delete any local branches with no commits
 
 Type "destroy" to confirm:`
 
 	return DialogModel{
 		Type:        DialogPruneAllConfirm,
-		Title:       "Destroy All Workstreams?",
+		Title:       "Destroy ALL Workstreams (All Projects)?",
 		Body:        body,
 		Input:       ti,
 		ConfirmWord: "destroy",
@@ -422,6 +459,8 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				case 0:
 					action = SettingsActionPruneStopped
 				case 1:
+					action = SettingsActionPruneProject
+				case 2:
 					action = SettingsActionPruneAll
 				default:
 					action = SettingsActionCancel
@@ -492,7 +531,7 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				}
 			}
 
-			if d.Type == DialogDestroy || d.Type == DialogPruneAllConfirm {
+			if d.Type == DialogDestroy || d.Type == DialogPruneAllConfirm || d.Type == DialogPruneProjectConfirm {
 				if strings.ToLower(d.Input.Value()) == d.ConfirmWord {
 					return d, func() tea.Msg {
 						return DialogConfirmMsg{

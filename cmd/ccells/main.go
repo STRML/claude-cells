@@ -15,6 +15,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// Version info - set via ldflags at build time
+// go build -ldflags "-X main.Version=v1.0.0 -X main.CommitHash=$(git rev-parse --short HEAD)"
+var (
+	Version    = "dev"
+	CommitHash = "unknown"
+)
+
 // spinner displays a progress spinner while a function runs
 type spinner struct {
 	frames  []string
@@ -83,6 +90,9 @@ func main() {
 	if tracker != nil {
 		go runHeartbeat(appCtx, tracker)
 	}
+
+	// Set version info for display in help dialog
+	tui.SetVersionInfo(Version, CommitHash)
 
 	app := tui.NewAppModel(appCtx)
 
