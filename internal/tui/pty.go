@@ -113,11 +113,12 @@ echo "[ccells] User: $(whoami), Home: $HOME"
 # Ensure PATH includes user's local bin directories
 export PATH="$HOME/.local/bin:$HOME/.claude/local/bin:$PATH"
 
-# Kill any existing claude processes (from previous sessions that weren't cleaned up)
+# Kill any existing claude CLI processes (from previous sessions that weren't cleaned up)
 # This happens when ccells quits - the container stays running but the PTY is orphaned
-if pgrep -f "claude" >/dev/null 2>&1; then
+# Use specific pattern to avoid killing this script (which contains "claude" in paths)
+if pgrep -x "claude" >/dev/null 2>&1; then
   echo "[ccells] Killing existing Claude processes from previous session..."
-  pkill -9 -f "claude" 2>/dev/null
+  pkill -9 -x "claude" 2>/dev/null
   sleep 1
 fi
 
