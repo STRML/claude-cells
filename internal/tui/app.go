@@ -2134,14 +2134,11 @@ func (m AppModel) renderPanes() string {
 		return ""
 	}
 
-	// Set input mode on panes (indices are assigned permanently at creation)
+	// Sync focus and input mode state on all panes every render
+	// This ensures pane state stays consistent with app state
 	for i := range m.panes {
-		// Only focused pane can be in input mode
-		if i == m.focusedPane && m.inputMode {
-			m.panes[i].SetInputMode(true)
-		} else {
-			m.panes[i].SetInputMode(false)
-		}
+		m.panes[i].SetFocused(i == m.focusedPane)
+		m.panes[i].SetInputMode(i == m.focusedPane && m.inputMode)
 	}
 
 	// Calculate available height for layout rendering
