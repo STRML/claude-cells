@@ -154,7 +154,7 @@ go install github.com/STRML/claude-cells/cmd/ccells@latest
 │  2. Isolation                                                   │
 │     • Each container has its own git worktree                   │
 │     • Host repo stays on its current branch (never changes!)    │
-│     • Claude credentials mounted read-only                      │
+│     • Claude credentials and skills copied into container       │
 │     • Changes isolated from other workstreams                   │
 ├─────────────────────────────────────────────────────────────────┤
 │  3. Pairing Mode (optional)                                     │
@@ -271,7 +271,7 @@ Claude Cells stores data in:
 
 | Location | Purpose |
 |----------|---------|
-| `~/.claude-cells/` | Global config and Claude credential copies |
+| `~/.claude-cells/` | Global config, Claude credentials, and skills (copied into containers) |
 | `.claude-cells/state.json` | Session state for resume (in project directory) |
 | `/tmp/ccells/worktrees/` | Git worktrees for container isolation |
 
