@@ -98,9 +98,12 @@ func (e *MergeConflictError) Error() string {
 }
 
 // MergeBranch merges a branch into the current branch (typically main).
-// It performs a checkout to main, then merges the specified branch.
+// It fetches origin/main and merges the branch into main.
 // Returns MergeConflictError if there are conflicts that need resolution.
 func (g *Git) MergeBranch(ctx context.Context, branch string) error {
+	// Fetch latest main from origin to ensure we're up to date
+	_, _ = g.run(ctx, "fetch", "origin", "main")
+
 	// Checkout main first
 	if _, err := g.run(ctx, "checkout", "main"); err != nil {
 		// Try master if main doesn't exist
@@ -108,6 +111,9 @@ func (g *Git) MergeBranch(ctx context.Context, branch string) error {
 			return fmt.Errorf("failed to checkout main/master: %w", err)
 		}
 	}
+
+	// Fast-forward local main to match origin/main
+	_, _ = g.run(ctx, "merge", "origin/main", "--ff-only")
 
 	// Merge the branch
 	_, err := g.run(ctx, "merge", branch, "--no-edit")

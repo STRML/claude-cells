@@ -1305,8 +1305,8 @@ Scroll Mode:
 					}
 				} else {
 					m.panes[i].AppendOutput(fmt.Sprintf("PR created: %s\n", msg.PRURL))
-					// Notify Claude Code about the PR creation
-					_ = m.panes[i].SendToPTY(fmt.Sprintf("\n[ccells] ✓ PR #%d created: %s\n", msg.PRNumber, msg.PRURL))
+					// Notify Claude Code about the PR creation (use \r to simulate Enter keypress)
+					_ = m.panes[i].SendToPTY(fmt.Sprintf("[ccells] ✓ PR #%d created: %s\r", msg.PRNumber, msg.PRURL))
 					// Update progress dialog if open
 					if m.dialog != nil && m.dialog.Type == DialogProgress && m.dialog.WorkstreamID == msg.WorkstreamID {
 						m.dialog.SetComplete(fmt.Sprintf("Pull Request Created!\n\nPR #%d: %s\n\nPress Enter or Esc to close.", msg.PRNumber, msg.PRURL))
@@ -1338,8 +1338,8 @@ Scroll Mode:
 					}
 				} else {
 					m.panes[i].AppendOutput("Branch merged into main successfully!\n")
-					// Notify Claude Code about the merge
-					_ = m.panes[i].SendToPTY(fmt.Sprintf("\n[ccells] ✓ Branch '%s' merged into main\n", ws.BranchName))
+					// Notify Claude Code about the merge (use \r to simulate Enter keypress)
+					_ = m.panes[i].SendToPTY(fmt.Sprintf("[ccells] ✓ Branch '%s' merged into main\r", ws.BranchName))
 					// Show post-merge destroy dialog
 					dialog := NewPostMergeDestroyDialog(ws.BranchName, ws.ID)
 					dialog.SetSize(50, 12)
@@ -1356,15 +1356,16 @@ Scroll Mode:
 				ws := m.panes[i].Workstream()
 				if msg.Error != nil {
 					if len(msg.ConflictFiles) > 0 {
-						// Rebase has conflicts - notify Claude to resolve
+						// Rebase has conflicts - notify Claude to resolve (use \r to simulate Enter keypress)
 						m.panes[i].AppendOutput("Rebase has conflicts. Resolve in container and run 'git rebase --continue'\n")
-						_ = m.panes[i].SendToPTY(fmt.Sprintf("\n[ccells] ⚠ Rebase has conflicts. Please resolve the following files and run 'git rebase --continue':\n%s\n", formatFileList(msg.ConflictFiles)))
+						_ = m.panes[i].SendToPTY(fmt.Sprintf("[ccells] ⚠ Rebase has conflicts. Please resolve the following files and run 'git rebase --continue': %s\r", formatFileList(msg.ConflictFiles)))
 					} else {
 						m.panes[i].AppendOutput(fmt.Sprintf("Rebase failed: %v\n", msg.Error))
 					}
 				} else {
 					m.panes[i].AppendOutput("Rebase successful! Branch is now up to date with main.\n")
-					_ = m.panes[i].SendToPTY(fmt.Sprintf("\n[ccells] ✓ Branch '%s' rebased onto main. You can now try merging again.\n", ws.BranchName))
+					// Notify Claude Code about the rebase (use \r to simulate Enter keypress)
+					_ = m.panes[i].SendToPTY(fmt.Sprintf("[ccells] ✓ Branch '%s' rebased onto main. You can now try merging again.\r", ws.BranchName))
 					m.toast = "Rebase successful"
 					m.toastExpiry = time.Now().Add(toastDuration)
 				}
