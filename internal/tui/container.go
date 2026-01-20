@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -776,15 +775,10 @@ func StartPTYCmd(ws *workstream.Workstream, initialPrompt string, width, height 
 	}
 }
 
-func init() {
-	// Configure log to include timestamps
-	log.SetFlags(log.Ldate | log.Ltime | log.Lmicroseconds)
-}
-
 // StopContainerCmd returns a command that stops and removes a container.
 func StopContainerCmd(ws *workstream.Workstream) tea.Cmd {
 	return func() tea.Msg {
-		log.Printf("[DEBUG] StopContainerCmd started for %s", ws.BranchName)
+		LogDebug("StopContainerCmd started for %s", ws.BranchName)
 
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
@@ -795,13 +789,13 @@ func StopContainerCmd(ws *workstream.Workstream) tea.Cmd {
 			if len(containerShort) > 12 {
 				containerShort = containerShort[:12]
 			}
-			log.Printf("[DEBUG] Stopping container %s", containerShort)
+			LogDebug("Stopping container %s", containerShort)
 			client, err := docker.NewClient()
 			if err == nil {
 				_ = client.StopContainer(ctx, ws.ContainerID)
-				log.Printf("[DEBUG] Container stopped, removing")
+				LogDebug("Container stopped, removing")
 				_ = client.RemoveContainer(ctx, ws.ContainerID)
-				log.Printf("[DEBUG] Container removed")
+				LogDebug("Container removed")
 				client.Close()
 			}
 			// Untrack the container since it's been removed
@@ -809,7 +803,7 @@ func StopContainerCmd(ws *workstream.Workstream) tea.Cmd {
 			// Unregister from credential refresh
 			unregisterContainerCredentials(ws.ContainerID)
 		}
-		log.Printf("[DEBUG] Container cleanup done")
+		LogDebug("Container cleanup done")
 
 		// Clean up the worktree
 		// Compute path from branch name if not set (e.g., restored from state)
@@ -817,55 +811,55 @@ func StopContainerCmd(ws *workstream.Workstream) tea.Cmd {
 		if worktreePath == "" && ws.BranchName != "" {
 			worktreePath = getWorktreePath(ws.BranchName)
 		}
-		log.Printf("[DEBUG] Worktree path: %s", worktreePath)
+		LogDebug("Worktree path: %s", worktreePath)
 
 		// Get repo path once for all git operations
 		repoPath, err := os.Getwd()
 		if err != nil {
-			log.Printf("[DEBUG] Failed to get cwd: %v", err)
+			LogWarn("Failed to get cwd: %v", err)
 			return ContainerStoppedMsg{WorkstreamID: ws.ID}
 		}
-		log.Printf("[DEBUG] Repo path: %s", repoPath)
+		LogDebug("Repo path: %s", repoPath)
 
 		if worktreePath != "" {
 			gitRepo := git.New(repoPath)
 
-			log.Printf("[DEBUG] Removing worktree")
+			LogDebug("Removing worktree")
 			// Remove worktree from git
 			if err := gitRepo.RemoveWorktree(ctx, worktreePath); err != nil {
-				log.Printf("[DEBUG] RemoveWorktree error (continuing): %v", err)
+				LogWarn("RemoveWorktree error (continuing): %v", err)
 			}
-			log.Printf("[DEBUG] Worktree removed from git")
+			LogDebug("Worktree removed from git")
 
 			// Remove the directory (git worktree remove doesn't always delete the dir)
-			log.Printf("[DEBUG] Removing directory %s", worktreePath)
+			LogDebug("Removing directory %s", worktreePath)
 			if err := os.RemoveAll(worktreePath); err != nil {
-				log.Printf("[DEBUG] RemoveAll error for %s: %v", worktreePath, err)
+				LogWarn("RemoveAll error for %s: %v", worktreePath, err)
 			}
-			log.Printf("[DEBUG] Directory removed")
+			LogDebug("Directory removed")
 		}
 
 		// Delete branch if it has no commits or is merged
 		if ws.BranchName != "" {
 			gitRepo := git.New(repoPath)
-			log.Printf("[DEBUG] Checking if branch has commits")
+			LogDebug("Checking if branch has commits")
 			// Check if branch has commits
 			hasCommits, err := gitRepo.BranchHasCommits(ctx, ws.BranchName)
 			if err != nil {
-				log.Printf("[DEBUG] BranchHasCommits error: %v", err)
+				LogWarn("BranchHasCommits error: %v", err)
 				return ContainerStoppedMsg{WorkstreamID: ws.ID}
 			}
-			log.Printf("[DEBUG] Branch hasCommits=%v", hasCommits)
+			LogDebug("Branch hasCommits=%v", hasCommits)
 			if !hasCommits {
-				log.Printf("[DEBUG] Deleting empty branch")
+				LogDebug("Deleting empty branch")
 				if err := gitRepo.DeleteBranch(ctx, ws.BranchName); err != nil {
-					log.Printf("[DEBUG] DeleteBranch error for %s: %v", ws.BranchName, err)
+					LogWarn("DeleteBranch error for %s: %v", ws.BranchName, err)
 				}
-				log.Printf("[DEBUG] Branch deleted")
+				LogDebug("Branch deleted")
 			}
 		}
 
-		log.Printf("[DEBUG] StopContainerCmd completed for %s", ws.BranchName)
+		LogDebug("StopContainerCmd completed for %s", ws.BranchName)
 		return ContainerStoppedMsg{WorkstreamID: ws.ID}
 	}
 }

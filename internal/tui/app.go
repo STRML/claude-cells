@@ -70,6 +70,8 @@ type AppModel struct {
 	pairingStashed      bool   // True if we stashed changes when enabling pairing
 	// Pane swap state
 	lastSwapPosition int // Position to swap back to when pressing Space at main (0 = none)
+	// Log panel
+	logPanel *LogPanelModel
 }
 
 const tmuxPrefixTimeout = 2 * time.Second
@@ -77,12 +79,15 @@ const tmuxPrefixTimeout = 2 * time.Second
 // NewAppModel creates a new application model
 func NewAppModel(ctx context.Context) AppModel {
 	cwd, _ := os.Getwd()
+	logPanel := NewLogPanelModel()
+	SetLogPanel(logPanel) // Set global for logging functions
 	return AppModel{
 		ctx:           ctx,
 		manager:       workstream.NewManager(),
 		statusBar:     NewStatusBarModel(),
 		workingDir:    cwd,
 		nextPaneIndex: 1, // Start pane numbering at 1
+		logPanel:      logPanel,
 	}
 }
 
@@ -212,7 +217,8 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Calculate pane bounds (title bar is 1 line, panes start at Y=1)
 			titleBarHeight := 1
 			statusBarHeight := 1
-			availableHeight := m.height - titleBarHeight - statusBarHeight
+			logPanelH := m.logPanelHeight()
+			availableHeight := m.height - titleBarHeight - statusBarHeight - logPanelH
 
 			bounds := CalculatePaneBounds(m.layout, len(m.panes), m.width, availableHeight, titleBarHeight)
 			clickedPane := FindPaneAtPosition(bounds, msg.X, msg.Y)
@@ -594,6 +600,29 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.toastExpiry = time.Now().Add(toastDuration)
 			return m, nil
 
+		case "`":
+			// Toggle log panel visibility
+			if m.logPanel != nil {
+				m.logPanel.Toggle()
+				m.updateLayout()
+				if m.logPanel.IsVisible() {
+					m.toast = fmt.Sprintf("Log panel: %s+", m.logPanel.FilterLevel().String())
+				} else {
+					m.toast = "Log panel hidden"
+				}
+				m.toastExpiry = time.Now().Add(toastDuration)
+			}
+			return m, nil
+
+		case "~":
+			// Cycle log panel filter level (when visible)
+			if m.logPanel != nil && m.logPanel.IsVisible() {
+				m.logPanel.CycleFilter()
+				m.toast = fmt.Sprintf("Log filter: %s+", m.logPanel.FilterLevel().String())
+				m.toastExpiry = time.Now().Add(toastDuration)
+			}
+			return m, nil
+
 		case " ":
 			// Toggle focused pane with main pane (position 0)
 			if len(m.panes) > 1 {
@@ -660,40 +689,39 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		case "?":
 			// Show help dialog
-			helpText := fmt.Sprintf(`Claude Cells %s (%s)
-
-Navigation Mode:
-  ←→ ↑↓       Switch between panes
-  i, Enter    Enter input mode (interact with Claude)
-  n           New workstream
-  d           Destroy workstream
-  m           Merge/PR options
-  p           Toggle pairing mode
-  r           Resource usage (CPU/memory)
-  s           Settings
-  l           Show logs
-  L           Cycle layout (Grid/Main+Stack/Main+Row/Rows/Columns)
-  Space       Move focused pane to main (largest) position
-  1-9         Focus pane by number
-  Tab         Cycle focus
-  PgUp/PgDn   Scroll pane (enters scroll mode)
-  q           Quit (pauses containers)
-  Esc Esc     Quit
-
-Input Mode:
-  Esc Esc     Exit to nav mode
-  Ctrl+B Esc  Exit to nav mode (or scroll mode)
-  Ctrl+B ←→   Switch pane (without exiting input mode)
-  Ctrl+B 1-9  Switch pane by number
-  Ctrl+B PgUp/Dn  Scroll pane (enters scroll mode)
-  Shift+Enter Insert newline
-  All other keys sent to Claude Code
-
-Scroll Mode:
-  PgUp/PgDn   Continue scrolling
-  Esc         Exit scroll mode (return to live)`, versionInfo, commitHash)
+			helpText := fmt.Sprintf("Claude Cells %s (%s)\n\n"+
+				"Navigation Mode:\n"+
+				"  ←→ ↑↓       Switch between panes\n"+
+				"  i, Enter    Enter input mode (interact with Claude)\n"+
+				"  n           New workstream\n"+
+				"  d           Destroy workstream\n"+
+				"  m           Merge/PR options\n"+
+				"  p           Toggle pairing mode\n"+
+				"  r           Resource usage (CPU/memory)\n"+
+				"  s           Settings\n"+
+				"  l           Show logs\n"+
+				"  L           Cycle layout (Grid/Main+Stack/Main+Row/Rows/Columns)\n"+
+				"  `           Toggle log panel (system logs)\n"+
+				"  ~           Cycle log filter (DEBUG/INFO/WARN/ERR)\n"+
+				"  Space       Move focused pane to main (largest) position\n"+
+				"  1-9         Focus pane by number\n"+
+				"  Tab         Cycle focus\n"+
+				"  PgUp/PgDn   Scroll pane (enters scroll mode)\n"+
+				"  q           Quit (pauses containers)\n"+
+				"  Esc Esc     Quit\n\n"+
+				"Input Mode:\n"+
+				"  Esc Esc     Exit to nav mode\n"+
+				"  Ctrl+B Esc  Exit to nav mode (or scroll mode)\n"+
+				"  Ctrl+B ←→   Switch pane (without exiting input mode)\n"+
+				"  Ctrl+B 1-9  Switch pane by number\n"+
+				"  Ctrl+B PgUp/Dn  Scroll pane (enters scroll mode)\n"+
+				"  Shift+Enter Insert newline\n"+
+				"  All other keys sent to Claude Code\n\n"+
+				"Scroll Mode:\n"+
+				"  PgUp/PgDn   Continue scrolling\n"+
+				"  Esc         Exit scroll mode (return to live)", versionInfo, commitHash)
 			dialog := NewLogDialog("Help", helpText)
-			dialog.SetSize(60, 34)
+			dialog.SetSize(60, 36)
 			m.dialog = &dialog
 			return m, nil
 
@@ -1621,17 +1649,24 @@ func (m AppModel) View() string {
 	sections = append(sections, titleBar)
 
 	// Panes section
+	logPanelH := m.logPanelHeight()
 	if len(m.panes) > 0 {
 		paneViews := m.renderPanes()
 		sections = append(sections, paneViews)
 	} else {
 		empty := lipgloss.NewStyle().
 			Width(m.width).
-			Height(m.height-4).
+			Height(m.height-4-logPanelH).
 			Align(lipgloss.Center, lipgloss.Center).
 			Foreground(lipgloss.Color("#666666")).
 			Render("No workstreams. Press [n] to create one.")
 		sections = append(sections, empty)
+	}
+
+	// Log panel (if visible)
+	if m.logPanel != nil && m.logPanel.IsVisible() {
+		m.logPanel.SetSize(m.width, logPanelH)
+		sections = append(sections, m.logPanel.View())
 	}
 
 	// Bottom status bar
@@ -1722,7 +1757,7 @@ func (m AppModel) renderTitleBar() string {
 		if scrollIndicator != "" {
 			hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [PgUp/Dn] scroll  [Esc] exit scroll  [i]nput")
 		} else {
-			hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [←→]panes  [n]ew  [m]erge  [d]estroy  [l]ogs  [i]nput  [?]help  [Esc Esc]quit")
+			hints = lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render("  [←→]panes  [n]ew  [m]erge  [d]estroy  [l]ogs  [`]panel  [i]nput  [?]help")
 		}
 	}
 
@@ -1796,7 +1831,8 @@ func (m AppModel) renderPanes() string {
 	// Calculate available height for layout rendering
 	titleBarHeight := 1
 	statusBarHeight := 1
-	availableHeight := m.height - titleBarHeight - statusBarHeight
+	logPanelH := m.logPanelHeight()
+	availableHeight := m.height - titleBarHeight - statusBarHeight - logPanelH
 
 	// Use the layout system to render panes
 	return RenderPanesWithLayout(m.panes, m.layout, m.width, availableHeight)
@@ -1818,7 +1854,8 @@ func (m AppModel) overlayDialog(background string) string {
 		// Find the pane with this workstream
 		titleBarHeight := 1
 		statusBarHeight := 1
-		availableHeight := m.height - titleBarHeight - statusBarHeight
+		logPanelH := m.logPanelHeight()
+		availableHeight := m.height - titleBarHeight - statusBarHeight - logPanelH
 		bounds := CalculatePaneBounds(m.layout, len(m.panes), m.width, availableHeight, titleBarHeight)
 
 		for i, pane := range m.panes {
@@ -1912,11 +1949,25 @@ func (m AppModel) overlayDialog(background string) string {
 	return result.String()
 }
 
+// logPanelHeight returns the height of the log panel (0 if hidden)
+func (m *AppModel) logPanelHeight() int {
+	if m.logPanel != nil && m.logPanel.IsVisible() {
+		return DefaultLogPanelHeight
+	}
+	return 0
+}
+
 // updateLayout recalculates pane sizes based on the current layout type
 func (m *AppModel) updateLayout() {
 	titleBarHeight := 1
 	statusBarHeight := 1
-	availableHeight := m.height - titleBarHeight - statusBarHeight
+	logPanelH := m.logPanelHeight()
+	availableHeight := m.height - titleBarHeight - statusBarHeight - logPanelH
+
+	// Update log panel size
+	if m.logPanel != nil {
+		m.logPanel.SetSize(m.width, logPanelH)
+	}
 
 	if len(m.panes) == 0 {
 		return

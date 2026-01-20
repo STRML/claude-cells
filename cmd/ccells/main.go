@@ -64,6 +64,9 @@ func (s *spinner) Stop() {
 }
 
 func main() {
+	// Initialize logging early to prevent any log.Printf from polluting TUI
+	tui.InitLogging()
+
 	// Create a cancellable context for the entire application.
 	// This context is cancelled on SIGINT/SIGTERM and propagates
 	// cancellation to all running operations.
