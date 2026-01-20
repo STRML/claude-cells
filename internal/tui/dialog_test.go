@@ -215,7 +215,7 @@ func TestPRDialog_HasInputValue(t *testing.T) {
 }
 
 func TestNewSettingsDialog(t *testing.T) {
-	d := NewSettingsDialog(5)
+	d := NewSettingsDialog(5, "test-project")
 
 	if d.Type != DialogSettings {
 		t.Error("Type should be DialogSettings")
@@ -226,8 +226,8 @@ func TestNewSettingsDialog(t *testing.T) {
 	if !strings.Contains(d.Body, "5") {
 		t.Error("Body should contain container count")
 	}
-	if len(d.MenuItems) != 3 {
-		t.Errorf("Should have 3 menu items, got %d", len(d.MenuItems))
+	if len(d.MenuItems) != 4 {
+		t.Errorf("Should have 4 menu items, got %d", len(d.MenuItems))
 	}
 	if d.MenuSelection != 0 {
 		t.Error("Initial selection should be 0")
@@ -235,7 +235,7 @@ func TestNewSettingsDialog(t *testing.T) {
 }
 
 func TestSettingsDialog_Navigation(t *testing.T) {
-	d := NewSettingsDialog(3)
+	d := NewSettingsDialog(3, "test-project")
 
 	// Navigate down
 	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
@@ -249,13 +249,25 @@ func TestSettingsDialog_Navigation(t *testing.T) {
 		t.Errorf("Selection should be 2, got %d", d.MenuSelection)
 	}
 
-	// Navigate down at bottom - should stay at 2
+	// Navigate down again
 	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
-	if d.MenuSelection != 2 {
-		t.Errorf("Selection should stay at 2 at bottom, got %d", d.MenuSelection)
+	if d.MenuSelection != 3 {
+		t.Errorf("Selection should be 3, got %d", d.MenuSelection)
+	}
+
+	// Navigate down at bottom - should stay at 3
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if d.MenuSelection != 3 {
+		t.Errorf("Selection should stay at 3 at bottom, got %d", d.MenuSelection)
 	}
 
 	// Navigate up
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if d.MenuSelection != 2 {
+		t.Errorf("Selection should be 2, got %d", d.MenuSelection)
+	}
+
+	// Navigate up again
 	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyUp})
 	if d.MenuSelection != 1 {
 		t.Errorf("Selection should be 1, got %d", d.MenuSelection)
@@ -275,7 +287,7 @@ func TestSettingsDialog_Navigation(t *testing.T) {
 }
 
 func TestSettingsDialog_VimNavigation(t *testing.T) {
-	d := NewSettingsDialog(3)
+	d := NewSettingsDialog(3, "test-project")
 
 	// Navigate with j (down)
 	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
@@ -291,7 +303,7 @@ func TestSettingsDialog_VimNavigation(t *testing.T) {
 }
 
 func TestSettingsDialog_PruneStopped(t *testing.T) {
-	d := NewSettingsDialog(3)
+	d := NewSettingsDialog(3, "test-project")
 	// Selection 0 = Prune stopped containers
 	d.MenuSelection = 0
 	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -310,10 +322,30 @@ func TestSettingsDialog_PruneStopped(t *testing.T) {
 	}
 }
 
-func TestSettingsDialog_PruneAll(t *testing.T) {
-	d := NewSettingsDialog(3)
-	// Selection 1 = Prune ALL containers
+func TestSettingsDialog_PruneProject(t *testing.T) {
+	d := NewSettingsDialog(3, "test-project")
+	// Selection 1 = Destroy project containers
 	d.MenuSelection = 1
+	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if cmd == nil {
+		t.Fatal("Should return a command on enter")
+	}
+
+	msg := cmd()
+	settingsMsg, ok := msg.(SettingsConfirmMsg)
+	if !ok {
+		t.Fatal("Should return SettingsConfirmMsg")
+	}
+	if settingsMsg.Action != SettingsActionPruneProject {
+		t.Errorf("Action should be PruneProject, got %v", settingsMsg.Action)
+	}
+}
+
+func TestSettingsDialog_PruneAll(t *testing.T) {
+	d := NewSettingsDialog(3, "test-project")
+	// Selection 2 = Destroy ALL containers (all projects)
+	d.MenuSelection = 2
 	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	if cmd == nil {
@@ -331,9 +363,9 @@ func TestSettingsDialog_PruneAll(t *testing.T) {
 }
 
 func TestSettingsDialog_Cancel(t *testing.T) {
-	d := NewSettingsDialog(3)
-	// Selection 2 = Cancel
-	d.MenuSelection = 2
+	d := NewSettingsDialog(3, "test-project")
+	// Selection 3 = Cancel
+	d.MenuSelection = 3
 	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	if cmd == nil {
@@ -347,7 +379,7 @@ func TestSettingsDialog_Cancel(t *testing.T) {
 }
 
 func TestSettingsDialog_View(t *testing.T) {
-	d := NewSettingsDialog(7)
+	d := NewSettingsDialog(7, "test-project")
 	d.SetSize(50, 20)
 
 	view := d.View()

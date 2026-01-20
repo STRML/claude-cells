@@ -7,7 +7,6 @@ import (
 	"strings"
 
 	"github.com/docker/docker/api/types"
-	"github.com/docker/docker/api/types/container"
 )
 
 // ContainerStats holds resource usage statistics for a container.
@@ -30,7 +29,7 @@ func (c *Client) GetContainerStats(ctx context.Context, containerID string) (*Co
 	}
 	defer resp.Body.Close()
 
-	var stats container.StatsResponse
+	var stats types.Stats
 	if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
 		return nil, fmt.Errorf("failed to decode stats: %w", err)
 	}
@@ -75,8 +74,7 @@ func (c *Client) GetAllCCellsStats(ctx context.Context) ([]ContainerStats, error
 		// Only get stats for running containers
 		if cont.State != "running" {
 			// Add entry with zero stats for non-running containers
-			name := strings.TrimPrefix(cont.Names[0], "/")
-			displayName := strings.TrimPrefix(name, "ccells-")
+			displayName := strings.TrimPrefix(cont.Name, "ccells-")
 			stats = append(stats, ContainerStats{
 				ContainerID:   cont.ID,
 				ContainerName: displayName,
@@ -144,14 +142,18 @@ func (c *Client) GetProjectCCellsStats(ctx context.Context, containerIDs []strin
 // calculateCPUPercent calculates CPU usage percentage from Docker stats.
 // The calculation uses the difference between the container's CPU usage and
 // the system's CPU usage to determine the percentage.
-func calculateCPUPercent(stats *container.StatsResponse) float64 {
+func calculateCPUPercent(stats *types.Stats) float64 {
+	// Check for invalid delta before subtracting (uint64 underflow prevention)
+	if stats.CPUStats.CPUUsage.TotalUsage < stats.PreCPUStats.CPUUsage.TotalUsage {
+		return 0.0
+	}
+	if stats.CPUStats.SystemUsage <= stats.PreCPUStats.SystemUsage {
+		return 0.0
+	}
+
 	// Get CPU delta values
 	cpuDelta := float64(stats.CPUStats.CPUUsage.TotalUsage - stats.PreCPUStats.CPUUsage.TotalUsage)
 	systemDelta := float64(stats.CPUStats.SystemUsage - stats.PreCPUStats.SystemUsage)
-
-	if systemDelta <= 0.0 || cpuDelta < 0.0 {
-		return 0.0
-	}
 
 	// Get number of CPUs
 	cpuCount := float64(stats.CPUStats.OnlineCPUs)
