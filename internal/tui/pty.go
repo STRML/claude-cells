@@ -244,6 +244,10 @@ echo "[ccells] Starting Claude Code..."
 		// (e.g., if already accepted or different Claude version)
 	}
 
+	// Start reading from PTY immediately to avoid losing output
+	// between autoAcceptBypassPermissions returning and PTYReadyMsg being processed
+	go session.StartReadLoop()
+
 	return session, nil
 }
 

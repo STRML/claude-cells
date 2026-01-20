@@ -860,15 +860,13 @@ Scroll Mode:
 
 	case PTYReadyMsg:
 		// PTY session is ready - connect it to the pane
+		// Note: StartReadLoop is already running (started in NewPTYSession)
 		for i := range m.panes {
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
 				ws := m.panes[i].Workstream()
 				ws.SetState(workstream.StateRunning)
 				m.panes[i].SetPTY(msg.Session)
 				m.panes[i].SetInitStatus("Starting Claude Code...")
-				// Start the read loop in a goroutine
-				// The session needs the program reference to send messages
-				go msg.Session.StartReadLoop()
 				break
 			}
 		}
