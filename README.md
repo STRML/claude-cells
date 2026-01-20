@@ -226,13 +226,17 @@ Pairing mode includes automatic health monitoring:
 
 When you quit ccells (`q` or `Ctrl+c`):
 1. All containers are **paused** (not stopped)
-2. State is saved to `.claude-cells/state.json`
-3. PTY sessions are closed gracefully
+2. State is saved to `.ccells-state.json` (auto-saved continuously during operation)
+3. Claude sessions are persisted to survive container rebuilds
+4. PTY sessions are closed gracefully
 
 When you restart ccells:
 1. Containers are **resumed**
 2. PTY sessions are reconnected
-3. You're back exactly where you left off
+3. Claude Code sessions are resumed with `--resume`
+4. You're back exactly where you left off
+
+**Auto-save**: State is automatically saved whenever workstreams are added/removed, focus changes, or layout changes. Even if you force-quit, the state file will be up-to-date.
 
 ## Architecture
 
@@ -255,7 +259,9 @@ claude-cells/
     │   ├── layout.go          # Pane layout calculations
     │   └── styles.go          # Styling
     └── workstream/            # Workstream state & lifecycle
-        └── manager.go         # Workstream management
+        ├── manager.go         # In-memory workstream tracking
+        ├── persistent_manager.go  # Auto-persisting state (wraps Manager)
+        └── state.go           # State file operations
 ```
 
 ### Key Technologies
@@ -272,7 +278,7 @@ Claude Cells stores data in:
 | Location | Purpose |
 |----------|---------|
 | `~/.claude-cells/` | Global config, Claude credentials, and skills (copied into containers) |
-| `.claude-cells/state.json` | Session state for resume (in project directory) |
+| `.ccells-state.json` | Session state for resume (in project directory, auto-saved) |
 | `/tmp/ccells/worktrees/` | Git worktrees for container isolation |
 
 ## Troubleshooting

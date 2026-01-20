@@ -27,6 +27,9 @@ internal/
     dialog.go              # Modal dialogs
     container.go           # Container lifecycle & git worktree management
   workstream/              # Workstream state & lifecycle
+    manager.go             # In-memory workstream tracking
+    persistent_manager.go  # Auto-persisting state manager (wraps Manager)
+    state.go               # State file read/write
   docker/                  # Docker SDK wrapper
   sync/                    # Mutagen/pairing mode
   git/                     # Branch, worktree & PR operations
@@ -129,10 +132,12 @@ if app.dialog == nil {
 - **Git Worktree Isolation**: Each container gets its own git worktree, avoiding host repo conflicts
 - **Shell Escaping**: `escapeShellArg()` handles newlines (`\n`, `\r`), null bytes, and other special characters
 - **Resource Limits**: Manager limits workstreams to 12 (MaxWorkstreams constant)
-- **Atomic State Persistence**: `SaveState` writes to temp file then renames for crash safety
+- **Auto-Persisting State**: `PersistentManager` auto-saves on any mutation (add/remove workstream, focus change, layout change). 200ms debounced saves prevent disk thrashing. Force-quit leaves coherent state.
+- **Atomic State Writes**: `SaveState` writes to temp file then renames for crash safety
 - **PTY Clean Shutdown**: Uses done channel for clean goroutine shutdown
 - **Container Cleanup**: Orphaned containers from crashed sessions are cleaned up on startup
 - **Context Timeouts**: All Docker operations use timeouts (no unbounded context.Background())
+- **Session Persistence**: Claude sessions are persisted from container runtime location to mount point before pause, surviving container rebuilds
 
 ### Remaining Technical Debt
 
