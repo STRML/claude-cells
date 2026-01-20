@@ -112,7 +112,14 @@ echo "[ccells] User: $(whoami), Home: $HOME"
 
 # Ensure PATH includes user's local bin directories
 export PATH="$HOME/.local/bin:$HOME/.claude/local/bin:$PATH"
-echo "[ccells] PATH: $PATH"
+
+# Kill any existing claude processes (from previous sessions that weren't cleaned up)
+# This happens when ccells quits - the container stays running but the PTY is orphaned
+if pgrep -f "claude" >/dev/null 2>&1; then
+  echo "[ccells] Killing existing Claude processes from previous session..."
+  pkill -9 -f "claude" 2>/dev/null
+  sleep 1
+fi
 
 # Setup credentials
 if test -f "$HOME/.claude-credentials"; then
