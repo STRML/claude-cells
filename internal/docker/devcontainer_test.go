@@ -1,9 +1,13 @@
 package docker
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 )
 
 func TestLoadDevcontainerConfig(t *testing.T) {
@@ -401,4 +405,90 @@ func containsSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+func TestAcquireBuildLock(t *testing.T) {
+	t.Run("same image serializes access", func(t *testing.T) {
+		t.Parallel()
+
+		const imageName = "test-lock-same-image"
+		var sequence []int
+		var mu sync.Mutex
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		// First goroutine acquires lock, holds it briefly
+		go func() {
+			defer wg.Done()
+			unlock := acquireBuildLock(imageName)
+			mu.Lock()
+			sequence = append(sequence, 1)
+			mu.Unlock()
+			time.Sleep(50 * time.Millisecond)
+			mu.Lock()
+			sequence = append(sequence, 2)
+			mu.Unlock()
+			unlock()
+		}()
+
+		// Give first goroutine time to acquire lock
+		time.Sleep(10 * time.Millisecond)
+
+		// Second goroutine should wait for first
+		go func() {
+			defer wg.Done()
+			unlock := acquireBuildLock(imageName)
+			mu.Lock()
+			sequence = append(sequence, 3)
+			mu.Unlock()
+			unlock()
+		}()
+
+		wg.Wait()
+
+		// Sequence should be 1, 2, 3 (not 1, 3, 2)
+		if len(sequence) != 3 {
+			t.Fatalf("expected 3 events, got %d", len(sequence))
+		}
+		if sequence[0] != 1 || sequence[1] != 2 || sequence[2] != 3 {
+			t.Errorf("expected sequence [1,2,3], got %v", sequence)
+		}
+	})
+
+	t.Run("different images allow parallel access", func(t *testing.T) {
+		t.Parallel()
+
+		var concurrent atomic.Int32
+		var maxConcurrent atomic.Int32
+
+		var wg sync.WaitGroup
+		wg.Add(2)
+
+		for i := 0; i < 2; i++ {
+			imageName := fmt.Sprintf("test-lock-different-%d", i)
+			go func() {
+				defer wg.Done()
+				unlock := acquireBuildLock(imageName)
+				c := concurrent.Add(1)
+				// Track max concurrent
+				for {
+					old := maxConcurrent.Load()
+					if c <= old || maxConcurrent.CompareAndSwap(old, c) {
+						break
+					}
+				}
+				time.Sleep(50 * time.Millisecond)
+				concurrent.Add(-1)
+				unlock()
+			}()
+		}
+
+		wg.Wait()
+
+		// Both should have run concurrently
+		if maxConcurrent.Load() != 2 {
+			t.Errorf("expected max concurrent 2, got %d", maxConcurrent.Load())
+		}
+	})
 }
