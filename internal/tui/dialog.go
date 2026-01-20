@@ -42,6 +42,7 @@ type DialogModel struct {
 	useTextArea  bool           // Whether to use textarea instead of textinput
 	ConfirmWord  string         // Word required to confirm (e.g., "destroy")
 	WorkstreamID string
+	BranchInfo   string // Branch statistics to pass through dialogs
 	width        int
 	height       int
 	// Menu-style dialogs
@@ -207,13 +208,20 @@ func NewBranchConflictDialog(branchName, workstreamID, branchInfo string) Dialog
 }
 
 // NewMergeDialog creates a merge/PR menu dialog
-func NewMergeDialog(branchName, workstreamID string) DialogModel {
-	body := fmt.Sprintf("Branch: %s\n", branchName)
+func NewMergeDialog(branchName, workstreamID, branchInfo string) DialogModel {
+	var body strings.Builder
+	body.WriteString(fmt.Sprintf("Branch: %s\n", branchName))
+
+	if branchInfo != "" {
+		body.WriteString("\n")
+		body.WriteString(branchInfo)
+		body.WriteString("\n")
+	}
 
 	return DialogModel{
 		Type:         DialogMerge,
 		Title:        "Merge / PR Options",
-		Body:         body,
+		Body:         body.String(),
 		WorkstreamID: workstreamID,
 		MenuItems: []string{
 			"Create Pull Request",
@@ -226,7 +234,7 @@ func NewMergeDialog(branchName, workstreamID string) DialogModel {
 }
 
 // NewCommitBeforeMergeDialog creates a dialog asking if user wants to commit uncommitted changes
-func NewCommitBeforeMergeDialog(branchName, workstreamID string) DialogModel {
+func NewCommitBeforeMergeDialog(branchName, workstreamID, branchInfo string) DialogModel {
 	body := fmt.Sprintf("Branch '%s' has uncommitted changes.\n\nWould you like Claude to commit them first?", branchName)
 
 	return DialogModel{
@@ -234,6 +242,7 @@ func NewCommitBeforeMergeDialog(branchName, workstreamID string) DialogModel {
 		Title:        "Uncommitted Changes",
 		Body:         body,
 		WorkstreamID: workstreamID,
+		BranchInfo:   branchInfo, // Store for passing to merge dialog
 		MenuItems: []string{
 			"Yes, commit changes",
 			"No, continue without committing",
@@ -597,8 +606,9 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				if action == CommitBeforeMergeCancel {
 					return d, func() tea.Msg { return DialogCancelMsg{} }
 				}
+				branchInfo := d.BranchInfo
 				return d, func() tea.Msg {
-					return CommitBeforeMergeConfirmMsg{Action: action, WorkstreamID: d.WorkstreamID}
+					return CommitBeforeMergeConfirmMsg{Action: action, WorkstreamID: d.WorkstreamID, BranchInfo: branchInfo}
 				}
 			}
 
@@ -982,6 +992,7 @@ type MergeConfirmMsg struct {
 type CommitBeforeMergeConfirmMsg struct {
 	Action       CommitBeforeMergeAction
 	WorkstreamID string
+	BranchInfo   string // Branch statistics for the merge dialog
 }
 
 // BranchConflictConfirmMsg is sent when a branch conflict resolution is confirmed

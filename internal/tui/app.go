@@ -1049,18 +1049,18 @@ Scroll Mode:
 				ws := m.panes[i].Workstream()
 				if msg.Error != nil {
 					// Error checking - just show merge dialog anyway
-					dialog := NewMergeDialog(ws.BranchName, ws.ID)
-					dialog.SetSize(50, 15)
+					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo)
+					dialog.SetSize(50, 20)
 					m.dialog = &dialog
 				} else if msg.HasChanges {
 					// Has uncommitted changes - ask if user wants to commit first
-					dialog := NewCommitBeforeMergeDialog(ws.BranchName, ws.ID)
+					dialog := NewCommitBeforeMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo)
 					dialog.SetSize(55, 12)
 					m.dialog = &dialog
 				} else {
 					// No uncommitted changes - show merge dialog directly
-					dialog := NewMergeDialog(ws.BranchName, ws.ID)
-					dialog.SetSize(50, 15)
+					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo)
+					dialog.SetSize(50, 20)
 					m.dialog = &dialog
 				}
 				break
@@ -1085,8 +1085,8 @@ Scroll Mode:
 					// Don't show merge dialog yet - user can press 'm' again after commit
 				case CommitBeforeMergeNo:
 					// Continue to merge dialog without committing
-					dialog := NewMergeDialog(ws.BranchName, ws.ID)
-					dialog.SetSize(50, 15)
+					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo)
+					dialog.SetSize(50, 20)
 					m.dialog = &dialog
 				}
 				break
