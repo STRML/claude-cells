@@ -762,7 +762,7 @@ Navigation Mode:
   s           Settings
   l           Show logs
   e           Export logs to file
-  L           Cycle layout (Grid/Main+Stack/Main+Row/Rows/Columns)
+  L           Cycle layout
   `+"`"+`           Toggle log panel (system logs)
   ~           Cycle log filter (DEBUG/INFO/WARN/ERR)
   Space       Move focused pane to main (largest) position
