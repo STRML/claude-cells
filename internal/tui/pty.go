@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"io"
+	"regexp"
 	"strings"
 	"sync"
 	"time"
@@ -12,6 +13,11 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/client"
 )
+
+// sessionIDRegex matches Claude Code session IDs in output.
+// Claude outputs session ID at startup like: "Resuming session: 01HXXXXXX..."
+// Session IDs are ULIDs (26 characters, alphanumeric).
+var sessionIDRegex = regexp.MustCompile(`(?:session(?:_id)?[:\s]+|Resuming session[:\s]+)([0-9A-Za-z]{26})`)
 
 // escapeShellArg escapes a string for safe use in a shell command.
 // It handles special characters that could break out of double-quoted strings
@@ -76,12 +82,19 @@ type PTYClosedMsg struct {
 	Error        error
 }
 
+// SessionIDCapturedMsg is sent when a Claude session ID is captured from output.
+type SessionIDCapturedMsg struct {
+	WorkstreamID string
+	SessionID    string
+}
+
 // PTYOptions holds options for creating a PTY session.
 type PTYOptions struct {
 	Width           int
 	Height          int
 	EnvVars         []string // Additional environment variables in "KEY=value" format
-	IsResume        bool     // If true, use 'claude --continue' instead of starting new session
+	IsResume        bool     // If true, use 'claude --resume' instead of starting new session
+	ClaudeSessionID string   // Claude session ID for --resume (if available)
 	HostProjectPath string   // Host project path for finding session data (encoded for .claude/projects/)
 }
 
@@ -195,8 +208,14 @@ echo "[ccells] Starting Claude Code..."
 `
 	var setupCmd string
 	if opts != nil && opts.IsResume {
-		// Resume existing session with --continue
-		setupCmd = setupScript + `exec claude --dangerously-skip-permissions --continue`
+		// Resume existing session
+		if opts.ClaudeSessionID != "" {
+			// Use --resume with explicit session ID (preferred)
+			setupCmd = setupScript + `exec claude --dangerously-skip-permissions --resume "` + escapeShellArg(opts.ClaudeSessionID) + `"`
+		} else {
+			// Fall back to --continue if no session ID available
+			setupCmd = setupScript + `exec claude --dangerously-skip-permissions --continue`
+		}
 	} else if initialPrompt != "" {
 		// New session with initial prompt
 		setupCmd = setupScript + `exec claude --dangerously-skip-permissions "` + escapeShellArg(initialPrompt) + `"`
@@ -302,7 +321,8 @@ func (p *PTYSession) Resize(width, height int) error {
 // StartReadLoop starts reading from the PTY and sending output messages.
 // This should be called in a goroutine. Uses context-based cancellation
 // to avoid race conditions with Close().
-// It also handles auto-accepting the bypass permissions prompt if it appears.
+// It also handles auto-accepting the bypass permissions prompt if it appears,
+// and captures the Claude session ID from output.
 func (p *PTYSession) StartReadLoop() {
 	buf := make([]byte, 4096)
 
@@ -310,8 +330,10 @@ func (p *PTYSession) StartReadLoop() {
 	// Always check - even with --continue, fresh containers show the prompt
 	var accumulated strings.Builder
 	bypassHandled := false
+	sessionIDCaptured := false
 	startTime := time.Now()
 	const bypassTimeout = 10 * time.Second
+	const sessionIDTimeout = 30 * time.Second // Session ID may appear later in output
 
 	for {
 		// Check context first (non-blocking)
@@ -375,19 +397,40 @@ func (p *PTYSession) StartReadLoop() {
 			}
 
 			if result.n > 0 {
-				// Check for bypass permissions prompt during startup (first 10 seconds)
-				if !bypassHandled && time.Since(startTime) < bypassTimeout {
+				// Accumulate output during startup period for pattern matching
+				needsAccumulation := (!bypassHandled && time.Since(startTime) < bypassTimeout) ||
+					(!sessionIDCaptured && time.Since(startTime) < sessionIDTimeout)
+
+				if needsAccumulation {
 					accumulated.Write(buf[:result.n])
 					content := accumulated.String()
-					if strings.Contains(content, "Bypass Permissions mode") {
-						// Wait a moment for the full prompt to render
-						time.Sleep(100 * time.Millisecond)
-						// Send down arrow to select "Yes, I accept"
-						p.Write([]byte{27, '[', 'B'})
-						time.Sleep(50 * time.Millisecond)
-						// Send enter to confirm
-						p.Write([]byte{'\r'})
-						bypassHandled = true
+
+					// Check for bypass permissions prompt during startup (first 10 seconds)
+					if !bypassHandled && time.Since(startTime) < bypassTimeout {
+						if strings.Contains(content, "Bypass Permissions mode") {
+							// Wait a moment for the full prompt to render
+							time.Sleep(100 * time.Millisecond)
+							// Send down arrow to select "Yes, I accept"
+							p.Write([]byte{27, '[', 'B'})
+							time.Sleep(50 * time.Millisecond)
+							// Send enter to confirm
+							p.Write([]byte{'\r'})
+							bypassHandled = true
+						}
+					}
+
+					// Check for session ID in output (within first 30 seconds)
+					if !sessionIDCaptured && time.Since(startTime) < sessionIDTimeout {
+						if matches := sessionIDRegex.FindStringSubmatch(content); len(matches) > 1 {
+							sessionID := matches[1]
+							sessionIDCaptured = true
+							if program != nil {
+								program.Send(SessionIDCapturedMsg{
+									WorkstreamID: p.workstreamID,
+									SessionID:    sessionID,
+								})
+							}
+						}
 					}
 				}
 

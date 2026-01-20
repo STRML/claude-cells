@@ -632,3 +632,139 @@ func TestTimeoutConstants(t *testing.T) {
 		t.Errorf("bypassTimeout = %v, should be between 5s and 30s", bypassTimeout)
 	}
 }
+
+// Test SessionIDCapturedMsg struct
+func TestSessionIDCapturedMsg(t *testing.T) {
+	msg := SessionIDCapturedMsg{
+		WorkstreamID: "test-ws",
+		SessionID:    "01HZ8Y3QPXKJNM5VG2DTCW9RAE",
+	}
+
+	if msg.WorkstreamID != "test-ws" {
+		t.Errorf("WorkstreamID = %q, want %q", msg.WorkstreamID, "test-ws")
+	}
+	if msg.SessionID != "01HZ8Y3QPXKJNM5VG2DTCW9RAE" {
+		t.Errorf("SessionID = %q, want %q", msg.SessionID, "01HZ8Y3QPXKJNM5VG2DTCW9RAE")
+	}
+}
+
+// Test session ID regex pattern matching
+func TestSessionIDRegex(t *testing.T) {
+	testCases := []struct {
+		name      string
+		content   string
+		wantMatch bool
+		wantID    string
+	}{
+		{
+			name:      "standard session format",
+			content:   "session: 01HZ8Y3QPXKJNM5VG2DTCW9RAE",
+			wantMatch: true,
+			wantID:    "01HZ8Y3QPXKJNM5VG2DTCW9RAE",
+		},
+		{
+			name:      "session_id format",
+			content:   "session_id: 01HZ8Y3QPXKJNM5VG2DTCW9RAE",
+			wantMatch: true,
+			wantID:    "01HZ8Y3QPXKJNM5VG2DTCW9RAE",
+		},
+		{
+			name:      "resuming session format",
+			content:   "Resuming session: 01HZ8Y3QPXKJNM5VG2DTCW9RAE",
+			wantMatch: true,
+			wantID:    "01HZ8Y3QPXKJNM5VG2DTCW9RAE",
+		},
+		{
+			name:      "with surrounding text",
+			content:   "Starting... session: 01ABC2DEF3GHJ4KLM5NPQ6RST7 and more",
+			wantMatch: true,
+			wantID:    "01ABC2DEF3GHJ4KLM5NPQ6RST7",
+		},
+		{
+			name:      "no session ID",
+			content:   "Normal output without session info",
+			wantMatch: false,
+			wantID:    "",
+		},
+		{
+			name:      "too short ID",
+			content:   "session: 01HZ8Y3Q",
+			wantMatch: false,
+			wantID:    "",
+		},
+		{
+			name:      "too long ID - only captures 26 chars",
+			content:   "session: 01HZ8Y3QPXKJNM5VG2DTCW9RAETOOLONG",
+			wantMatch: true,
+			wantID:    "01HZ8Y3QPXKJNM5VG2DTCW9RAE",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			matches := sessionIDRegex.FindStringSubmatch(tc.content)
+			if tc.wantMatch {
+				if len(matches) < 2 {
+					t.Errorf("Expected match for %q, but got none", tc.content)
+					return
+				}
+				if matches[1] != tc.wantID {
+					t.Errorf("Session ID = %q, want %q", matches[1], tc.wantID)
+				}
+			} else {
+				if len(matches) > 1 {
+					t.Errorf("Expected no match for %q, but got %q", tc.content, matches[1])
+				}
+			}
+		})
+	}
+}
+
+// Test PTYOptions with ClaudeSessionID
+func TestPTYOptionsWithSessionID(t *testing.T) {
+	tests := []struct {
+		name          string
+		opts          *PTYOptions
+		wantSessionID string
+		wantIsResume  bool
+	}{
+		{
+			name: "resume with session ID",
+			opts: &PTYOptions{
+				IsResume:        true,
+				ClaudeSessionID: "01HZ8Y3QPXKJNM5VG2DTCW9RAE",
+			},
+			wantSessionID: "01HZ8Y3QPXKJNM5VG2DTCW9RAE",
+			wantIsResume:  true,
+		},
+		{
+			name: "resume without session ID (fallback to --continue)",
+			opts: &PTYOptions{
+				IsResume:        true,
+				ClaudeSessionID: "",
+			},
+			wantSessionID: "",
+			wantIsResume:  true,
+		},
+		{
+			name: "new session (no resume)",
+			opts: &PTYOptions{
+				IsResume:        false,
+				ClaudeSessionID: "",
+			},
+			wantSessionID: "",
+			wantIsResume:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.opts.ClaudeSessionID != tt.wantSessionID {
+				t.Errorf("ClaudeSessionID = %q, want %q", tt.opts.ClaudeSessionID, tt.wantSessionID)
+			}
+			if tt.opts.IsResume != tt.wantIsResume {
+				t.Errorf("IsResume = %v, want %v", tt.opts.IsResume, tt.wantIsResume)
+			}
+		})
+	}
+}

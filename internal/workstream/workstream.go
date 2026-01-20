@@ -43,6 +43,9 @@ type Workstream struct {
 	// Git worktree (container has isolated working directory)
 	WorktreePath string // Path to git worktree on host
 
+	// Claude Code session
+	ClaudeSessionID string // Claude Code session ID for --resume (captured from output)
+
 	// State
 	State        State     // Current lifecycle state
 	ErrorMessage string    // Error details if State == StateError
@@ -150,6 +153,20 @@ func (w *Workstream) SetTitle(title string) {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 	w.Title = title
+}
+
+// SetClaudeSessionID sets the Claude Code session ID (for --resume).
+func (w *Workstream) SetClaudeSessionID(sessionID string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.ClaudeSessionID = sessionID
+}
+
+// GetClaudeSessionID returns the Claude Code session ID (thread-safe).
+func (w *Workstream) GetClaudeSessionID() string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.ClaudeSessionID
 }
 
 // GetTitle returns the title, or BranchName as fallback if title not yet set.
