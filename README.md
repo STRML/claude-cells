@@ -1,23 +1,24 @@
 # Claude Cells
 
-**Run multiple Claude Code instances in parallel, each in its own isolated Docker container with automatic git branch management.**
+**Claude Code, behind bars.** Each instance runs in its own isolated cell—no conflicts, no permission prompts, no babysitting.
 
 <p align="center">
   <img src="cc-4-pane.png" alt="Claude Cells running 4 parallel workstreams" width="100%">
 </p>
 
-> **Why another tool?** Other multi-agent orchestrators exist—but they all layer heavy GUIs on top, burying the Claude Code experience under their own interfaces. Claude Code's TUI is already best-in-class. We don't replace it; we multiply it. Claude Cells gives you the isolation and parallelism you need while keeping you in the terminal where you belong.
+> Other multi-agent tools wrap AI behind heavy custom UIs. We don't wrap Claude Code—**we put it in a cell**.
 
-Claude Cells is a terminal multiplexer specifically designed for AI-assisted development. Spin up multiple Claude Code instances, each working on a different feature or bug fix in complete isolation, and watch them all progress simultaneously.
+Claude Cells is a terminal multiplexer for AI-assisted development. Spin up Claude Code instances, each working on a different feature in complete isolation, and watch them all progress simultaneously.
 
 ## Why Claude Cells?
 
-- **Parallel Development**: Work on multiple features/bugs simultaneously without context switching
-- **Complete Isolation**: Each Claude instance runs in its own Docker container with a dedicated git branch
-- **No Conflicts**: Changes in one workstream can't interfere with another
-- **Permission-Free Iteration**: Because each container is fully isolated, Claude Code can work autonomously without constant permission prompts - let it edit files, run commands, and iterate freely while you focus on other workstreams
-- **Session Persistence**: Close ccells and come back later - containers pause and resume exactly where you left off
-- **Real-time Collaboration**: Pairing mode syncs your local filesystem with any container for live editing
+- **Total Isolation**: Each Claude runs in its own Docker container with its own git worktree. No `.git/index.lock` conflicts. No stepping on each other's toes.
+- **Zero Permission Prompts**: Isolation means safety. Let Claude edit files, run commands, and iterate freely—it can't escape its cell.
+- **Pure Claude Code**: No custom UI layer. You get Claude Code's excellent TUI, just tiled. Think tmux, not a framework.
+- **Set It and Forget It**: Spin up a workstream, move on. Come back when it's done—containers pause and resume exactly where you left off.
+- **Devcontainer Support**: Already have a `.devcontainer/devcontainer.json`? It just works.
+- **Your Hardware is the Limit**: Run as many parallel workstreams as your machine can handle.
+- **Real-time Pairing**: Sync your local filesystem with any container for live editing alongside Claude.
 
 <p align="center">
   <img src="cc-3-pane.png" alt="Claude Cells grid layout with 3 panes" width="100%">
@@ -60,7 +61,7 @@ Switch modes with `i`/`Enter` to enter input mode, `Esc Esc` or `Ctrl+B Esc` to 
 
 ## Prerequisites
 
-- **Docker** - Container runtime
+- **Docker runtime** - We recommend [OrbStack](https://orbstack.dev/) on macOS, or Docker Engine on Linux
 - **Go 1.21+** - For building from source
 - **[Mutagen](https://mutagen.io/)** - For pairing mode (optional)
 - **[gh CLI](https://cli.github.com/)** - For PR creation (optional)
@@ -330,8 +331,7 @@ If you see conflict notifications:
 
 ## Limitations
 
-- Maximum of **12 concurrent workstreams** (configurable in code)
-- Requires Docker Desktop or Docker Engine running
+- Requires a Docker runtime (we recommend [OrbStack](https://orbstack.dev/) on macOS)
 - Pairing mode requires Mutagen
 - PR creation requires `gh` CLI authenticated
 
