@@ -3,7 +3,6 @@ package tui
 import (
 	"context"
 	"io"
-	"log"
 	"strings"
 	"sync"
 	"time"
@@ -63,6 +62,7 @@ type PTYSession struct {
 	dockerClient *client.Client
 	width        int
 	height       int
+	isResume     bool // If true, skip bypass prompt detection (already accepted)
 }
 
 // PTYOutputMsg is sent when there's output from the PTY.
@@ -224,6 +224,7 @@ echo "[ccells] Starting Claude Code..."
 	// Create a cancellable context for this session
 	sessionCtx, sessionCancel := context.WithCancel(context.Background())
 
+	isResume := opts != nil && opts.IsResume
 	session := &PTYSession{
 		containerID:  containerID,
 		execID:       execResp.ID,
@@ -236,6 +237,7 @@ echo "[ccells] Starting Claude Code..."
 		dockerClient: dockerClient,
 		width:        width,
 		height:       height,
+		isResume:     isResume,
 	}
 
 	// Start the read loop immediately - it will handle both:
@@ -276,8 +278,9 @@ func (p *PTYSession) StartReadLoop() {
 	buf := make([]byte, 4096)
 
 	// For detecting the bypass permissions prompt during startup
+	// Skip if resuming (--continue) since bypass was already accepted
 	var accumulated strings.Builder
-	bypassHandled := false
+	bypassHandled := p.isResume // Skip bypass detection if resuming
 	startTime := time.Now()
 	const bypassTimeout = 10 * time.Second
 
@@ -348,19 +351,13 @@ func (p *PTYSession) StartReadLoop() {
 					accumulated.Write(buf[:result.n])
 					content := accumulated.String()
 					if strings.Contains(content, "Bypass Permissions mode") {
-						log.Printf("[PTY %s] DETECTED bypass prompt, sending keys", p.workstreamID)
 						// Wait a moment for the full prompt to render
 						time.Sleep(100 * time.Millisecond)
 						// Send down arrow to select "Yes, I accept"
-						if err := p.Write([]byte{27, '[', 'B'}); err != nil {
-							log.Printf("[PTY %s] Error sending down arrow: %v", p.workstreamID, err)
-						}
+						p.Write([]byte{27, '[', 'B'})
 						time.Sleep(50 * time.Millisecond)
 						// Send enter to confirm
-						if err := p.Write([]byte{'\r'}); err != nil {
-							log.Printf("[PTY %s] Error sending enter: %v", p.workstreamID, err)
-						}
-						log.Printf("[PTY %s] Bypass prompt accepted", p.workstreamID)
+						p.Write([]byte{'\r'})
 						bypassHandled = true
 					}
 				}
