@@ -150,7 +150,7 @@ func CheckUncommittedChangesCmd(ws *workstream.Workstream) tea.Cmd {
 			}
 		}
 
-		gitRepo := git.New(worktreePath)
+		gitRepo := GitClientFactory(worktreePath)
 		hasChanges, err := gitRepo.HasUncommittedChanges(ctx)
 		if err != nil {
 			return UncommittedChangesMsg{
@@ -255,7 +255,7 @@ func StartContainerWithNewBranchCmd(ws *workstream.Workstream, existingBranches 
 			}
 		}
 
-		gitRepo := git.New(repoPath)
+		gitRepo := GitClientFactory(repoPath)
 		for {
 			exists, _ := gitRepo.BranchExists(ctx, newName)
 			if !exists {
@@ -287,7 +287,7 @@ func DeleteAndRestartContainerCmd(ws *workstream.Workstream) tea.Cmd {
 			}
 		}
 
-		gitRepo := git.New(repoPath)
+		gitRepo := GitClientFactory(repoPath)
 
 		// With worktrees, the branch may be checked out in a worktree
 		// First remove any worktree using this branch
@@ -324,7 +324,7 @@ func RebuildContainerCmd(ws *workstream.Workstream) tea.Cmd {
 			}
 		}
 
-		gitRepo := git.New(repoPath)
+		gitRepo := GitClientFactory(repoPath)
 
 		// Determine worktree path for this container
 		worktreePath := getWorktreePath(ws.BranchName)
@@ -500,7 +500,7 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 			}
 		}
 
-		gitRepo := git.New(repoPath)
+		gitRepo := GitClientFactory(repoPath)
 
 		// Auto-pull main before creating branch to avoid stale base
 		// This updates local main to match origin/main without checking it out
@@ -838,7 +838,7 @@ func StopContainerCmd(ws *workstream.Workstream) tea.Cmd {
 		LogDebug("Repo path: %s", repoPath)
 
 		if worktreePath != "" {
-			gitRepo := git.New(repoPath)
+			gitRepo := GitClientFactory(repoPath)
 
 			LogDebug("Removing worktree")
 			// Remove worktree from git
@@ -857,7 +857,7 @@ func StopContainerCmd(ws *workstream.Workstream) tea.Cmd {
 
 		// Delete branch if it has no commits or is merged
 		if ws.BranchName != "" {
-			gitRepo := git.New(repoPath)
+			gitRepo := GitClientFactory(repoPath)
 			LogDebug("Checking if branch has commits")
 			// Check if branch has commits
 			hasCommits, err := gitRepo.BranchHasCommits(ctx, ws.BranchName)
@@ -1018,7 +1018,7 @@ func PruneAllContainersAndBranchesCmd() tea.Cmd {
 		}
 
 		// Now prune empty branches
-		g := git.New(cwd)
+		g := GitClientFactory(cwd)
 		branches, err := g.ListCCellsBranches(ctx)
 		if err != nil {
 			// Not fatal - still report container cleanup
@@ -1083,7 +1083,7 @@ func PruneProjectContainersAndBranchesCmd(projectName string) tea.Cmd {
 		}
 
 		// Now prune empty branches (these are repo-local anyway)
-		g := git.New(cwd)
+		g := GitClientFactory(cwd)
 		branches, err := g.ListCCellsBranches(ctx)
 		if err != nil {
 			// Not fatal - still report container cleanup
@@ -1247,7 +1247,7 @@ func PushBranchCmd(ws *workstream.Workstream) tea.Cmd {
 			return PushBranchResultMsg{WorkstreamID: ws.ID, Error: fmt.Errorf("no worktree path for branch")}
 		}
 
-		gitRepo := git.New(worktreePath)
+		gitRepo := GitClientFactory(worktreePath)
 		if err := gitRepo.Push(ctx, ws.BranchName); err != nil {
 			return PushBranchResultMsg{WorkstreamID: ws.ID, Error: err}
 		}
@@ -1280,7 +1280,7 @@ func CreatePRCmd(ws *workstream.Workstream) tea.Cmd {
 			return PRCreatedMsg{WorkstreamID: ws.ID, Error: fmt.Errorf("no worktree path for branch")}
 		}
 
-		gitRepo := git.New(worktreePath)
+		gitRepo := GitClientFactory(worktreePath)
 
 		// First push the branch from the worktree
 		if err := gitRepo.Push(ctx, ws.BranchName); err != nil {
@@ -1339,7 +1339,7 @@ func MergeBranchWithOptionsCmd(ws *workstream.Workstream, squash bool) tea.Cmd {
 			return MergeBranchMsg{WorkstreamID: ws.ID, Error: err}
 		}
 
-		gitRepo := git.New(repoPath)
+		gitRepo := GitClientFactory(repoPath)
 
 		// Merge the branch into main
 		if err := gitRepo.MergeBranchWithOptions(ctx, ws.BranchName, squash); err != nil {
@@ -1377,7 +1377,7 @@ func RebaseBranchCmd(ws *workstream.Workstream) tea.Cmd {
 			worktreePath = getWorktreePath(ws.BranchName)
 		}
 
-		gitRepo := git.New(worktreePath)
+		gitRepo := GitClientFactory(worktreePath)
 
 		// Rebase the branch onto main
 		if err := gitRepo.RebaseBranch(ctx, ws.BranchName); err != nil {

@@ -12,7 +12,6 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/STRML/claude-cells/internal/config"
 	"github.com/STRML/claude-cells/internal/docker"
-	"github.com/STRML/claude-cells/internal/git"
 	"github.com/STRML/claude-cells/internal/sync"
 	"github.com/STRML/claude-cells/internal/workstream"
 	"github.com/charmbracelet/x/ansi"
@@ -90,7 +89,7 @@ func NewAppModel(ctx context.Context) AppModel {
 	SetLogPanel(logPanel) // Set global for logging functions
 
 	// Initialize pairing orchestrator with real git and mutagen implementations
-	gitOps := git.New(cwd)
+	gitOps := GitClientFactory(cwd)
 	mutagenOps := sync.NewMutagen()
 
 	// Compute state directory based on repo ID
@@ -712,7 +711,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if otherWs.ContainerID == pairingState.ContainerID {
 						m.panes[i].AppendOutput("\nDisabling pairing mode (switching to new workstream)...\n")
 						// Capture previousBranch BEFORE async dispatch to avoid race
-						gitOps := git.New(m.workingDir)
+						gitOps := GitClientFactory(m.workingDir)
 						previousBranch, _ := gitOps.CurrentBranch(m.ctx)
 						// Disable old pairing then enable new one
 						return m, tea.Sequence(
@@ -724,7 +723,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			// Capture previousBranch BEFORE async dispatch to avoid race
-			gitOps := git.New(m.workingDir)
+			gitOps := GitClientFactory(m.workingDir)
 			previousBranch, _ := gitOps.CurrentBranch(m.ctx)
 
 			m.panes[m.focusedPane].AppendOutput("\nEnabling pairing mode...\n")
