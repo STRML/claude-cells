@@ -18,6 +18,12 @@ import (
 // ContainerPrefix is used to identify ccells containers
 const ContainerPrefix = "ccells-"
 
+// Default resource limits for containers
+const (
+	DefaultCPULimit    = 2.0                    // Number of CPUs
+	DefaultMemoryLimit = 4 * 1024 * 1024 * 1024 // 4GB in bytes
+)
+
 // ContainerConfig holds configuration for creating a workstream container.
 type ContainerConfig struct {
 	Name        string            // Container name (ccells-<project>-<timestamp>)
@@ -30,6 +36,10 @@ type ContainerConfig struct {
 	Credentials string            // Path to credentials file (OAuth tokens from keychain)
 	ExtraEnv    map[string]string // Additional environment variables from devcontainer.json
 	ExtraMounts []mount.Mount     // Additional mounts from devcontainer.json
+
+	// Resource limits (optional - defaults applied if zero)
+	CPULimit    float64 // Number of CPUs (e.g., 2.0 for 2 CPUs)
+	MemoryLimit int64   // Memory limit in bytes (e.g., 4*1024*1024*1024 for 4GB)
 }
 
 // NewContainerConfig creates a container config for a workstream.
@@ -125,8 +135,26 @@ func (c *Client) CreateContainer(ctx context.Context, cfg *ContainerConfig) (str
 	// Add extra mounts from devcontainer.json
 	mounts = append(mounts, cfg.ExtraMounts...)
 
+	// Apply resource limits with defaults
+	cpuLimit := cfg.CPULimit
+	if cpuLimit == 0 {
+		cpuLimit = DefaultCPULimit
+	}
+	memoryLimit := cfg.MemoryLimit
+	if memoryLimit == 0 {
+		memoryLimit = DefaultMemoryLimit
+	}
+
 	hostCfg := &container.HostConfig{
 		Mounts: mounts,
+		Resources: container.Resources{
+			// CPU limit: NanoCPUs is CPUs * 1e9 (e.g., 2.0 CPUs = 2e9 NanoCPUs)
+			NanoCPUs: int64(cpuLimit * 1e9),
+			// Memory limit in bytes
+			Memory: memoryLimit,
+			// Memory swap equal to memory (disables swap)
+			MemorySwap: memoryLimit,
+		},
 	}
 
 	resp, err := c.cli.ContainerCreate(ctx, containerCfg, hostCfg, nil, nil, cfg.Name)

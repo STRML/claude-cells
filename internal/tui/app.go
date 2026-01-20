@@ -688,39 +688,59 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Settings dialog - first get container count
 			return m, ListContainersCmd()
 
+		case "e":
+			// Export logs for focused pane
+			if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
+				pane := &m.panes[m.focusedPane]
+				logsDir := filepath.Join(m.workingDir, "ccells-logs")
+				exportPath, err := pane.ExportLogs(logsDir)
+				if err != nil {
+					m.toast = fmt.Sprintf("Export failed: %v", err)
+					m.toastExpiry = time.Now().Add(toastDuration * 2)
+				} else {
+					m.toast = fmt.Sprintf("Logs exported: %s", exportPath)
+					m.toastExpiry = time.Now().Add(toastDuration * 2)
+				}
+			}
+			return m, nil
+
 		case "?":
 			// Show help dialog
-			helpText := fmt.Sprintf("Claude Cells %s (%s)\n\n"+
-				"Navigation Mode:\n"+
-				"  ←→ ↑↓       Switch between panes\n"+
-				"  i, Enter    Enter input mode (interact with Claude)\n"+
-				"  n           New workstream\n"+
-				"  d           Destroy workstream\n"+
-				"  m           Merge/PR options\n"+
-				"  p           Toggle pairing mode\n"+
-				"  r           Resource usage (CPU/memory)\n"+
-				"  s           Settings\n"+
-				"  l           Show logs\n"+
-				"  L           Cycle layout (Grid/Main+Stack/Main+Row/Rows/Columns)\n"+
-				"  `           Toggle log panel (system logs)\n"+
-				"  ~           Cycle log filter (DEBUG/INFO/WARN/ERR)\n"+
-				"  Space       Move focused pane to main (largest) position\n"+
-				"  1-9         Focus pane by number\n"+
-				"  Tab         Cycle focus\n"+
-				"  PgUp/PgDn   Scroll pane (enters scroll mode)\n"+
-				"  q           Quit (pauses containers)\n"+
-				"  Esc Esc     Quit\n\n"+
-				"Input Mode:\n"+
-				"  Esc Esc     Exit to nav mode\n"+
-				"  Ctrl+B Esc  Exit to nav mode (or scroll mode)\n"+
-				"  Ctrl+B ←→   Switch pane (without exiting input mode)\n"+
-				"  Ctrl+B 1-9  Switch pane by number\n"+
-				"  Ctrl+B PgUp/Dn  Scroll pane (enters scroll mode)\n"+
-				"  Shift+Enter Insert newline\n"+
-				"  All other keys sent to Claude Code\n\n"+
-				"Scroll Mode:\n"+
-				"  PgUp/PgDn   Continue scrolling\n"+
-				"  Esc         Exit scroll mode (return to live)", versionInfo, commitHash)
+			helpText := fmt.Sprintf(`Claude Cells %s (%s)
+
+Navigation Mode:
+  ←→ ↑↓       Switch between panes
+  i, Enter    Enter input mode (interact with Claude)
+  n           New workstream
+  d           Destroy workstream
+  m           Merge/PR options
+  p           Toggle pairing mode
+  r           Resource usage (CPU/memory)
+  s           Settings
+  l           Show logs
+  e           Export logs to file
+  L           Cycle layout (Grid/Main+Stack/Main+Row/Rows/Columns)
+  `+"`"+`           Toggle log panel (system logs)
+  ~           Cycle log filter (DEBUG/INFO/WARN/ERR)
+  Space       Move focused pane to main (largest) position
+  1-9         Focus pane by number
+  Tab         Cycle focus
+  PgUp/PgDn   Scroll pane (enters scroll mode)
+  q           Quit (pauses containers)
+  Esc Esc     Quit
+
+Input Mode:
+  Esc Esc     Exit to nav mode
+  Ctrl+B Esc  Exit to nav mode (or scroll mode)
+  Ctrl+B ←→   Switch pane (without exiting input mode)
+  Ctrl+B 1-9  Switch pane by number
+  Ctrl+B PgUp/Dn  Scroll pane (enters scroll mode)
+  Shift+Enter Insert newline
+  All other keys sent to Claude Code
+
+Scroll Mode:
+  PgUp/PgDn   Continue scrolling
+  Esc         Exit scroll mode (return to live)`, versionInfo, commitHash)
 			dialog := NewLogDialog("Help", helpText)
 			dialog.SetSize(60, 36)
 			m.dialog = &dialog

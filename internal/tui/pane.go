@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -1077,6 +1078,54 @@ func (p *PaneModel) ScrollToBottom() {
 // IsScrollMode returns true if the pane is in scroll mode (not following live output)
 func (p *PaneModel) IsScrollMode() bool {
 	return p.scrollMode
+}
+
+// ExportLogs exports the pane's full terminal history to a file.
+// Returns the path to the exported file, or an error.
+func (p *PaneModel) ExportLogs(logsDir string) (string, error) {
+	// Build full content: scrollback + current vterm
+	var content strings.Builder
+
+	// Add header with metadata
+	content.WriteString(fmt.Sprintf("# CCells Log Export\n"))
+	content.WriteString(fmt.Sprintf("# Branch: %s\n", p.workstream.BranchName))
+	content.WriteString(fmt.Sprintf("# Title: %s\n", p.workstream.GetTitle()))
+	content.WriteString(fmt.Sprintf("# Exported: %s\n", time.Now().Format(time.RFC3339)))
+	content.WriteString(fmt.Sprintf("# Prompt: %s\n", p.workstream.Prompt))
+	content.WriteString("\n" + strings.Repeat("=", 60) + "\n\n")
+
+	// Add scrollback buffer
+	if len(p.scrollback) > 0 {
+		for _, line := range p.scrollback {
+			// Strip ANSI codes for clean output
+			content.WriteString(stripANSI(line))
+			content.WriteString("\n")
+		}
+	}
+
+	// Add current vterm content
+	vtermContent := p.renderVTerm()
+	if vtermContent != "" {
+		content.WriteString(stripANSI(vtermContent))
+	}
+
+	// Generate filename: <branch>-<timestamp>.txt
+	safeBranch := strings.ReplaceAll(p.workstream.BranchName, "/", "-")
+	safeBranch = strings.ReplaceAll(safeBranch, " ", "-")
+	timestamp := time.Now().Format("20060102-150405")
+	filename := fmt.Sprintf("%s-%s.txt", safeBranch, timestamp)
+	filepath := fmt.Sprintf("%s/%s", logsDir, filename)
+
+	// Write to file
+	if err := os.MkdirAll(logsDir, 0755); err != nil {
+		return "", fmt.Errorf("failed to create logs directory: %w", err)
+	}
+
+	if err := os.WriteFile(filepath, []byte(content.String()), 0644); err != nil {
+		return "", fmt.Errorf("failed to write log file: %w", err)
+	}
+
+	return filepath, nil
 }
 
 // PromptMsg is sent when user submits a prompt
