@@ -55,6 +55,9 @@ type Workstream struct {
 	// PR info (optional)
 	PRNumber int    // GitHub PR number if created
 	PRURL    string // GitHub PR URL if created
+
+	// Auto-continue support
+	WasInterrupted bool // True if Claude was actively working when session ended
 }
 
 // New creates a new workstream from a prompt.

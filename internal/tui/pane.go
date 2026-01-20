@@ -1400,6 +1400,37 @@ func (p *PaneModel) HasInPaneDialog() bool {
 	return p.inPaneDialog != nil
 }
 
+// IsClaudeWorking returns true if Claude appears to be actively working.
+// This is detected by looking for the "(ctrl+c to interrupt)" message in the terminal output,
+// which Claude Code shows when it's processing a task.
+func (p *PaneModel) IsClaudeWorking() bool {
+	if p.vterm == nil {
+		return false
+	}
+
+	cols, rows := p.vterm.Size()
+	if rows <= 0 || cols <= 0 {
+		return false
+	}
+
+	// Check all rows for the working indicator (the message could be anywhere on screen)
+	for row := 0; row < rows; row++ {
+		line := p.getVtermLine(row)
+		// Empty lines indicate we've passed the content area
+		if line == "" {
+			continue
+		}
+		// Check for the interrupt message that Claude Code shows when working
+		// The "·" character makes this specific to Claude's status line (user won't type it)
+		if strings.Contains(line, "ctrl+c to interrupt ·") ||
+			strings.Contains(line, "ctrl-c to interrupt ·") {
+			return true
+		}
+	}
+
+	return false
+}
+
 // PromptMsg is sent when user submits a prompt
 type PromptMsg struct {
 	WorkstreamID string

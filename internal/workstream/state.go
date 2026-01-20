@@ -22,6 +22,7 @@ type SavedWorkstream struct {
 	Title           string    `json:"title,omitempty"` // Short summary title
 	ContainerID     string    `json:"container_id"`
 	ClaudeSessionID string    `json:"claude_session_id,omitempty"` // Claude Code session ID for --resume
+	WasInterrupted  bool      `json:"was_interrupted,omitempty"`   // True if Claude was working when session ended
 	CreatedAt       time.Time `json:"created_at"`
 }
 
@@ -65,6 +66,7 @@ func SaveState(dir string, workstreams []*Workstream, focusedIndex int, layout i
 			Title:           ws.Title,
 			ContainerID:     ws.ContainerID,
 			ClaudeSessionID: ws.ClaudeSessionID,
+			WasInterrupted:  ws.WasInterrupted,
 			CreatedAt:       ws.CreatedAt,
 		})
 	}
