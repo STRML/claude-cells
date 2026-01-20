@@ -192,3 +192,106 @@ func TestPaneModel_HasPTY(t *testing.T) {
 		t.Error("HasPTY() should be false with nil PTY")
 	}
 }
+
+func TestPaneModel_ScrollMode(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24)
+
+	// Initially not in scroll mode
+	if pane.IsScrollMode() {
+		t.Error("Pane should not be in scroll mode initially")
+	}
+
+	// Enter scroll mode
+	pane.EnterScrollMode()
+	if !pane.IsScrollMode() {
+		t.Error("Pane should be in scroll mode after EnterScrollMode()")
+	}
+
+	// Exit scroll mode
+	pane.ScrollToBottom()
+	if pane.IsScrollMode() {
+		t.Error("Pane should not be in scroll mode after ScrollToBottom()")
+	}
+}
+
+func TestPaneModel_ScrollLineUp(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24)
+
+	// Add some content so we have something to scroll
+	for i := 0; i < 50; i++ {
+		pane.AppendOutput("Line content\n")
+	}
+
+	// ScrollLineUp should enter scroll mode
+	pane.ScrollLineUp()
+	if !pane.IsScrollMode() {
+		t.Error("ScrollLineUp() should enter scroll mode")
+	}
+}
+
+func TestPaneModel_ScrollLineDown(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24)
+
+	// Add content and enter scroll mode
+	for i := 0; i < 50; i++ {
+		pane.AppendOutput("Line content\n")
+	}
+	pane.ScrollPageUp() // Enter scroll mode and scroll up
+
+	if !pane.IsScrollMode() {
+		t.Error("Should be in scroll mode after ScrollPageUp()")
+	}
+
+	// ScrollLineDown should stay in scroll mode until at bottom
+	pane.ScrollLineDown()
+	// We're still not at bottom, so should still be in scroll mode
+	if !pane.IsScrollMode() {
+		t.Error("ScrollLineDown() should stay in scroll mode when not at bottom")
+	}
+}
+
+func TestPaneModel_ScrollPageUp(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24)
+
+	// ScrollPageUp should enter scroll mode
+	pane.ScrollPageUp()
+	if !pane.IsScrollMode() {
+		t.Error("ScrollPageUp() should enter scroll mode")
+	}
+}
+
+func TestPaneModel_View_ScrollModeIndicator(t *testing.T) {
+	ws := workstream.New("test prompt")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24)
+	pane.SetIndex(1)
+	pane.SetFocused(true)
+
+	// Not in scroll mode - should show NAV or INPUT
+	pane.SetInputMode(false)
+	view := pane.View()
+	if !strings.Contains(view, "NAV") {
+		t.Error("Focused pane not in scroll mode should show NAV indicator")
+	}
+
+	// Enter scroll mode - should show SCROLL
+	pane.EnterScrollMode()
+	view = pane.View()
+	if !strings.Contains(view, "SCROLL") {
+		t.Error("Focused pane in scroll mode should show SCROLL indicator")
+	}
+	if strings.Contains(view, "NAV") {
+		t.Error("Pane in scroll mode should not show NAV indicator")
+	}
+	if strings.Contains(view, "INPUT") {
+		t.Error("Pane in scroll mode should not show INPUT indicator")
+	}
+}

@@ -1911,3 +1911,217 @@ func TestAppModel_MouseClick_EdgeCases(t *testing.T) {
 		})
 	}
 }
+
+// ============================================================================
+// Scroll/Copy Mode Tests
+// ============================================================================
+
+func TestAppModel_ScrollMode_EnterWithBracket_NavMode(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Should not be in scroll mode initially
+	if app.panes[0].IsScrollMode() {
+		t.Error("Pane should not be in scroll mode initially")
+	}
+
+	// Press '[' in nav mode to enter scroll mode
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	app = model.(AppModel)
+
+	if !app.panes[0].IsScrollMode() {
+		t.Error("Pressing '[' in nav mode should enter scroll mode")
+	}
+}
+
+func TestAppModel_ScrollMode_EnterWithCtrlBBracket_InputMode(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Enter input mode
+	app.inputMode = true
+
+	// Press ctrl+b then '[' to enter scroll mode
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyCtrlB})
+	app = model.(AppModel)
+
+	if !app.tmuxPrefix {
+		t.Error("ctrl+b should set tmux prefix")
+	}
+
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	app = model.(AppModel)
+
+	if !app.panes[0].IsScrollMode() {
+		t.Error("Pressing ctrl+b [ in input mode should enter scroll mode")
+	}
+	if app.tmuxPrefix {
+		t.Error("tmux prefix should be reset after use")
+	}
+}
+
+func TestAppModel_ScrollMode_ArrowKeysScroll_NavMode(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Enter scroll mode
+	app.panes[0].EnterScrollMode()
+
+	if !app.panes[0].IsScrollMode() {
+		t.Fatal("Pane should be in scroll mode")
+	}
+
+	// Press up arrow - should scroll, not navigate (there's only one pane anyway)
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyUp})
+	app = model.(AppModel)
+
+	// Should still be in scroll mode
+	if !app.panes[0].IsScrollMode() {
+		t.Error("Up arrow in scroll mode should keep scroll mode active")
+	}
+
+	// Press down arrow - should scroll
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyDown})
+	app = model.(AppModel)
+
+	// Might exit scroll mode if at bottom, but should not panic
+}
+
+func TestAppModel_ScrollMode_ArrowKeysScroll_InputMode(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Enter input mode and scroll mode
+	app.inputMode = true
+	app.panes[0].EnterScrollMode()
+
+	// Press up arrow in input mode while in scroll mode
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyUp})
+	app = model.(AppModel)
+
+	// Should still be in scroll mode (arrow scrolled instead of going to pane)
+	if !app.panes[0].IsScrollMode() {
+		t.Error("Up arrow in scroll mode (input mode) should keep scroll mode active")
+	}
+}
+
+func TestAppModel_ScrollMode_ExitWithEscape_NavMode(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Enter scroll mode
+	app.panes[0].EnterScrollMode()
+
+	if !app.panes[0].IsScrollMode() {
+		t.Fatal("Pane should be in scroll mode")
+	}
+
+	// Press escape in nav mode - should exit scroll mode
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyEscape})
+	app = model.(AppModel)
+
+	if app.panes[0].IsScrollMode() {
+		t.Error("Escape in nav mode should exit scroll mode")
+	}
+}
+
+func TestAppModel_ScrollMode_TitleBarIndicator(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Not in scroll mode
+	view := app.View()
+	// The title bar SCROLL indicator should not be present
+	// (Note: we can't easily test this without parsing the view, but we can at least
+	// verify it doesn't crash)
+
+	// Enter scroll mode
+	app.panes[0].EnterScrollMode()
+	view = app.View()
+
+	// Should contain SCROLL indicator
+	if !strings.Contains(view, "SCROLL") {
+		t.Error("View should contain SCROLL indicator when in scroll mode")
+	}
+}
+
+func TestAppModel_ScrollMode_BracketWithoutPrefix_InputMode(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Enter input mode
+	app.inputMode = true
+
+	// Press '[' without ctrl+b prefix - should pass through to pane, not enter scroll mode
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'['}})
+	app = model.(AppModel)
+
+	if app.panes[0].IsScrollMode() {
+		t.Error("Pressing '[' without ctrl+b prefix in input mode should not enter scroll mode")
+	}
+}
+
+func TestAppModel_ScrollMode_ArrowsDontNavigate_InScrollMode(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create two workstreams
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "first"})
+	app = model.(AppModel)
+	model, _ = app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "second"})
+	app = model.(AppModel)
+
+	// Focus is on pane 1
+	if app.focusedPane != 1 {
+		t.Fatalf("Expected focusedPane=1, got %d", app.focusedPane)
+	}
+
+	// Enter scroll mode on focused pane
+	app.panes[app.focusedPane].EnterScrollMode()
+
+	// Press left arrow in nav mode while in scroll mode
+	// Left/right arrows should still navigate panes (only up/down scroll)
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	app = model.(AppModel)
+
+	// Focus should change to pane 0 (left/right still navigate)
+	if app.focusedPane != 0 {
+		t.Errorf("Left arrow should still navigate panes, expected focusedPane=0, got %d", app.focusedPane)
+	}
+}

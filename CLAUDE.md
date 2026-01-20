@@ -45,9 +45,84 @@ Each container gets its own **git worktree** at `/tmp/ccells/worktrees/<branch-n
 ## Development Rules
 
 ### Test-Driven Development (Mandatory)
-- Write tests FIRST
+- Write tests FIRST before implementing features
+- All new code must have corresponding unit tests
 - Tests must pass before moving on
-- Use table-driven tests
+- Use table-driven tests for multiple scenarios
+- Run `go test -race ./...` before committing
+
+### Testing Guidelines
+
+**Unit Tests**
+- Every new function/method should have unit tests
+- Test both success and error paths
+- Use table-driven tests for testing multiple inputs:
+```go
+func TestSomething(t *testing.T) {
+    tests := []struct {
+        name     string
+        input    string
+        expected string
+        wantErr  bool
+    }{
+        {"valid input", "foo", "bar", false},
+        {"empty input", "", "", true},
+    }
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            // test logic
+        })
+    }
+}
+```
+
+**Docker Mocking**
+
+The `internal/docker` package provides `MockClient` for testing Docker interactions without a real Docker daemon. This enables fast, isolated unit tests.
+
+```go
+// Create a mock client
+client := docker.NewMockClient()
+ctx := context.Background()
+
+// Use it like a real client
+cfg := &docker.ContainerConfig{Name: "test", Image: "alpine"}
+id, _ := client.CreateContainer(ctx, cfg)
+_ = client.StartContainer(ctx, id)
+
+// Mock client tracks container state in memory
+state, _ := client.GetContainerState(ctx, id) // returns "running"
+```
+
+MockClient features:
+- In-memory container state tracking (created/running/paused/exited)
+- Configurable behaviors via function fields (`CreateContainerFn`, `ImageExistsFn`)
+- Implements the full `DockerClient` interface
+- Thread-safe with mutex protection
+
+**Integration Tests**
+
+For tests that need real Docker:
+- Use build tags: `//go:build integration`
+- Run with: `go test -tags=integration ./...`
+- These tests are slower and require Docker daemon
+
+**TUI Testing**
+
+The TUI uses Bubble Tea's message-passing architecture which makes testing straightforward:
+```go
+app := NewAppModel(context.Background())
+app.width = 100
+app.height = 40
+
+// Send a message and check state
+model, _ := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+app = model.(AppModel)
+
+if app.dialog == nil {
+    t.Error("Dialog should be open")
+}
+```
 
 ### Completed Technical Improvements
 
