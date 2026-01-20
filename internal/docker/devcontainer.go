@@ -164,22 +164,26 @@ func isWhitespace(c byte) bool {
 }
 
 // GetProjectImage returns the image name to use for a project and whether it needs to be built.
-// Returns (imageName, needsBuild, error).
+// Returns (imageName, needsBuild, baseImage, error).
 // If no devcontainer.json exists, returns the DefaultImage with needsBuild=false.
+// When a devcontainer.json exists, we always need to build to include Claude Code.
 func GetProjectImage(projectPath string) (string, bool, error) {
 	cfg, err := LoadDevcontainerConfig(projectPath)
 	if err != nil {
 		return "", false, err
 	}
 
-	// No devcontainer.json - use default image
+	// No devcontainer.json - use default image (which has Claude Code pre-installed)
 	if cfg == nil {
 		return DefaultImage, false, nil
 	}
 
-	// If image is specified directly, use it
+	// Always generate our own image name - we'll build a derived image with Claude Code
+	imageName := generateProjectImageName(projectPath)
+
+	// If image is specified directly, we still need to build a derived image with Claude Code
 	if cfg.Image != "" {
-		return cfg.Image, false, nil
+		return imageName, true, nil
 	}
 
 	// If build is specified, we need to build
@@ -189,13 +193,24 @@ func GetProjectImage(projectPath string) (string, bool, error) {
 		if err != nil {
 			return "", false, err
 		}
-		// Image name will be generated based on project
-		imageName := generateProjectImageName(projectPath)
 		return imageName, true, nil
 	}
 
 	// Neither image nor build specified - use default
 	return DefaultImage, false, nil
+}
+
+// GetBaseImage returns the base image specified in devcontainer.json (if any).
+// This is used when we need to build a derived image with Claude Code.
+func GetBaseImage(projectPath string) (string, error) {
+	cfg, err := LoadDevcontainerConfig(projectPath)
+	if err != nil {
+		return "", err
+	}
+	if cfg == nil || cfg.Image == "" {
+		return "", nil
+	}
+	return cfg.Image, nil
 }
 
 // generateProjectImageName creates a unique image name for a project's custom build.
@@ -242,28 +257,97 @@ func (cfg *DevcontainerConfig) ResolveDockerfilePath(projectPath string) (string
 // BuildProjectImage builds a Docker image from the devcontainer configuration.
 // The output writer receives build progress output.
 func BuildProjectImage(ctx context.Context, projectPath string, cfg *DevcontainerConfig, output io.Writer) error {
-	if cfg == nil || cfg.Build == nil {
-		return fmt.Errorf("no build configuration provided")
-	}
-
-	dockerfilePath, contextPath, err := cfg.ResolveDockerfilePath(projectPath)
-	if err != nil {
-		return err
+	if cfg == nil {
+		return fmt.Errorf("no devcontainer configuration provided")
 	}
 
 	imageName := generateProjectImageName(projectPath)
 
-	// Build command arguments
-	args := []string{"build", "-t", imageName, "-f", dockerfilePath}
+	// If we have a build config with Dockerfile, use it
+	if cfg.Build != nil && cfg.Build.Dockerfile != "" {
+		dockerfilePath, contextPath, err := cfg.ResolveDockerfilePath(projectPath)
+		if err != nil {
+			return err
+		}
 
-	// Add build args
-	for key, value := range cfg.Build.Args {
-		args = append(args, "--build-arg", fmt.Sprintf("%s=%s", key, value))
+		// Build command arguments
+		args := []string{"build", "-t", imageName, "-f", dockerfilePath}
+
+		// Add build args
+		for key, value := range cfg.Build.Args {
+			args = append(args, "--build-arg", fmt.Sprintf("%s=%s", key, value))
+		}
+
+		// Add context
+		args = append(args, contextPath)
+
+		cmd := exec.CommandContext(ctx, "docker", args...)
+
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			return fmt.Errorf("failed to get stdout pipe: %w", err)
+		}
+		cmd.Stderr = cmd.Stdout
+
+		if err := cmd.Start(); err != nil {
+			return fmt.Errorf("failed to start docker build: %w", err)
+		}
+
+		// Stream output
+		scanner := bufio.NewScanner(stdout)
+		for scanner.Scan() {
+			fmt.Fprintln(output, scanner.Text())
+		}
+
+		if err := cmd.Wait(); err != nil {
+			return fmt.Errorf("docker build failed: %w", err)
+		}
+
+		return nil
 	}
 
-	// Add context
-	args = append(args, contextPath)
+	// If we only have an image specified, build a derived image with Claude Code
+	if cfg.Image != "" {
+		return BuildEnhancedImage(ctx, cfg.Image, imageName, output)
+	}
 
+	return fmt.Errorf("no image or build configuration found")
+}
+
+// BuildEnhancedImage builds a derived image from a base image with Claude Code pre-installed.
+// This allows containers to start faster since Claude Code is already available.
+func BuildEnhancedImage(ctx context.Context, baseImage, targetImage string, output io.Writer) error {
+	// Create a temporary Dockerfile
+	dockerfile := fmt.Sprintf(`FROM %s
+
+# Install curl if not present (needed for Claude Code installer)
+RUN which curl || (apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/* || (apk add --no-cache curl 2>/dev/null || true))
+
+# Install Claude Code globally via npm if npm is available, otherwise use installer script
+RUN if which npm >/dev/null 2>&1; then \
+      npm install -g @anthropic-ai/claude-code; \
+    else \
+      curl -fsSL https://claude.ai/install.sh | sh; \
+    fi
+`, baseImage)
+
+	// Create temp directory for build context
+	tmpDir, err := os.MkdirTemp("", "ccells-build-*")
+	if err != nil {
+		return fmt.Errorf("failed to create temp dir: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Write Dockerfile
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	if err := os.WriteFile(dockerfilePath, []byte(dockerfile), 0644); err != nil {
+		return fmt.Errorf("failed to write Dockerfile: %w", err)
+	}
+
+	fmt.Fprintf(output, "Building enhanced image with Claude Code from %s...\n", baseImage)
+
+	// Build the image
+	args := []string{"build", "-t", targetImage, "-f", dockerfilePath, tmpDir}
 	cmd := exec.CommandContext(ctx, "docker", args...)
 
 	stdout, err := cmd.StdoutPipe()
@@ -286,5 +370,6 @@ func BuildProjectImage(ctx context.Context, projectPath string, cfg *Devcontaine
 		return fmt.Errorf("docker build failed: %w", err)
 	}
 
+	fmt.Fprintln(output, "Enhanced image built successfully!")
 	return nil
 }
