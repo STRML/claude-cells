@@ -2,6 +2,9 @@
 /ccells
 *.exe
 
+# State files
+.ccells-state.json
+
 # IDE
 .idea/
 .vscode/
