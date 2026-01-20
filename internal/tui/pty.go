@@ -142,6 +142,12 @@ if test -d "/home/claude/.claude" && test "$HOME" != "/home/claude"; then
   cp -r /home/claude/.claude/* "$HOME/.claude/" 2>/dev/null || true
 fi
 
+# Copy .claude.json (onboarding state, settings) if mounted at /home/claude
+if test -f "/home/claude/.claude.json" && test "$HOME" != "/home/claude"; then
+  echo "[ccells] Copying .claude.json from /home/claude..."
+  cp /home/claude/.claude.json "$HOME/.claude.json" 2>/dev/null || true
+fi
+
 mkdir -p "$HOME/.local/bin" 2>/dev/null
 test ! -f "$HOME/.local/bin/claude" && which claude >/dev/null 2>&1 && ln -sf "$(which claude)" "$HOME/.local/bin/claude" 2>/dev/null
 
