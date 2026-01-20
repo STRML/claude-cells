@@ -1037,16 +1037,24 @@ func (p *PaneModel) renderVTerm() (result string) {
 		return p.lastVtermRender
 	}
 
+	// Get cursor position and visibility
+	cursor := p.vterm.Cursor()
+	showCursor := p.focused && p.vterm.CursorVisible()
+
 	var lines []string
 	for row := 0; row < rows; row++ {
 		var line strings.Builder
 		var lastFG, lastBG vt10x.Color = vt10x.DefaultFG, vt10x.DefaultBG
+		var lastInverse bool
 
 		for col := 0; col < cols; col++ {
 			cell := p.vterm.Cell(col, row)
 
-			// Check if colors changed
-			if cell.FG != lastFG || cell.BG != lastBG {
+			// Check if this is the cursor position - apply inverse video
+			isCursor := showCursor && col == cursor.X && row == cursor.Y
+
+			// Check if colors or cursor state changed
+			if cell.FG != lastFG || cell.BG != lastBG || isCursor != lastInverse {
 				// Reset and apply new colors
 				line.WriteString("\x1b[0m") // Reset
 				if cell.FG != vt10x.DefaultFG {
@@ -1087,7 +1095,12 @@ func (p *PaneModel) renderVTerm() (result string) {
 						line.WriteString(fmt.Sprintf("\x1b[48;5;%dm", cell.BG))
 					}
 				}
+				// Apply inverse video for cursor
+				if isCursor {
+					line.WriteString("\x1b[7m") // Inverse video
+				}
 				lastFG, lastBG = cell.FG, cell.BG
+				lastInverse = isCursor
 			}
 
 			if cell.Char == 0 {
