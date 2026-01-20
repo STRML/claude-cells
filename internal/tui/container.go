@@ -684,11 +684,15 @@ func StartPTYCmd(ws *workstream.Workstream, initialPrompt string, width, height 
 			}
 		}
 
+		// Get host project path for session data copying
+		hostProjectPath, _ := os.Getwd()
+
 		// Build PTY options with terminal size
 		opts := &PTYOptions{
-			Width:    width,
-			Height:   height,
-			IsResume: isResume,
+			Width:           width,
+			Height:          height,
+			IsResume:        isResume,
+			HostProjectPath: hostProjectPath,
 		}
 
 		// Pass through ANTHROPIC_API_KEY if set (fallback for non-OAuth auth)
