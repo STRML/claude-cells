@@ -823,9 +823,23 @@ func (d DialogModel) View() string {
 			endLine = len(lines)
 		}
 
+		// Calculate content width: dialog width minus border (2) and padding (4)
+		contentWidth := d.width - 6
+		if contentWidth < 20 {
+			contentWidth = 20
+		}
+
 		if d.scrollOffset < len(lines) {
-			visibleContent := strings.Join(lines[d.scrollOffset:endLine], "\n")
-			content.WriteString(visibleContent)
+			// Truncate each line to fit the content width
+			var truncatedLines []string
+			for i := d.scrollOffset; i < endLine; i++ {
+				line := lines[i]
+				if len(line) > contentWidth {
+					line = line[:contentWidth-3] + "..."
+				}
+				truncatedLines = append(truncatedLines, line)
+			}
+			content.WriteString(strings.Join(truncatedLines, "\n"))
 		}
 		content.WriteString("\n\n")
 

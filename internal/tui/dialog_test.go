@@ -520,6 +520,25 @@ func TestLogDialog_View(t *testing.T) {
 	}
 }
 
+func TestLogDialog_LineTruncation(t *testing.T) {
+	// Create a log with a very long line
+	longLine := strings.Repeat("x", 200)
+	d := NewLogDialog("test-branch", longLine)
+	d.SetSize(80, 30) // Dialog width 80, content width = 80 - 6 = 74
+
+	view := d.View()
+
+	// The long line should be truncated with "..."
+	if !strings.Contains(view, "...") {
+		t.Error("Long lines should be truncated with '...'")
+	}
+
+	// The original 200-char line should NOT appear in full
+	if strings.Contains(view, longLine) {
+		t.Error("Long line should be truncated, not shown in full")
+	}
+}
+
 func TestNewProgressDialog(t *testing.T) {
 	d := NewProgressDialog("Pushing Branch", "Working on it...", "ws-123")
 
