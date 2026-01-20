@@ -27,8 +27,9 @@ const (
 	DialogPruneProjectConfirm
 	DialogCommitBeforeMerge
 	DialogResourceUsage
-	DialogPostMergeDestroy // Confirmation to destroy container after successful merge
-	DialogMergeConflict    // Merge failed due to conflicts - offer rebase
+	DialogPostMergeDestroy     // Confirmation to destroy container after successful merge
+	DialogMergeConflict        // Merge failed due to conflicts - offer rebase
+	DialogFirstRunIntroduction // First-run introduction modal
 )
 
 // DialogModel represents a modal dialog
@@ -280,6 +281,44 @@ func NewMergeConflictDialog(branchName, workstreamID string, conflictFiles []str
 	}
 }
 
+// NewFirstRunIntroductionDialog creates the first-run introduction dialog
+func NewFirstRunIntroductionDialog() DialogModel {
+	body := `Welcome to Claude Cells!
+
+Run parallel Claude Code instances in isolated Docker containers.
+
+NAVIGATION
+  NAV mode   Navigate between panes, create/destroy workstreams
+  INPUT mode Type directly into the focused pane (Claude)
+
+  Press [i] or click a pane to enter INPUT mode
+  Press [Esc] twice quickly to return to NAV mode
+
+KEYBOARD SHORTCUTS (NAV mode)
+  [n]        New workstream      [d]        Destroy workstream
+  [←/→]      Switch pane         [m]        Merge/PR options
+  [l]        View logs           [p]        Toggle pairing mode
+  [?]        Help                [q]        Quit (containers pause)
+
+TMUX-STYLE SHORTCUTS (INPUT mode)
+  [Ctrl+B] then...
+  [Esc]      Return to NAV mode
+  [←/→]      Switch pane
+  [n]        New workstream
+  [d]        Destroy
+
+PAIRING MODE
+  Sync your local editor with a container for real-time collaboration.
+
+For more details: https://github.com/STRML/claude-cells`
+
+	return DialogModel{
+		Type:  DialogFirstRunIntroduction,
+		Title: "Getting Started",
+		Body:  body,
+	}
+}
+
 // NewSettingsDialog creates a settings menu dialog
 func NewSettingsDialog(containerCount int, projectName string) DialogModel {
 	body := fmt.Sprintf("Containers managed by ccells: %d\n", containerCount)
@@ -488,6 +527,12 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 			if d.Type == DialogLog {
 				return d, func() tea.Msg { return DialogCancelMsg{} }
 			}
+			// First-run introduction dialog dismisses on enter
+			if d.Type == DialogFirstRunIntroduction {
+				return d, func() tea.Msg {
+					return DialogConfirmMsg{Type: d.Type}
+				}
+			}
 			// Resource usage dialog dismisses on enter
 			if d.Type == DialogResourceUsage {
 				return d, func() tea.Msg { return DialogCancelMsg{} }
@@ -641,8 +686,8 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				return d, nil
 			}
 		case "up", "k":
-			// Handle log dialog scrolling
-			if d.Type == DialogLog {
+			// Handle scrollable dialog scrolling
+			if d.Type == DialogLog || d.Type == DialogFirstRunIntroduction {
 				if d.scrollOffset > 0 {
 					d.scrollOffset--
 				}
@@ -656,8 +701,8 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				return d, nil
 			}
 		case "down", "j":
-			// Handle log dialog scrolling
-			if d.Type == DialogLog {
+			// Handle scrollable dialog scrolling
+			if d.Type == DialogLog || d.Type == DialogFirstRunIntroduction {
 				if d.scrollOffset < d.scrollMax {
 					d.scrollOffset++
 				}
@@ -671,8 +716,8 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				return d, nil
 			}
 		case "pgup", "ctrl+u":
-			// Page up for log dialog
-			if d.Type == DialogLog {
+			// Page up for scrollable dialogs
+			if d.Type == DialogLog || d.Type == DialogFirstRunIntroduction {
 				visibleLines := d.height - 8
 				if visibleLines < 5 {
 					visibleLines = 5
@@ -684,8 +729,8 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				return d, nil
 			}
 		case "pgdown", "ctrl+d":
-			// Page down for log dialog
-			if d.Type == DialogLog {
+			// Page down for scrollable dialogs
+			if d.Type == DialogLog || d.Type == DialogFirstRunIntroduction {
 				visibleLines := d.height - 8
 				if visibleLines < 5 {
 					visibleLines = 5
@@ -697,22 +742,22 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				return d, nil
 			}
 		case "home", "g":
-			// Go to top for log dialog
-			if d.Type == DialogLog {
+			// Go to top for scrollable dialogs
+			if d.Type == DialogLog || d.Type == DialogFirstRunIntroduction {
 				d.scrollOffset = 0
 				return d, nil
 			}
 		case "end", "G":
-			// Go to bottom for log dialog
-			if d.Type == DialogLog {
+			// Go to bottom for scrollable dialogs
+			if d.Type == DialogLog || d.Type == DialogFirstRunIntroduction {
 				d.scrollOffset = d.scrollMax
 				return d, nil
 			}
 		}
 	}
 
-	// For menu-style, log, progress, and resource dialogs, don't pass keys to input
-	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogLog || d.Type == DialogProgress || d.Type == DialogResourceUsage {
+	// For menu-style, log, progress, resource, and introduction dialogs, don't pass keys to input
+	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogLog || d.Type == DialogProgress || d.Type == DialogResourceUsage || d.Type == DialogFirstRunIntroduction {
 		return d, nil
 	}
 
@@ -802,6 +847,33 @@ func (d DialogModel) View() string {
 		return DialogBox.Width(d.width).Render(content.String())
 	}
 
+	// First-run introduction dialog renders scrollable content
+	if d.Type == DialogFirstRunIntroduction {
+		lines := strings.Split(d.Body, "\n")
+		visibleLines := d.height - 8 // Account for title, padding, hints
+		if visibleLines < 5 {
+			visibleLines = 5
+		}
+
+		endLine := d.scrollOffset + visibleLines
+		if endLine > len(lines) {
+			endLine = len(lines)
+		}
+
+		if d.scrollOffset < len(lines) {
+			visibleContent := strings.Join(lines[d.scrollOffset:endLine], "\n")
+			content.WriteString(visibleContent)
+		}
+		content.WriteString("\n\n")
+
+		// Footer with scroll hints if content is scrollable
+		if d.scrollMax > 0 {
+			content.WriteString(KeyHint("↑↓", " scroll") + "  ")
+		}
+		content.WriteString(KeyHint("Enter", " continue"))
+		return DialogBox.Width(d.width).Render(content.String())
+	}
+
 	content.WriteString(d.Body)
 	content.WriteString("\n\n")
 
@@ -858,8 +930,8 @@ func (d *DialogModel) SetSize(width, height int) {
 		d.TextArea.SetWidth(textareaWidth)
 	}
 
-	// Recalculate scrollMax for log dialogs based on actual visible lines
-	if d.Type == DialogLog {
+	// Recalculate scrollMax for scrollable dialogs based on actual visible lines
+	if d.Type == DialogLog || d.Type == DialogFirstRunIntroduction {
 		lines := strings.Split(d.Body, "\n")
 		visibleLines := height - 8 // Account for title, padding, hints
 		if visibleLines < 5 {
