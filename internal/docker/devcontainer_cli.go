@@ -54,8 +54,13 @@ Or with Homebrew (macOS):
 // Uses a per-image lock to prevent concurrent builds of the same image.
 func BuildWithDevcontainerCLI(ctx context.Context, projectPath string, output io.Writer) (string, error) {
 	// Generate intermediate image name (will be enhanced with Claude Code later)
+	// The project image name has format "name:tag", insert "-base" before the tag
 	baseImageName := generateProjectImageName(projectPath)
-	baseImageName = strings.TrimSuffix(baseImageName, ":latest") + "-base:latest"
+	if colonIdx := strings.LastIndex(baseImageName, ":"); colonIdx >= 0 {
+		baseImageName = baseImageName[:colonIdx] + "-base" + baseImageName[colonIdx:]
+	} else {
+		baseImageName = baseImageName + "-base:latest"
+	}
 
 	// Acquire build lock for this image
 	unlock := acquireBuildLock(baseImageName)
