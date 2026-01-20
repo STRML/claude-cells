@@ -678,8 +678,9 @@ func TestWorkstreamDialog_TextAreaWidthUpdatesOnSetSize(t *testing.T) {
 	// Set dialog size to 70 (as used in app.go)
 	d.SetSize(70, 15)
 
-	// TextArea width should be dialog width - 12 (for borders and padding)
-	expectedWidth := 70 - 12
+	// TextArea width should be dialog width - 14 (for borders and padding)
+	// See SetSize() comment for breakdown: inputStyle inner = width - 14
+	expectedWidth := 70 - 14
 	actualWidth := d.TextArea.Width()
 	if actualWidth != expectedWidth {
 		t.Errorf("TextArea width should be %d after SetSize(70, 15), got %d", expectedWidth, actualWidth)
@@ -704,11 +705,11 @@ func TestWorkstreamDialog_TextAreaWidthVarious(t *testing.T) {
 		dialogWidth      int
 		expectedMinWidth int
 	}{
-		{50, 38},  // 50 - 12 = 38
-		{60, 48},  // 60 - 12 = 48
-		{70, 58},  // 70 - 12 = 58
-		{80, 68},  // 80 - 12 = 68
-		{100, 88}, // 100 - 12 = 88
+		{50, 36},  // 50 - 14 = 36
+		{60, 46},  // 60 - 14 = 46
+		{70, 56},  // 70 - 14 = 56
+		{80, 66},  // 80 - 14 = 66
+		{100, 86}, // 100 - 14 = 86
 	}
 
 	for _, tc := range testCases {

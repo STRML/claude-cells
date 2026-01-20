@@ -1038,10 +1038,12 @@ func (d *DialogModel) SetSize(width, height int) {
 	d.width = width
 	d.height = height
 
-	// Update textarea width to match dialog content area
-	// Account for dialog box padding (4 on each side = 8) and input style padding (2)
+	// Update textarea width to match the inputStyle container's inner content area
+	// In View(), inputStyle = DialogInputFocused.Width(d.width - 10)
+	// DialogInputFocused has border (2) + padding (2) = 4 total horizontal overhead
+	// So inputStyle inner width = (width - 10) - 4 = width - 14
 	if d.useTextArea {
-		textareaWidth := width - 12
+		textareaWidth := width - 14
 		if textareaWidth < 20 {
 			textareaWidth = 20
 		}
