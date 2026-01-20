@@ -864,7 +864,12 @@ func (p PaneModel) View() string {
 		outputView = greyStyle.Render(outputView)
 	} else if !p.focused {
 		// Unfocused panes: muted colors (very desaturated, dimmed)
+		// First mute any explicit ANSI colors
 		outputView = muteANSI(outputView, 0.25, 0.6)
+		// Apply muted default foreground for text without explicit colors
+		// (terminal default colors like user's green-on-black aren't in ANSI codes)
+		mutedDefaultStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMidGrey))
+		outputView = mutedDefaultStyle.Render(outputView)
 	}
 
 	// Overlay fading title during initialization (after container starts)
