@@ -699,14 +699,8 @@ Scroll Mode:
 		m.dialog = nil
 		switch msg.Type {
 		case DialogNewWorkstream:
-			// Collect existing branch names to ensure uniqueness
-			var existingBranches []string
-			for _, pane := range m.panes {
-				existingBranches = append(existingBranches, pane.Workstream().BranchName)
-			}
-
-			// Create new workstream with unique branch name
-			ws := workstream.NewWithUniqueBranch(msg.Value, existingBranches)
+			// Create new workstream for summarizing (branch name derived from title later)
+			ws := workstream.NewForSummarizing(msg.Value)
 			if err := m.manager.Add(ws); err != nil {
 				m.toast = fmt.Sprintf("Cannot create workstream: %v", err)
 				m.toastExpiry = time.Now().Add(toastDuration * 2)
@@ -715,8 +709,7 @@ Scroll Mode:
 			pane := NewPaneModel(ws)
 			pane.SetIndex(m.nextPaneIndex) // Assign permanent index
 			m.nextPaneIndex++
-			pane.SetInitializing(true)
-			pane.SetInitStatus("Starting container...")
+			pane.SetSummarizing(true) // Start with summarizing animation
 			m.panes = append(m.panes, pane)
 			m.updateLayout()
 			// Focus the new pane
@@ -725,8 +718,8 @@ Scroll Mode:
 			}
 			m.focusedPane = len(m.panes) - 1
 			m.panes[m.focusedPane].SetFocused(true)
-			// Start container and title generation asynchronously, plus spinner animation
-			return m, tea.Batch(StartContainerCmd(ws), GenerateTitleCmd(ws), spinnerTickCmd())
+			// Generate title first (container starts after title is ready)
+			return m, tea.Batch(GenerateTitleCmd(ws), spinnerTickCmd())
 
 		case DialogDestroy:
 			// Destroy workstream
@@ -853,13 +846,46 @@ Scroll Mode:
 		return m, nil
 
 	case TitleGeneratedMsg:
-		// Title generated via Claude CLI - update workstream
+		// Title generated via Claude CLI - update workstream and start container immediately
 		for i := range m.panes {
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
-				if msg.Error == nil && msg.Title != "" {
-					m.panes[i].Workstream().SetTitle(msg.Title)
+				ws := m.panes[i].Workstream()
+
+				// Determine the title to use
+				title := msg.Title
+				if msg.Error != nil || title == "" {
+					// Fallback to generating from prompt if title generation failed
+					title = ws.Prompt
+					if len(title) > 50 {
+						title = title[:47] + "..."
+					}
 				}
-				// Silently ignore errors - fallback to branch name is fine
+
+				// Set the title
+				ws.SetTitle(title)
+
+				// If pane is summarizing, derive branch name and start container immediately
+				if m.panes[i].IsSummarizing() {
+					// Collect existing branch names for uniqueness
+					var existingBranches []string
+					for _, pane := range m.panes {
+						if bn := pane.Workstream().BranchName; bn != "" {
+							existingBranches = append(existingBranches, bn)
+						}
+					}
+					// Derive branch name from the generated title
+					ws.SetBranchNameFromTitle(title, existingBranches)
+
+					// Set title and start fading animation immediately
+					m.panes[i].SetSummarizeTitle(title)
+					m.panes[i].StartSummarizeFade()
+
+					// Start container immediately (don't wait for animation)
+					m.panes[i].SetInitializing(true)
+					m.panes[i].SetInitStatus("Starting container...")
+
+					return m, StartContainerCmd(ws)
+				}
 				break
 			}
 		}
@@ -962,13 +988,29 @@ Scroll Mode:
 		return m, nil
 
 	case spinnerTickMsg:
-		// Animate spinner for any initializing panes and check for timeout
-		anyInitializing := false
+		// Animate spinner for any initializing or summarizing panes
+		anyAnimating := false
 		var cmds []tea.Cmd
 		for i := range m.panes {
+			// Handle summarizing panes (waiting for title generation)
+			if m.panes[i].IsSummarizing() && !m.panes[i].IsSummarizeFading() {
+				m.panes[i].TickSpinner()
+				anyAnimating = true
+			}
+
+			// Handle fading overlay (runs alongside initialization)
+			if m.panes[i].IsSummarizeFading() {
+				anyAnimating = true
+				// Check if fade is complete
+				if m.panes[i].ShouldFinishFade() {
+					m.panes[i].SummarizeComplete()
+				}
+			}
+
+			// Handle initializing panes
 			if m.panes[i].IsInitializing() {
 				m.panes[i].TickSpinner()
-				anyInitializing = true
+				anyAnimating = true
 
 				// Check for initialization timeout
 				if m.panes[i].InitTimedOut() {
@@ -985,8 +1027,8 @@ Scroll Mode:
 				}
 			}
 		}
-		// Continue ticking if any pane is still initializing
-		if anyInitializing {
+		// Continue ticking if any pane is still animating
+		if anyAnimating {
 			cmds = append(cmds, spinnerTickCmd())
 		}
 		if len(cmds) > 0 {
@@ -1682,6 +1724,25 @@ func (m AppModel) overlayDialog(background string) string {
 
 	x := (m.width - dialogWidth) / 2
 	y := (m.height - dialogHeight) / 2
+
+	// For destroy dialogs, position over the target pane
+	if m.dialog.Type == DialogDestroy && m.dialog.WorkstreamID != "" {
+		// Find the pane with this workstream
+		titleBarHeight := 1
+		statusBarHeight := 1
+		availableHeight := m.height - titleBarHeight - statusBarHeight
+		bounds := CalculatePaneBounds(m.layout, len(m.panes), m.width, availableHeight, titleBarHeight)
+
+		for i, pane := range m.panes {
+			if pane.Workstream().ID == m.dialog.WorkstreamID && i < len(bounds) {
+				// Center dialog within this pane's bounds
+				paneBounds := bounds[i]
+				x = paneBounds.X + (paneBounds.Width-dialogWidth)/2
+				y = paneBounds.Y + (paneBounds.Height-dialogHeight)/2
+				break
+			}
+		}
+	}
 
 	if x < 0 {
 		x = 0

@@ -96,6 +96,28 @@ func NewWithID(id, branchName, prompt string) *Workstream {
 	}
 }
 
+// NewForSummarizing creates a workstream that's waiting for title generation.
+// The branch name will be derived from the generated title later.
+func NewForSummarizing(prompt string) *Workstream {
+	now := time.Now()
+	id := idCounter.Add(1)
+	return &Workstream{
+		ID:           fmt.Sprintf("%d-%d", now.UnixNano(), id),
+		Prompt:       prompt,
+		BranchName:   "", // Will be set after title generation
+		State:        StateStarting,
+		CreatedAt:    now,
+		LastActivity: now,
+	}
+}
+
+// SetBranchNameFromTitle derives and sets a unique branch name from the generated title.
+func (w *Workstream) SetBranchNameFromTitle(title string, existingBranches []string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.BranchName = GenerateUniqueBranchName(title, existingBranches)
+}
+
 // SetState updates the workstream state.
 func (w *Workstream) SetState(state State) {
 	w.mu.Lock()

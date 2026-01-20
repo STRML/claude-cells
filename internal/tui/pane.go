@@ -26,6 +26,16 @@ func stripANSI(s string) string {
 	return ansiRegex.ReplaceAllString(s, "")
 }
 
+// SummarizePhase represents the animation phase during title generation
+type SummarizePhase int
+
+const (
+	SummarizePhasePrompt   SummarizePhase = iota // Showing prompt with spinner
+	SummarizePhaseReveal                         // Title revealed, brief highlight
+	SummarizePhaseFading                         // Title fading out over initialization
+	SummarizePhaseDone                           // Animation complete
+)
+
 // PaneModel represents a single workstream pane
 type PaneModel struct {
 	workstream      *workstream.Workstream
@@ -53,6 +63,13 @@ type PaneModel struct {
 	fading        bool      // True when fade animation is in progress
 	fadeStartTime time.Time // When fade started
 	fadeProgress  float64   // Progress from 0.0 to 1.0
+
+	// Summarizing state (before container creation)
+	summarizing        bool           // True while generating title
+	summarizeStart     time.Time      // When summarization/fading started
+	summarizePhase     SummarizePhase // Current animation phase
+	summarizeTitle     string         // Generated title (set when ready)
+	summarizeFadeEndAt time.Time      // When fading overlay should disappear
 }
 
 // Width returns the pane width
@@ -182,6 +199,63 @@ func (p *PaneModel) SetInitStatus(status string) {
 // IsInitializing returns true if the pane is still initializing
 func (p *PaneModel) IsInitializing() bool {
 	return p.initializing
+}
+
+// IsSummarizing returns true if the pane is generating a title
+func (p *PaneModel) IsSummarizing() bool {
+	return p.summarizing
+}
+
+// SetSummarizing starts the summarizing animation
+func (p *PaneModel) SetSummarizing(summarizing bool) {
+	p.summarizing = summarizing
+	if summarizing {
+		p.summarizeStart = time.Now()
+		p.summarizePhase = SummarizePhasePrompt
+		p.summarizeTitle = ""
+	}
+}
+
+// SetSummarizeTitle sets the generated title
+func (p *PaneModel) SetSummarizeTitle(title string) {
+	p.summarizeTitle = title
+}
+
+// StartSummarizeFade starts the fading animation (called when container starts)
+func (p *PaneModel) StartSummarizeFade() {
+	p.summarizePhase = SummarizePhaseFading
+	p.summarizeStart = time.Now()                          // Reset start time for fade progress
+	p.summarizeFadeEndAt = time.Now().Add(4 * time.Second) // Fade out over 4 seconds
+}
+
+// SummarizeComplete marks summarization as done and returns the title
+func (p *PaneModel) SummarizeComplete() string {
+	p.summarizing = false
+	p.summarizePhase = SummarizePhaseDone
+	return p.summarizeTitle
+}
+
+// IsSummarizeFading returns true if in the fading phase
+func (p *PaneModel) IsSummarizeFading() bool {
+	return p.summarizePhase == SummarizePhaseFading
+}
+
+// SummarizeFadeProgress returns 0.0-1.0 progress through the fade (1.0 = fully faded)
+func (p *PaneModel) SummarizeFadeProgress() float64 {
+	if p.summarizePhase != SummarizePhaseFading {
+		return 0
+	}
+	total := p.summarizeFadeEndAt.Sub(p.summarizeStart)
+	elapsed := time.Since(p.summarizeStart)
+	if elapsed >= total {
+		return 1.0
+	}
+	return float64(elapsed) / float64(total)
+}
+
+// ShouldFinishFade returns true if the fading phase is complete
+func (p *PaneModel) ShouldFinishFade() bool {
+	return p.summarizePhase == SummarizePhaseFading && time.Now().After(p.summarizeFadeEndAt)
 }
 
 // TickSpinner advances the spinner animation
@@ -428,8 +502,136 @@ func (p PaneModel) View() string {
 
 	outputView := p.viewport.View()
 
-	// Show spinner overlay while initializing
-	if p.initializing {
+	// Show summarizing animation (before container creation)
+	if p.summarizing {
+		viewportHeight := p.height - 4
+		viewportWidth := p.width - 4
+		if viewportHeight > 0 && viewportWidth > 0 {
+			// Create empty background
+			emptyLine := strings.Repeat(" ", viewportWidth)
+			lines := make([]string, viewportHeight)
+			for i := range lines {
+				lines[i] = emptyLine
+			}
+
+			centerY := viewportHeight / 2
+
+			switch p.summarizePhase {
+			case SummarizePhasePrompt:
+				// Show prompt with "Summarizing..." and spinner
+				spinnerChars := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+				spinner := spinnerChars[p.spinnerFrame%len(spinnerChars)]
+
+				// Spinner line
+				spinnerStyle := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#A855F7")).
+					Bold(true)
+				labelStyle := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#888888"))
+				spinnerText := spinnerStyle.Render(spinner) + " " + labelStyle.Render("Summarizing...")
+				spinnerX := (viewportWidth - lipgloss.Width(spinnerText)) / 2
+				if spinnerX < 0 {
+					spinnerX = 0
+				}
+				if centerY-2 >= 0 && centerY-2 < len(lines) {
+					lines[centerY-2] = strings.Repeat(" ", spinnerX) + spinnerText
+				}
+
+				// Prompt text (truncate if too long)
+				prompt := p.workstream.Prompt
+				if prompt == "" {
+					prompt = "..."
+				}
+				// Wrap prompt to fit width with some margin
+				maxPromptWidth := viewportWidth - 8
+				if maxPromptWidth < 20 {
+					maxPromptWidth = 20
+				}
+				promptStyle := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#CCCCCC")).
+					Italic(true).
+					Width(maxPromptWidth).
+					Align(lipgloss.Center)
+				promptRendered := promptStyle.Render(prompt)
+				promptLines := strings.Split(promptRendered, "\n")
+
+				// Render prompt lines centered
+				startY := centerY
+				for i, pLine := range promptLines {
+					if startY+i >= 0 && startY+i < len(lines) {
+						lineWidth := lipgloss.Width(pLine)
+						promptX := (viewportWidth - lineWidth) / 2
+						if promptX < 0 {
+							promptX = 0
+						}
+						lines[startY+i] = strings.Repeat(" ", promptX) + pLine
+					}
+				}
+
+			case SummarizePhaseReveal:
+				// Fade the prompt, show the title with highlight
+				titleStyle := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#22C55E")).
+					Bold(true)
+				title := p.summarizeTitle
+				if title == "" {
+					title = "Untitled"
+				}
+
+				// "Title generated" label
+				labelStyle := lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#666666"))
+				labelText := labelStyle.Render("✓ Title generated")
+				labelX := (viewportWidth - lipgloss.Width(labelText)) / 2
+				if labelX < 0 {
+					labelX = 0
+				}
+				if centerY-1 >= 0 && centerY-1 < len(lines) {
+					lines[centerY-1] = strings.Repeat(" ", labelX) + labelText
+				}
+
+				// Title with highlight
+				titleText := titleStyle.Render(title)
+				titleX := (viewportWidth - lipgloss.Width(titleText)) / 2
+				if titleX < 0 {
+					titleX = 0
+				}
+				if centerY+1 >= 0 && centerY+1 < len(lines) {
+					lines[centerY+1] = strings.Repeat(" ", titleX) + titleText
+				}
+
+				// Faded prompt below
+				prompt := p.workstream.Prompt
+				if prompt != "" {
+					maxPromptWidth := viewportWidth - 8
+					if maxPromptWidth < 20 {
+						maxPromptWidth = 20
+					}
+					promptStyle := lipgloss.NewStyle().
+						Foreground(lipgloss.Color("#444444")). // Very faded
+						Italic(true).
+						Width(maxPromptWidth).
+						Align(lipgloss.Center)
+					promptRendered := promptStyle.Render(prompt)
+					promptLines := strings.Split(promptRendered, "\n")
+
+					startY := centerY + 3
+					for i, pLine := range promptLines {
+						if startY+i >= 0 && startY+i < len(lines) && i < 2 { // Only show first 2 lines
+							lineWidth := lipgloss.Width(pLine)
+							promptX := (viewportWidth - lineWidth) / 2
+							if promptX < 0 {
+								promptX = 0
+							}
+							lines[startY+i] = strings.Repeat(" ", promptX) + pLine
+						}
+					}
+				}
+			}
+
+			outputView = strings.Join(lines, "\n")
+		}
+	} else if p.initializing {
 		// Grey out the output
 		outputView = stripANSI(outputView)
 		greyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorDarkGrey))
@@ -500,6 +702,55 @@ func (p PaneModel) View() string {
 		outputView = stripANSI(outputView)
 		greyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorMidGrey))
 		outputView = greyStyle.Render(outputView)
+	}
+
+	// Overlay fading title during initialization (after container starts)
+	if p.IsSummarizeFading() && p.summarizeTitle != "" {
+		viewportHeight := p.height - 4
+		viewportWidth := p.width - 4
+		if viewportHeight > 0 && viewportWidth > 0 {
+			lines := strings.Split(outputView, "\n")
+
+			// Calculate fade: start at full green, fade to grey, then invisible
+			progress := p.SummarizeFadeProgress()
+			var titleColor string
+			if progress < 0.5 {
+				// First half: bright green
+				titleColor = "#22C55E"
+			} else if progress < 0.75 {
+				// Middle: fade to grey
+				titleColor = "#666666"
+			} else {
+				// Last quarter: very dim before disappearing
+				titleColor = "#444444"
+			}
+
+			titleStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color(titleColor)).
+				Bold(progress < 0.5) // Only bold in first half
+
+			title := p.summarizeTitle
+			titleText := titleStyle.Render(title)
+
+			// Position vertically centered
+			titleY := viewportHeight / 2
+			titleX := (viewportWidth - lipgloss.Width(titleText)) / 2
+			if titleX < 0 {
+				titleX = 0
+			}
+
+			// Ensure we have enough lines
+			for len(lines) <= titleY {
+				lines = append(lines, strings.Repeat(" ", viewportWidth))
+			}
+
+			if titleY >= 0 && titleY < len(lines) {
+				// Overlay title on the line
+				lines[titleY] = strings.Repeat(" ", titleX) + titleText
+			}
+
+			outputView = strings.Join(lines, "\n")
+		}
 	}
 
 	// Input (only show when focused and no PTY)

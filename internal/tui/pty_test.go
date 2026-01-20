@@ -509,7 +509,7 @@ func TestEscapeShellArg_EdgeCases(t *testing.T) {
 		{"only newlines", "\n\n\n", `\n\n\n`},
 		{"unicode", "hello 世界", "hello 世界"},
 		{"emoji", "hello 🎉", "hello 🎉"},
-		{"nested quotes", `"'"`, `\"\'\"` + ``},
+		{"nested quotes", `"'"`, `\"'\"`},
 		{"shell command injection", "$(rm -rf /)", `\$(rm -rf /)`},
 		{"complex injection", "`rm -rf /`; echo pwned", "\\`rm -rf /\\`; echo pwned"},
 		{"path traversal", "../../../etc/passwd", "../../../etc/passwd"},

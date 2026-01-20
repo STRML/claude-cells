@@ -49,24 +49,26 @@ Or with Homebrew (macOS):
 
 // BuildWithDevcontainerCLI builds a container image using the devcontainer CLI.
 // This properly processes devcontainer.json including features.
-// Returns the image ID/name on success.
+// Returns the intermediate image name (without Claude Code) on success.
+// The caller should then use BuildEnhancedImage to add Claude Code.
 // Uses a per-image lock to prevent concurrent builds of the same image.
 func BuildWithDevcontainerCLI(ctx context.Context, projectPath string, output io.Writer) (string, error) {
-	// Generate image name based on project
-	imageName := generateProjectImageName(projectPath)
+	// Generate intermediate image name (will be enhanced with Claude Code later)
+	baseImageName := generateProjectImageName(projectPath)
+	baseImageName = strings.TrimSuffix(baseImageName, ":latest") + "-base:latest"
 
 	// Acquire build lock for this image
-	unlock := acquireBuildLock(imageName)
+	unlock := acquireBuildLock(baseImageName)
 	defer unlock()
 
 	// Check if image was built while we waited for the lock
 	client, err := NewClient()
 	if err == nil {
-		exists, _ := client.ImageExists(ctx, imageName)
+		exists, _ := client.ImageExists(ctx, baseImageName)
 		client.Close()
 		if exists {
-			fmt.Fprintln(output, "Image already built by another workstream")
-			return imageName, nil
+			fmt.Fprintln(output, "Base image already built by another workstream")
+			return baseImageName, nil
 		}
 	}
 
@@ -74,7 +76,7 @@ func BuildWithDevcontainerCLI(ctx context.Context, projectPath string, output io
 	args := []string{
 		"build",
 		"--workspace-folder", projectPath,
-		"--image-name", imageName,
+		"--image-name", baseImageName,
 	}
 
 	cmd := exec.CommandContext(ctx, "devcontainer", args...)
@@ -99,7 +101,7 @@ func BuildWithDevcontainerCLI(ctx context.Context, projectPath string, output io
 		return "", fmt.Errorf("devcontainer build failed: %w", err)
 	}
 
-	return imageName, nil
+	return baseImageName, nil
 }
 
 // HasDevcontainerConfig checks if the project has a devcontainer.json
