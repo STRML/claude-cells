@@ -214,6 +214,50 @@ func TestContainerConfig(t *testing.T) {
 	}
 }
 
+// TestGetHostTimezone tests the timezone detection function.
+func TestGetHostTimezone(t *testing.T) {
+	// This test verifies GetHostTimezone doesn't crash and returns sensible values.
+	// The actual timezone depends on the host system's configuration.
+	tz := GetHostTimezone()
+
+	// GetHostTimezone can return empty string if timezone cannot be determined
+	if tz == "" {
+		t.Log("No timezone detected on this system (TZ env not set and /etc/localtime not a symlink to zoneinfo)")
+		return
+	}
+
+	// Verify it looks like a valid timezone (contains / for region/city format)
+	// e.g., "America/New_York", "Europe/London", "UTC"
+	t.Logf("Detected timezone: %q", tz)
+
+	// Most timezones have the format Region/City, but some like "UTC" are single words
+	// Just verify it's not suspiciously short or containing path separators beyond the timezone format
+	if len(tz) < 2 {
+		t.Errorf("Timezone %q seems too short to be valid", tz)
+	}
+}
+
+// TestGetHostTimezoneFromEnv tests that TZ env var takes precedence.
+func TestGetHostTimezoneFromEnv(t *testing.T) {
+	// Save and restore original TZ
+	originalTZ := os.Getenv("TZ")
+	defer func() {
+		if originalTZ == "" {
+			os.Unsetenv("TZ")
+		} else {
+			os.Setenv("TZ", originalTZ)
+		}
+	}()
+
+	// Set TZ environment variable
+	os.Setenv("TZ", "America/Los_Angeles")
+
+	tz := GetHostTimezone()
+	if tz != "America/Los_Angeles" {
+		t.Errorf("GetHostTimezone() = %q, want %q", tz, "America/Los_Angeles")
+	}
+}
+
 // TestGetGitIdentity tests the git identity detection function.
 func TestGetGitIdentity(t *testing.T) {
 	// This test verifies GetGitIdentity doesn't crash and returns sensible values.

@@ -35,6 +35,7 @@ type ContainerConfig struct {
 	GitConfig   string            // Path to ~/.gitconfig file on host (git identity)
 	GitIdentity *GitIdentity      // Git user identity (name/email) for commits
 	Credentials string            // Path to credentials file (OAuth tokens from keychain)
+	Timezone    string            // Host timezone (e.g., "America/New_York") for consistent commit timestamps
 	ExtraEnv    map[string]string // Additional environment variables from devcontainer.json
 	ExtraMounts []mount.Mount     // Additional mounts from devcontainer.json
 
@@ -84,6 +85,12 @@ func (c *Client) CreateContainer(ctx context.Context, cfg *ContainerConfig) (str
 			env = append(env, fmt.Sprintf("GIT_AUTHOR_EMAIL=%s", cfg.GitIdentity.Email))
 			env = append(env, fmt.Sprintf("GIT_COMMITTER_EMAIL=%s", cfg.GitIdentity.Email))
 		}
+	}
+
+	// Add timezone environment variable if provided
+	// This ensures commits have the same timezone as the host
+	if cfg.Timezone != "" {
+		env = append(env, fmt.Sprintf("TZ=%s", cfg.Timezone))
 	}
 
 	containerCfg := &container.Config{

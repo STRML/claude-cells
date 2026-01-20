@@ -39,6 +39,33 @@ type GitIdentity struct {
 	Email string
 }
 
+// GetHostTimezone returns the host's timezone name (e.g., "America/New_York").
+// This is used to ensure container commits have the same timezone as the host.
+// Returns empty string if timezone cannot be determined.
+func GetHostTimezone() string {
+	// First check TZ environment variable
+	if tz := os.Getenv("TZ"); tz != "" {
+		return tz
+	}
+
+	// On macOS/Linux, /etc/localtime is typically a symlink to a timezone file
+	// like /var/db/timezone/zoneinfo/America/New_York (macOS)
+	// or /usr/share/zoneinfo/America/New_York (Linux)
+	target, err := filepath.EvalSymlinks("/etc/localtime")
+	if err != nil {
+		return ""
+	}
+
+	// Extract timezone name from path
+	// Look for "zoneinfo/" and take everything after it
+	const marker = "zoneinfo/"
+	if idx := strings.Index(target, marker); idx != -1 {
+		return target[idx+len(marker):]
+	}
+
+	return ""
+}
+
 // GetGitIdentity reads the user's git identity from the host system.
 // It first tries git config --global, then falls back to git config (local).
 // Returns nil if no identity is configured.

@@ -438,6 +438,7 @@ func RebuildContainerCmd(ws *workstream.Workstream) tea.Cmd {
 		cfg.GitConfig = configPaths.GitConfig
 		cfg.GitIdentity = docker.GetGitIdentity()
 		cfg.Credentials = configPaths.Credentials
+		cfg.Timezone = docker.GetHostTimezone()
 
 		containerID, err := dockerClient.CreateContainer(ctx, cfg)
 		if err != nil {
@@ -726,6 +727,7 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 		cfg.GitConfig = configPaths.GitConfig
 		cfg.GitIdentity = docker.GetGitIdentity()
 		cfg.Credentials = configPaths.Credentials
+		cfg.Timezone = docker.GetHostTimezone()
 
 		// Create container
 		containerID, err := dockerClient.CreateContainer(ctx, cfg)
