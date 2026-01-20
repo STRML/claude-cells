@@ -10,7 +10,29 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 )
+
+// buildLocks manages per-image build locks to prevent concurrent builds
+var (
+	buildLocksMu sync.Mutex
+	buildLocks   = make(map[string]*sync.Mutex)
+)
+
+// acquireBuildLock gets or creates a lock for a specific image and acquires it.
+// Returns a function to release the lock.
+func acquireBuildLock(imageName string) func() {
+	buildLocksMu.Lock()
+	lock, ok := buildLocks[imageName]
+	if !ok {
+		lock = &sync.Mutex{}
+		buildLocks[imageName] = lock
+	}
+	buildLocksMu.Unlock()
+
+	lock.Lock()
+	return lock.Unlock
+}
 
 // DevcontainerConfig represents the parsed devcontainer.json configuration.
 type DevcontainerConfig struct {
@@ -256,12 +278,28 @@ func (cfg *DevcontainerConfig) ResolveDockerfilePath(projectPath string) (string
 
 // BuildProjectImage builds a Docker image from the devcontainer configuration.
 // The output writer receives build progress output.
+// Uses a per-image lock to prevent concurrent builds of the same image.
 func BuildProjectImage(ctx context.Context, projectPath string, cfg *DevcontainerConfig, output io.Writer) error {
 	if cfg == nil {
 		return fmt.Errorf("no devcontainer configuration provided")
 	}
 
 	imageName := generateProjectImageName(projectPath)
+
+	// Acquire build lock for this image
+	unlock := acquireBuildLock(imageName)
+	defer unlock()
+
+	// Check if image was built while we waited for the lock
+	client, err := NewClient()
+	if err == nil {
+		exists, _ := client.ImageExists(ctx, imageName)
+		client.Close()
+		if exists {
+			fmt.Fprintln(output, "Image already built by another workstream")
+			return nil
+		}
+	}
 
 	// If we have a build config with Dockerfile, use it
 	if cfg.Build != nil && cfg.Build.Dockerfile != "" {
@@ -316,7 +354,23 @@ func BuildProjectImage(ctx context.Context, projectPath string, cfg *Devcontaine
 
 // BuildEnhancedImage builds a derived image from a base image with Claude Code pre-installed.
 // This allows containers to start faster since Claude Code is already available.
+// Uses a per-image lock to prevent concurrent builds of the same image.
 func BuildEnhancedImage(ctx context.Context, baseImage, targetImage string, output io.Writer) error {
+	// Acquire build lock for this image
+	unlock := acquireBuildLock(targetImage)
+	defer unlock()
+
+	// Check if image was built while we waited for the lock
+	client, err := NewClient()
+	if err == nil {
+		exists, _ := client.ImageExists(ctx, targetImage)
+		client.Close()
+		if exists {
+			fmt.Fprintln(output, "Image already built by another workstream")
+			return nil
+		}
+	}
+
 	// Create a temporary Dockerfile
 	dockerfile := fmt.Sprintf(`FROM %s
 
