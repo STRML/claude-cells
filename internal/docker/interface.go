@@ -20,6 +20,7 @@ type DockerClient interface {
 	IsContainerRunning(ctx context.Context, containerID string) (bool, error)
 	ExecInContainer(ctx context.Context, containerID string, cmd []string) (string, error)
 	SignalProcess(ctx context.Context, containerID, processName, signal string) error
+	PersistSessions(ctx context.Context, containerID string) error
 
 	// Container management
 	ListDockerTUIContainers(ctx context.Context) ([]ContainerInfo, error)

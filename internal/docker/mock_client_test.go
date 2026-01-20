@@ -248,3 +248,27 @@ func TestMockClient_Prune(t *testing.T) {
 		t.Error("Running container should still exist")
 	}
 }
+
+func TestMockClient_PersistSessions(t *testing.T) {
+	t.Parallel()
+
+	client := NewMockClient()
+	ctx := context.Background()
+
+	// Create and start a container
+	cfg := &ContainerConfig{Name: "persist-test", Image: "alpine"}
+	id, _ := client.CreateContainer(ctx, cfg)
+	_ = client.StartContainer(ctx, id)
+
+	// PersistSessions should succeed on existing container
+	err := client.PersistSessions(ctx, id)
+	if err != nil {
+		t.Fatalf("PersistSessions() error = %v", err)
+	}
+
+	// PersistSessions should fail on non-existent container
+	err = client.PersistSessions(ctx, "nonexistent")
+	if err == nil {
+		t.Error("PersistSessions() should error for non-existent container")
+	}
+}

@@ -145,6 +145,16 @@ func (m *MockClient) SignalProcess(ctx context.Context, containerID, processName
 	return nil
 }
 
+func (m *MockClient) PersistSessions(ctx context.Context, containerID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if _, ok := m.containers[containerID]; !ok {
+		return &containerNotFoundError{containerID}
+	}
+	return nil
+}
+
 func (m *MockClient) ListDockerTUIContainers(ctx context.Context) ([]ContainerInfo, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

@@ -195,6 +195,15 @@ func PauseAllAndSaveCmd(dir string, workstreams []*workstream.Workstream, focuse
 			// Wait for processes to handle the signal and finish writes
 			time.Sleep(500 * time.Millisecond)
 
+			// Persist sessions from container runtime location to mount point
+			// This ensures sessions survive container rebuilds
+			for _, ws := range workstreams {
+				if ws.ContainerID != "" {
+					// Ignore errors - session persistence is best-effort
+					_ = dockerClient.PersistSessions(ctx, ws.ContainerID)
+				}
+			}
+
 			// Validate and repair state before pausing containers
 			// This extracts session IDs from running containers
 			repairResult, repairErr := workstream.ValidateAndRepairState(ctx, workstreams)

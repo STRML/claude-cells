@@ -462,3 +462,58 @@ func extractBranchFromContainerName(containerName, projectName string) string {
 	}
 	return ""
 }
+
+// PersistSessions copies Claude session files from the container's runtime location
+// to the persistent mount point, so sessions survive container rebuilds.
+//
+// Sessions created inside containers are stored at $HOME/.claude/projects/-workspace/
+// (e.g., /root/.claude/projects/-workspace/ when running as root).
+// The .claude directory is mounted at /home/claude/.claude from the host.
+// To persist sessions, we copy them from the runtime location to the mount point.
+func (c *Client) PersistSessions(ctx context.Context, containerID string) error {
+	// Shell script that:
+	// 1. Finds where Claude stored sessions (varies by user: /root/.claude or /home/<user>/.claude)
+	// 2. Copies session files to the mount point at /home/claude/.claude/projects/-workspace/
+	// 3. Handles the case where sessions might be in multiple locations
+	script := `
+# Find source session directories (where Claude wrote them)
+# Check $HOME/.claude/projects/-workspace/ first
+SRC_DIR=""
+if [ -d "$HOME/.claude/projects/-workspace" ] && [ "$HOME" != "/home/claude" ]; then
+    SRC_DIR="$HOME/.claude/projects/-workspace"
+elif [ -d "/root/.claude/projects/-workspace" ]; then
+    SRC_DIR="/root/.claude/projects/-workspace"
+fi
+
+# Mount point where sessions should persist (this is mounted from host)
+DEST_DIR="/home/claude/.claude/projects/-workspace"
+
+# Only copy if source exists and has files, and is different from destination
+if [ -n "$SRC_DIR" ] && [ "$SRC_DIR" != "$DEST_DIR" ] && [ -d "$SRC_DIR" ]; then
+    # Create destination directory
+    mkdir -p "$DEST_DIR" 2>/dev/null
+
+    # Copy all session files (.jsonl files and session directories)
+    # Use -n to not overwrite existing files (preserve original sessions)
+    if ls "$SRC_DIR"/*.jsonl >/dev/null 2>&1; then
+        for f in "$SRC_DIR"/*.jsonl; do
+            if [ -f "$f" ]; then
+                cp -n "$f" "$DEST_DIR/" 2>/dev/null
+            fi
+        done
+    fi
+
+    # Copy any subdirectories (tool results, etc.)
+    for d in "$SRC_DIR"/*/; do
+        if [ -d "$d" ]; then
+            dirname=$(basename "$d")
+            mkdir -p "$DEST_DIR/$dirname" 2>/dev/null
+            cp -rn "$d"* "$DEST_DIR/$dirname/" 2>/dev/null
+        fi
+    done
+fi
+`
+	cmd := []string{"/bin/sh", "-c", script}
+	_, err := c.ExecInContainer(ctx, containerID, cmd)
+	return err
+}
