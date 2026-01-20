@@ -184,6 +184,10 @@ func TestValidatePrerequisites_Behavior(t *testing.T) {
 
 // TestValidatePrerequisites_WithDevcontainerConfig tests behavior with devcontainer.json
 func TestValidatePrerequisites_WithDevcontainerConfig(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
 	// Save original directory
 	origDir, _ := os.Getwd()
 	defer os.Chdir(origDir)
