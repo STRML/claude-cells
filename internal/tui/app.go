@@ -1422,10 +1422,15 @@ Scroll Mode:
 					m.panes[i].SetInPaneDialog(&dialog)
 					return m, CreatePRCmd(ws)
 				case MergeActionMergeMain:
-					m.panes[i].AppendOutput("\nMerging branch into main...\n")
-					dialog := NewProgressDialog("Merging Branch", fmt.Sprintf("Branch: %s\n\nMerging into main...", ws.BranchName), ws.ID)
+					m.panes[i].AppendOutput("\nMerging branch into main (merge commit)...\n")
+					dialog := NewProgressDialog("Merging Branch", fmt.Sprintf("Branch: %s\n\nMerging into main (merge commit)...", ws.BranchName), ws.ID)
 					m.panes[i].SetInPaneDialog(&dialog)
 					return m, MergeBranchCmd(ws)
+				case MergeActionSquashMain:
+					m.panes[i].AppendOutput("\nMerging branch into main (squash)...\n")
+					dialog := NewProgressDialog("Squash Merging Branch", fmt.Sprintf("Branch: %s\n\nSquash merging into main...", ws.BranchName), ws.ID)
+					m.panes[i].SetInPaneDialog(&dialog)
+					return m, SquashMergeBranchCmd(ws)
 				case MergeActionPush:
 					m.panes[i].AppendOutput("\nPushing branch to origin...\n")
 					dialog := NewProgressDialog("Pushing Branch", fmt.Sprintf("Branch: %s\n\nPushing to origin...", ws.BranchName), ws.ID)

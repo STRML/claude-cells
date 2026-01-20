@@ -1320,6 +1320,16 @@ type MergeBranchMsg struct {
 
 // MergeBranchCmd returns a command that merges a branch into main.
 func MergeBranchCmd(ws *workstream.Workstream) tea.Cmd {
+	return MergeBranchWithOptionsCmd(ws, false)
+}
+
+// SquashMergeBranchCmd returns a command that squash merges a branch into main.
+func SquashMergeBranchCmd(ws *workstream.Workstream) tea.Cmd {
+	return MergeBranchWithOptionsCmd(ws, true)
+}
+
+// MergeBranchWithOptionsCmd returns a command that merges a branch into main with optional squash.
+func MergeBranchWithOptionsCmd(ws *workstream.Workstream, squash bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 		defer cancel()
@@ -1332,7 +1342,7 @@ func MergeBranchCmd(ws *workstream.Workstream) tea.Cmd {
 		gitRepo := git.New(repoPath)
 
 		// Merge the branch into main
-		if err := gitRepo.MergeBranch(ctx, ws.BranchName); err != nil {
+		if err := gitRepo.MergeBranchWithOptions(ctx, ws.BranchName, squash); err != nil {
 			// Check if it's a conflict error
 			if conflictErr, ok := err.(*git.MergeConflictError); ok {
 				return MergeBranchMsg{

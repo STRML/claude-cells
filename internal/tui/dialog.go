@@ -160,10 +160,11 @@ const (
 type MergeAction string
 
 const (
-	MergeActionCreatePR  MergeAction = "create_pr"
-	MergeActionMergeMain MergeAction = "merge_main"
-	MergeActionPush      MergeAction = "push"
-	MergeActionCancel    MergeAction = "cancel"
+	MergeActionMergeMain  MergeAction = "merge_main"
+	MergeActionSquashMain MergeAction = "squash_main"
+	MergeActionCreatePR   MergeAction = "create_pr"
+	MergeActionPush       MergeAction = "push"
+	MergeActionCancel     MergeAction = "cancel"
 )
 
 // CommitBeforeMergeAction represents a commit-before-merge dialog action
@@ -225,8 +226,9 @@ func NewMergeDialog(branchName, workstreamID, branchInfo string) DialogModel {
 		Body:         body.String(),
 		WorkstreamID: workstreamID,
 		MenuItems: []string{
+			"Merge into main (merge commit)",
+			"Merge into main (squash)",
 			"Create Pull Request",
-			"Merge into main",
 			"Push branch only",
 			"Cancel",
 		},
@@ -604,10 +606,12 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				var action MergeAction
 				switch d.MenuSelection {
 				case 0:
-					action = MergeActionCreatePR
-				case 1:
 					action = MergeActionMergeMain
+				case 1:
+					action = MergeActionSquashMain
 				case 2:
+					action = MergeActionCreatePR
+				case 3:
 					action = MergeActionPush
 				default:
 					action = MergeActionCancel

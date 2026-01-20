@@ -101,6 +101,13 @@ func (e *MergeConflictError) Error() string {
 // It fetches origin/main and merges the branch into main.
 // Returns MergeConflictError if there are conflicts that need resolution.
 func (g *Git) MergeBranch(ctx context.Context, branch string) error {
+	return g.MergeBranchWithOptions(ctx, branch, false)
+}
+
+// MergeBranchWithOptions merges a branch into main with optional squash.
+// If squash is true, all commits are combined into a single commit.
+// Returns MergeConflictError if there are conflicts that need resolution.
+func (g *Git) MergeBranchWithOptions(ctx context.Context, branch string, squash bool) error {
 	// Fetch latest main from origin to ensure we're up to date
 	_, _ = g.run(ctx, "fetch", "origin", "main")
 
@@ -116,16 +123,38 @@ func (g *Git) MergeBranch(ctx context.Context, branch string) error {
 	_, _ = g.run(ctx, "merge", "origin/main", "--ff-only")
 
 	// Merge the branch
-	_, err := g.run(ctx, "merge", branch, "--no-edit")
-	if err != nil {
-		// Check if this is a conflict
-		conflictFiles, conflictErr := g.GetConflictFiles(ctx)
-		if conflictErr == nil && len(conflictFiles) > 0 {
-			// Abort the failed merge to leave repo in clean state
-			_, _ = g.run(ctx, "merge", "--abort")
-			return &MergeConflictError{Branch: branch, ConflictFiles: conflictFiles}
+	var err error
+	if squash {
+		// Squash merge: combines all commits into staged changes
+		_, err = g.run(ctx, "merge", "--squash", branch)
+		if err != nil {
+			// Check if this is a conflict
+			conflictFiles, conflictErr := g.GetConflictFiles(ctx)
+			if conflictErr == nil && len(conflictFiles) > 0 {
+				// Abort the failed merge to leave repo in clean state
+				_, _ = g.run(ctx, "merge", "--abort")
+				return &MergeConflictError{Branch: branch, ConflictFiles: conflictFiles}
+			}
+			return err
 		}
-		return err
+		// Squash merge requires a separate commit
+		_, err = g.run(ctx, "commit", "-m", fmt.Sprintf("Squash merge branch '%s'", branch))
+		if err != nil {
+			return fmt.Errorf("failed to commit squash merge: %w", err)
+		}
+	} else {
+		// Regular merge commit
+		_, err = g.run(ctx, "merge", branch, "--no-edit")
+		if err != nil {
+			// Check if this is a conflict
+			conflictFiles, conflictErr := g.GetConflictFiles(ctx)
+			if conflictErr == nil && len(conflictFiles) > 0 {
+				// Abort the failed merge to leave repo in clean state
+				_, _ = g.run(ctx, "merge", "--abort")
+				return &MergeConflictError{Branch: branch, ConflictFiles: conflictFiles}
+			}
+			return err
+		}
 	}
 	return nil
 }
