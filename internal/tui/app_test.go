@@ -1516,3 +1516,398 @@ func TestAppModel_SpaceSwapPreservesIndices(t *testing.T) {
 		t.Errorf("After swap, focus should be at position 0, got %d", app.focusedPane)
 	}
 }
+
+// ============================================================================
+// Mouse Click-to-Focus Tests
+// ============================================================================
+
+func TestAppModel_MouseClick_FocusesPane(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create two workstreams
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "first"})
+	app = model.(AppModel)
+	model, _ = app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "second"})
+	app = model.(AppModel)
+
+	// Focus is on pane 1 (second created)
+	if app.focusedPane != 1 {
+		t.Fatalf("Expected focusedPane=1, got %d", app.focusedPane)
+	}
+
+	// Calculate bounds for the first pane (pane 0)
+	titleBarHeight := 1
+	statusBarHeight := 1
+	availableHeight := app.height - titleBarHeight - statusBarHeight
+	bounds := CalculatePaneBounds(app.layout, len(app.panes), app.width, availableHeight, titleBarHeight)
+
+	// Click in the center of the first pane
+	centerX := bounds[0].X + bounds[0].Width/2
+	centerY := bounds[0].Y + bounds[0].Height/2
+
+	mouseMsg := tea.MouseMsg{
+		X:      centerX,
+		Y:      centerY,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+	}
+
+	model, _ = app.Update(mouseMsg)
+	app = model.(AppModel)
+
+	// Focus should have moved to pane 0
+	if app.focusedPane != 0 {
+		t.Errorf("After clicking pane 0, focusedPane should be 0, got %d", app.focusedPane)
+	}
+
+	// Pane 0 should be focused, pane 1 should not
+	if !app.panes[0].focused {
+		t.Error("Pane 0 should have focus flag set")
+	}
+	if app.panes[1].focused {
+		t.Error("Pane 1 should not have focus flag set")
+	}
+}
+
+func TestAppModel_MouseClick_EntersInputMode(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Start in nav mode
+	app.inputMode = false
+
+	// Calculate bounds
+	titleBarHeight := 1
+	statusBarHeight := 1
+	availableHeight := app.height - titleBarHeight - statusBarHeight
+	bounds := CalculatePaneBounds(app.layout, len(app.panes), app.width, availableHeight, titleBarHeight)
+
+	// Click in the pane
+	mouseMsg := tea.MouseMsg{
+		X:      bounds[0].X + 10,
+		Y:      bounds[0].Y + 5,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+	}
+
+	model, cmd := app.Update(mouseMsg)
+	app = model.(AppModel)
+
+	// Should enter input mode
+	if !app.inputMode {
+		t.Error("Clicking on pane should enter input mode")
+	}
+
+	// Should return ShowCursor command
+	if cmd == nil {
+		t.Error("Should return ShowCursor command")
+	}
+}
+
+func TestAppModel_MouseClick_OutsidePanes(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	originalFocus := app.focusedPane
+
+	// Click on the title bar (Y=0)
+	mouseMsg := tea.MouseMsg{
+		X:      50,
+		Y:      0,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+	}
+
+	model, _ = app.Update(mouseMsg)
+	app = model.(AppModel)
+
+	// Focus should not change
+	if app.focusedPane != originalFocus {
+		t.Errorf("Clicking outside panes should not change focus, expected %d, got %d", originalFocus, app.focusedPane)
+	}
+}
+
+func TestAppModel_MouseClick_OnStatusBar(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	originalFocus := app.focusedPane
+
+	// Click on the status bar (bottom line)
+	mouseMsg := tea.MouseMsg{
+		X:      50,
+		Y:      app.height - 1,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+	}
+
+	model, _ = app.Update(mouseMsg)
+	app = model.(AppModel)
+
+	// Focus should not change
+	if app.focusedPane != originalFocus {
+		t.Errorf("Clicking on status bar should not change focus, expected %d, got %d", originalFocus, app.focusedPane)
+	}
+}
+
+func TestAppModel_MouseClick_WithDialog(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create two workstreams
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "first"})
+	app = model.(AppModel)
+	model, _ = app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "second"})
+	app = model.(AppModel)
+
+	// Open a dialog
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+	app = model.(AppModel)
+
+	if app.dialog == nil {
+		t.Fatal("Dialog should be open")
+	}
+
+	originalFocus := app.focusedPane
+
+	// Try to click on a pane
+	titleBarHeight := 1
+	statusBarHeight := 1
+	availableHeight := app.height - titleBarHeight - statusBarHeight
+	bounds := CalculatePaneBounds(app.layout, len(app.panes), app.width, availableHeight, titleBarHeight)
+
+	mouseMsg := tea.MouseMsg{
+		X:      bounds[0].X + 10,
+		Y:      bounds[0].Y + 5,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+	}
+
+	model, _ = app.Update(mouseMsg)
+	app = model.(AppModel)
+
+	// Focus should not change (dialog blocks mouse)
+	if app.focusedPane != originalFocus {
+		t.Errorf("Clicking with dialog open should not change focus, expected %d, got %d", originalFocus, app.focusedPane)
+	}
+
+	// Dialog should still be open
+	if app.dialog == nil {
+		t.Error("Dialog should still be open after click")
+	}
+}
+
+func TestAppModel_MouseClick_RightButton(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create two workstreams
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "first"})
+	app = model.(AppModel)
+	model, _ = app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "second"})
+	app = model.(AppModel)
+
+	originalFocus := app.focusedPane
+
+	// Right click should be ignored
+	titleBarHeight := 1
+	statusBarHeight := 1
+	availableHeight := app.height - titleBarHeight - statusBarHeight
+	bounds := CalculatePaneBounds(app.layout, len(app.panes), app.width, availableHeight, titleBarHeight)
+
+	mouseMsg := tea.MouseMsg{
+		X:      bounds[0].X + 10,
+		Y:      bounds[0].Y + 5,
+		Button: tea.MouseButtonRight,
+		Action: tea.MouseActionPress,
+	}
+
+	model, _ = app.Update(mouseMsg)
+	app = model.(AppModel)
+
+	// Focus should not change (only left click focuses)
+	if app.focusedPane != originalFocus {
+		t.Errorf("Right click should not change focus, expected %d, got %d", originalFocus, app.focusedPane)
+	}
+}
+
+func TestAppModel_MouseClick_Release(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create two workstreams
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "first"})
+	app = model.(AppModel)
+	model, _ = app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "second"})
+	app = model.(AppModel)
+
+	originalFocus := app.focusedPane
+
+	// Mouse release should be ignored (only press focuses)
+	titleBarHeight := 1
+	statusBarHeight := 1
+	availableHeight := app.height - titleBarHeight - statusBarHeight
+	bounds := CalculatePaneBounds(app.layout, len(app.panes), app.width, availableHeight, titleBarHeight)
+
+	mouseMsg := tea.MouseMsg{
+		X:      bounds[0].X + 10,
+		Y:      bounds[0].Y + 5,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionRelease,
+	}
+
+	model, _ = app.Update(mouseMsg)
+	app = model.(AppModel)
+
+	// Focus should not change (only press focuses)
+	if app.focusedPane != originalFocus {
+		t.Errorf("Mouse release should not change focus, expected %d, got %d", originalFocus, app.focusedPane)
+	}
+}
+
+func TestAppModel_MouseClick_NoPanes(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// No panes - click should not panic
+	mouseMsg := tea.MouseMsg{
+		X:      50,
+		Y:      20,
+		Button: tea.MouseButtonLeft,
+		Action: tea.MouseActionPress,
+	}
+
+	model, _ := app.Update(mouseMsg)
+	app = model.(AppModel)
+
+	// Should not panic and focus should remain 0
+	if app.focusedPane != 0 {
+		t.Errorf("Focus should remain 0 with no panes, got %d", app.focusedPane)
+	}
+}
+
+func TestAppModel_MouseClick_AllLayouts(t *testing.T) {
+	layouts := []LayoutType{LayoutGrid, LayoutMainLeft, LayoutMainTop, LayoutRows, LayoutColumns}
+
+	for _, layout := range layouts {
+		t.Run(layout.String(), func(t *testing.T) {
+			app := NewAppModel(context.Background())
+			app.width = 120
+			app.height = 60
+			app.layout = layout
+
+			// Create three workstreams
+			for _, name := range []string{"first", "second", "third"} {
+				model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: name})
+				app = model.(AppModel)
+			}
+
+			// Calculate bounds
+			titleBarHeight := 1
+			statusBarHeight := 1
+			availableHeight := app.height - titleBarHeight - statusBarHeight
+			bounds := CalculatePaneBounds(app.layout, len(app.panes), app.width, availableHeight, titleBarHeight)
+
+			// Click on each pane and verify focus changes
+			for targetPane := 0; targetPane < len(app.panes); targetPane++ {
+				// Reset focus to pane 0
+				for i := range app.panes {
+					app.panes[i].SetFocused(i == 0)
+				}
+				app.focusedPane = 0
+
+				// Click on target pane center
+				centerX := bounds[targetPane].X + bounds[targetPane].Width/2
+				centerY := bounds[targetPane].Y + bounds[targetPane].Height/2
+
+				mouseMsg := tea.MouseMsg{
+					X:      centerX,
+					Y:      centerY,
+					Button: tea.MouseButtonLeft,
+					Action: tea.MouseActionPress,
+				}
+
+				model, _ := app.Update(mouseMsg)
+				app = model.(AppModel)
+
+				if app.focusedPane != targetPane {
+					t.Errorf("Layout %s: clicking pane %d at (%d,%d) should focus it, got focusedPane=%d",
+						layout, targetPane, centerX, centerY, app.focusedPane)
+				}
+			}
+		})
+	}
+}
+
+func TestAppModel_MouseClick_EdgeCases(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create two workstreams
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "first"})
+	app = model.(AppModel)
+	model, _ = app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "second"})
+	app = model.(AppModel)
+
+	titleBarHeight := 1
+	statusBarHeight := 1
+	availableHeight := app.height - titleBarHeight - statusBarHeight
+	bounds := CalculatePaneBounds(app.layout, len(app.panes), app.width, availableHeight, titleBarHeight)
+
+	tests := []struct {
+		name         string
+		x, y         int
+		expectedPane int // -1 means no change
+	}{
+		{"pane 0 top-left corner", bounds[0].X, bounds[0].Y, 0},
+		{"pane 0 just inside right edge", bounds[0].X + bounds[0].Width - 1, bounds[0].Y + 5, 0},
+		{"pane 1 left edge (boundary)", bounds[1].X, bounds[1].Y + 5, 1},
+		{"pane 1 top-right corner", bounds[1].X + bounds[1].Width - 1, bounds[1].Y, 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Reset focus to pane 1 (so we can detect change to pane 0)
+			for i := range app.panes {
+				app.panes[i].SetFocused(i == 1)
+			}
+			app.focusedPane = 1
+
+			mouseMsg := tea.MouseMsg{
+				X:      tt.x,
+				Y:      tt.y,
+				Button: tea.MouseButtonLeft,
+				Action: tea.MouseActionPress,
+			}
+
+			model, _ := app.Update(mouseMsg)
+			app = model.(AppModel)
+
+			if app.focusedPane != tt.expectedPane {
+				t.Errorf("Click at (%d,%d) expected pane %d, got %d", tt.x, tt.y, tt.expectedPane, app.focusedPane)
+			}
+		})
+	}
+}

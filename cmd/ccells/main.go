@@ -101,7 +101,7 @@ func main() {
 		tui.SetContainerTracker(tracker)
 	}
 
-	p := tea.NewProgram(app, tea.WithAltScreen())
+	p := tea.NewProgram(app, tea.WithAltScreen(), tea.WithMouseCellMotion())
 
 	// Set the program reference so PTY sessions can send messages
 	tui.SetProgram(p)
