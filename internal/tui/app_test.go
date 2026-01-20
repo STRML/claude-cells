@@ -1422,39 +1422,39 @@ func TestAppModel_NumberKeyFocusByPermanentIndex(t *testing.T) {
 	model, _ := app.Update(DialogConfirmMsg{Type: DialogDestroy, WorkstreamID: wsID})
 	app = model.(AppModel)
 
-	// Now we have 2 panes with indices 2 and 3 (at slice positions 0 and 1)
+	// Now we have 2 panes renumbered to indices 1 and 2 (at slice positions 0 and 1)
 	if len(app.panes) != 2 {
 		t.Fatalf("Expected 2 panes, got %d", len(app.panes))
 	}
-	if app.panes[0].Index() != 2 {
-		t.Errorf("First remaining pane should have index 2, got %d", app.panes[0].Index())
+	if app.panes[0].Index() != 1 {
+		t.Errorf("First remaining pane should be renumbered to index 1, got %d", app.panes[0].Index())
 	}
-	if app.panes[1].Index() != 3 {
-		t.Errorf("Second remaining pane should have index 3, got %d", app.panes[1].Index())
+	if app.panes[1].Index() != 2 {
+		t.Errorf("Second remaining pane should be renumbered to index 2, got %d", app.panes[1].Index())
 	}
 
-	// Press '2' - should focus the pane with index 2 (slice position 0)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	// Press '1' - should focus the pane with index 1 (slice position 0)
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
 	app = model.(AppModel)
 
 	if app.focusedPane != 0 {
-		t.Errorf("Pressing '2' should focus slice position 0 (pane index 2), got focusedPane=%d", app.focusedPane)
+		t.Errorf("Pressing '1' should focus slice position 0 (pane index 1), got focusedPane=%d", app.focusedPane)
 	}
 
-	// Press '3' - should focus the pane with index 3 (slice position 1)
+	// Press '2' - should focus the pane with index 2 (slice position 1)
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	app = model.(AppModel)
+
+	if app.focusedPane != 1 {
+		t.Errorf("Pressing '2' should focus slice position 1 (pane index 2), got focusedPane=%d", app.focusedPane)
+	}
+
+	// Press '3' - should do nothing (no pane with index 3 exists after renumbering)
 	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
 	app = model.(AppModel)
 
 	if app.focusedPane != 1 {
-		t.Errorf("Pressing '3' should focus slice position 1 (pane index 3), got focusedPane=%d", app.focusedPane)
-	}
-
-	// Press '1' - should do nothing (no pane with index 1 exists anymore)
-	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
-	app = model.(AppModel)
-
-	if app.focusedPane != 1 {
-		t.Errorf("Pressing '1' (non-existent index) should not change focus, got focusedPane=%d", app.focusedPane)
+		t.Errorf("Pressing '3' (non-existent index) should not change focus, got focusedPane=%d", app.focusedPane)
 	}
 }
 
@@ -2123,5 +2123,194 @@ func TestAppModel_ScrollMode_ArrowsDontNavigate_InScrollMode(t *testing.T) {
 	// Focus should change to pane 0 (left/right still navigate)
 	if app.focusedPane != 0 {
 		t.Errorf("Left arrow should still navigate panes, expected focusedPane=0, got %d", app.focusedPane)
+	}
+}
+
+// ============================================================================
+// Workstream Renumbering After Destruction Tests
+// ============================================================================
+
+func TestAppModel_RenumberPanesAfterDestroy(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create three workstreams (indices 1, 2, 3)
+	for _, name := range []string{"first", "second", "third"} {
+		model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: name})
+		app = model.(AppModel)
+	}
+
+	// Verify initial indices
+	if app.panes[0].Index() != 1 || app.panes[1].Index() != 2 || app.panes[2].Index() != 3 {
+		t.Fatalf("Initial indices should be 1, 2, 3, got %d, %d, %d",
+			app.panes[0].Index(), app.panes[1].Index(), app.panes[2].Index())
+	}
+
+	// Destroy the middle workstream (index 2)
+	wsID := app.panes[1].Workstream().ID
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogDestroy, WorkstreamID: wsID})
+	app = model.(AppModel)
+
+	// Should have 2 panes remaining
+	if len(app.panes) != 2 {
+		t.Fatalf("Expected 2 panes after destroy, got %d", len(app.panes))
+	}
+
+	// Panes should be renumbered to 1 and 2
+	if app.panes[0].Index() != 1 {
+		t.Errorf("First pane should be renumbered to index 1, got %d", app.panes[0].Index())
+	}
+	if app.panes[1].Index() != 2 {
+		t.Errorf("Second pane should be renumbered to index 2, got %d", app.panes[1].Index())
+	}
+
+	// nextPaneIndex should be updated for next creation
+	if app.nextPaneIndex != 3 {
+		t.Errorf("nextPaneIndex should be 3 after renumbering, got %d", app.nextPaneIndex)
+	}
+}
+
+func TestAppModel_RenumberPanesAfterDestroy_FirstPane(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create three workstreams (indices 1, 2, 3)
+	for _, name := range []string{"first", "second", "third"} {
+		model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: name})
+		app = model.(AppModel)
+	}
+
+	// Destroy the first workstream (index 1)
+	wsID := app.panes[0].Workstream().ID
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogDestroy, WorkstreamID: wsID})
+	app = model.(AppModel)
+
+	// Should have 2 panes remaining, renumbered to 1 and 2
+	if len(app.panes) != 2 {
+		t.Fatalf("Expected 2 panes after destroy, got %d", len(app.panes))
+	}
+
+	if app.panes[0].Index() != 1 {
+		t.Errorf("First pane should be renumbered to index 1, got %d", app.panes[0].Index())
+	}
+	if app.panes[1].Index() != 2 {
+		t.Errorf("Second pane should be renumbered to index 2, got %d", app.panes[1].Index())
+	}
+}
+
+func TestAppModel_RenumberPanesAfterDestroy_QuickDestroy(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create two workstreams
+	for _, name := range []string{"first", "second"} {
+		model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: name})
+		app = model.(AppModel)
+	}
+
+	// Set the first workstream to error state (for quick destroy without dialog)
+	app.panes[0].Workstream().SetState(workstream.StateError)
+
+	// Focus the first pane
+	app.focusedPane = 0
+	app.panes[0].SetFocused(true)
+	app.panes[1].SetFocused(false)
+
+	// Press 'd' to quick-destroy the errored workstream
+	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}})
+	app = model.(AppModel)
+
+	// Should have 1 pane remaining, renumbered to index 1
+	if len(app.panes) != 1 {
+		t.Fatalf("Expected 1 pane after quick destroy, got %d", len(app.panes))
+	}
+
+	if app.panes[0].Index() != 1 {
+		t.Errorf("Remaining pane should be renumbered to index 1, got %d", app.panes[0].Index())
+	}
+}
+
+func TestAppModel_RenumberPanes_NumberKeysFocusCorrectly(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create three workstreams (indices 1, 2, 3)
+	for _, name := range []string{"first", "second", "third"} {
+		model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: name})
+		app = model.(AppModel)
+	}
+
+	// Destroy the first workstream (original index 1)
+	wsID := app.panes[0].Workstream().ID
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogDestroy, WorkstreamID: wsID})
+	app = model.(AppModel)
+
+	// After renumbering, panes should have indices 1 and 2
+
+	// Focus on pane 0 initially
+	app.focusedPane = 0
+	app.panes[0].SetFocused(true)
+	app.panes[1].SetFocused(false)
+
+	// Press '2' - should focus the pane with index 2 (slice position 1)
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'2'}})
+	app = model.(AppModel)
+
+	if app.focusedPane != 1 {
+		t.Errorf("Pressing '2' should focus slice position 1 (pane index 2), got focusedPane=%d", app.focusedPane)
+	}
+
+	// Press '1' - should focus the pane with index 1 (slice position 0)
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'1'}})
+	app = model.(AppModel)
+
+	if app.focusedPane != 0 {
+		t.Errorf("Pressing '1' should focus slice position 0 (pane index 1), got focusedPane=%d", app.focusedPane)
+	}
+
+	// Press '3' - should do nothing (no pane with index 3 exists after renumbering)
+	model, _ = app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'3'}})
+	app = model.(AppModel)
+
+	if app.focusedPane != 0 {
+		t.Errorf("Pressing '3' (non-existent index) should not change focus, got focusedPane=%d", app.focusedPane)
+	}
+}
+
+func TestAppModel_RenumberPanes_LastSwapPositionReset(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create three workstreams
+	for _, name := range []string{"first", "second", "third"} {
+		model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: name})
+		app = model.(AppModel)
+	}
+
+	// Swap pane 2 to main position
+	app.focusedPane = 2
+	app.panes[0].SetFocused(false)
+	app.panes[2].SetFocused(true)
+	model, _ := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{' '}})
+	app = model.(AppModel)
+
+	// Should have a lastSwapPosition set
+	if app.lastSwapPosition == 0 {
+		t.Fatal("lastSwapPosition should be set after swap")
+	}
+
+	// Destroy a pane - lastSwapPosition should be reset to avoid invalid indices
+	wsID := app.panes[1].Workstream().ID
+	model, _ = app.Update(DialogConfirmMsg{Type: DialogDestroy, WorkstreamID: wsID})
+	app = model.(AppModel)
+
+	// lastSwapPosition should be reset to 0
+	if app.lastSwapPosition != 0 {
+		t.Errorf("lastSwapPosition should be reset to 0 after destruction, got %d", app.lastSwapPosition)
 	}
 }
