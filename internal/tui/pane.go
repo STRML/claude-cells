@@ -1234,12 +1234,12 @@ func (p *PaneModel) ScrollPageDown() {
 // ScrollLineUp scrolls the viewport up by one line
 func (p *PaneModel) ScrollLineUp() {
 	p.scrollMode = true
-	p.viewport.LineUp(1)
+	p.viewport.ScrollUp(1)
 }
 
 // ScrollLineDown scrolls the viewport down by one line
 func (p *PaneModel) ScrollLineDown() {
-	p.viewport.LineDown(1)
+	p.viewport.ScrollDown(1)
 	// Exit scroll mode if at bottom
 	if p.viewport.AtBottom() {
 		p.scrollMode = false
@@ -1269,7 +1269,7 @@ func (p *PaneModel) ExportLogs(logsDir string) (string, error) {
 	var content strings.Builder
 
 	// Add header with metadata
-	content.WriteString(fmt.Sprintf("# CCells Log Export\n"))
+	content.WriteString("# CCells Log Export\n")
 	content.WriteString(fmt.Sprintf("# Branch: %s\n", p.workstream.BranchName))
 	content.WriteString(fmt.Sprintf("# Title: %s\n", p.workstream.GetTitle()))
 	content.WriteString(fmt.Sprintf("# Exported: %s\n", time.Now().Format(time.RFC3339)))
