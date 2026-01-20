@@ -2086,6 +2086,230 @@ func TestAppModel_MouseClick_EdgeCases(t *testing.T) {
 	}
 }
 
+func TestAppModel_MouseClick_WithInPaneDialog(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create two workstreams
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "first"})
+	app = model.(AppModel)
+	model, _ = app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "second"})
+	app = model.(AppModel)
+
+	// Focus first pane
+	app.focusedPane = 0
+
+	// Set an in-pane dialog on the first pane (simulating a progress dialog)
+	inPaneDialog := NewProgressDialog("Processing...", "Please wait", "test-id")
+	app.panes[0].SetInPaneDialog(&inPaneDialog)
+
+	if !app.panes[0].HasInPaneDialog() {
+		t.Fatal("Pane 0 should have an in-pane dialog")
+	}
+
+	// Click on the second pane - should still switch focus (in-pane dialogs are non-modal)
+	titleBarHeight := 1
+	statusBarHeight := 1
+	availableHeight := app.height - titleBarHeight - statusBarHeight
+	bounds := CalculatePaneBounds(app.layout, len(app.panes), app.width, availableHeight, titleBarHeight)
+
+	// Click on second pane
+	mouseMsg := tea.MouseClickMsg{
+		X:      bounds[1].X + 10,
+		Y:      bounds[1].Y + 5,
+		Button: tea.MouseLeft,
+	}
+
+	model, _ = app.Update(mouseMsg)
+	app = model.(AppModel)
+
+	// Focus should change to second pane (in-pane dialogs don't block mouse clicks)
+	if app.focusedPane != 1 {
+		t.Errorf("Clicking on second pane with in-pane dialog on first should switch focus, expected 1, got %d", app.focusedPane)
+	}
+
+	// The in-pane dialog should still be on pane 0
+	if !app.panes[0].HasInPaneDialog() {
+		t.Error("In-pane dialog should still be on pane 0")
+	}
+}
+
+func TestAppModel_View_MouseModeEnabled(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Get the view
+	view := app.View()
+
+	// The view should have mouse mode enabled (MouseModeCellMotion) by default
+	if view.MouseMode != tea.MouseModeCellMotion {
+		t.Errorf("View should have MouseModeCellMotion enabled, got %v", view.MouseMode)
+	}
+}
+
+func TestAppModel_MouseModeToggle_CtrlBM_NavMode(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Mouse should be enabled by default
+	if !app.mouseEnabled {
+		t.Error("Mouse should be enabled by default")
+	}
+
+	// Press Ctrl+B to set prefix
+	model, _ = app.Update(ctrlKey('b'))
+	app = model.(AppModel)
+
+	if !app.tmuxPrefix {
+		t.Error("tmuxPrefix should be set after Ctrl+B")
+	}
+
+	// Press 'm' to toggle mouse mode off
+	model, _ = app.Update(keyPress('m'))
+	app = model.(AppModel)
+
+	if app.mouseEnabled {
+		t.Error("Mouse should be disabled after Ctrl+B m")
+	}
+	if app.toast == "" {
+		t.Error("Toast message should be shown")
+	}
+
+	// View should return MouseModeNone when disabled
+	view := app.View()
+	if view.MouseMode != tea.MouseModeNone {
+		t.Errorf("View should have MouseModeNone when disabled, got %v", view.MouseMode)
+	}
+
+	// Toggle back on
+	model, _ = app.Update(ctrlKey('b'))
+	app = model.(AppModel)
+	model, _ = app.Update(keyPress('m'))
+	app = model.(AppModel)
+
+	if !app.mouseEnabled {
+		t.Error("Mouse should be enabled after toggling back on")
+	}
+
+	view = app.View()
+	if view.MouseMode != tea.MouseModeCellMotion {
+		t.Errorf("View should have MouseModeCellMotion when enabled, got %v", view.MouseMode)
+	}
+}
+
+func TestAppModel_MouseModeToggle_CtrlBM_InputMode(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Enter input mode
+	app.inputMode = true
+
+	// Press Ctrl+B then m
+	model, _ = app.Update(ctrlKey('b'))
+	app = model.(AppModel)
+	model, _ = app.Update(keyPress('m'))
+	app = model.(AppModel)
+
+	if app.mouseEnabled {
+		t.Error("Mouse should be disabled after Ctrl+B m in input mode")
+	}
+}
+
+func TestAppModel_MouseClick_DisabledWhenMouseModeOff(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create two workstreams
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "first"})
+	app = model.(AppModel)
+	model, _ = app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "second"})
+	app = model.(AppModel)
+
+	// Disable mouse mode
+	app.mouseEnabled = false
+	originalFocus := app.focusedPane
+
+	// Try to click on a pane
+	titleBarHeight := 1
+	statusBarHeight := 1
+	availableHeight := app.height - titleBarHeight - statusBarHeight
+	bounds := CalculatePaneBounds(app.layout, len(app.panes), app.width, availableHeight, titleBarHeight)
+
+	mouseMsg := tea.MouseClickMsg{
+		X:      bounds[0].X + 10,
+		Y:      bounds[0].Y + 5,
+		Button: tea.MouseLeft,
+	}
+
+	model, _ = app.Update(mouseMsg)
+	app = model.(AppModel)
+
+	// Focus should NOT change when mouse mode is disabled
+	if app.focusedPane != originalFocus {
+		t.Errorf("Clicking should not change focus when mouse mode disabled, expected %d, got %d", originalFocus, app.focusedPane)
+	}
+}
+
+func TestAppModel_MouseDragHint_ShownOnce(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Hint should not be shown yet
+	if app.dragHintShown {
+		t.Error("Drag hint should not be shown initially")
+	}
+
+	// Simulate drag motion
+	motionMsg := tea.MouseMotionMsg{
+		X:      50,
+		Y:      20,
+		Button: tea.MouseLeft,
+	}
+
+	model, _ = app.Update(motionMsg)
+	app = model.(AppModel)
+
+	// Hint should now be shown
+	if !app.dragHintShown {
+		t.Error("Drag hint should be shown after drag")
+	}
+	if app.toast == "" {
+		t.Error("Toast should contain drag hint")
+	}
+
+	// Clear toast and simulate another drag
+	app.toast = ""
+	model, _ = app.Update(motionMsg)
+	app = model.(AppModel)
+
+	// Toast should NOT be shown again
+	if app.toast != "" {
+		t.Error("Drag hint should only be shown once per session")
+	}
+}
+
 // ============================================================================
 // Scroll/Copy Mode Tests
 // ============================================================================

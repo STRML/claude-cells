@@ -121,6 +121,7 @@ go install github.com/STRML/claude-cells/cmd/ccells@latest
 | `s` | Settings |
 | `?` | Show help |
 | `i` / `Enter` | Enter input mode |
+| `Ctrl+B` `m` | Toggle mouse mode (click-to-focus) |
 | `q` / `Ctrl+c` | Quit (pauses containers) |
 | `Esc Esc` | Quit |
 
@@ -132,8 +133,21 @@ go install github.com/STRML/claude-cells/cmd/ccells@latest
 | `Ctrl+B` `Esc` | Exit to navigation mode |
 | `Ctrl+B` `←`/`→`/`↑`/`↓` | Switch panes (tmux-style, stays in input mode) |
 | `Ctrl+B` `1`-`9` | Switch pane by number |
+| `Ctrl+B` `m` | Toggle mouse mode (click-to-focus) |
 | `Ctrl+c` | Send interrupt to Claude |
 | All other keys | Sent directly to Claude Code |
+
+### Mouse Support
+
+Click on any pane to focus it and enter input mode. Mouse mode is **enabled by default**.
+
+| Action | Description |
+|--------|-------------|
+| **Click** | Focus pane and enter input mode |
+| **Shift+Drag** | Select text (native terminal selection) |
+| **Ctrl+B m** | Toggle mouse mode on/off |
+
+When mouse mode is **OFF**, you can drag to select text without holding Shift, but click-to-focus is disabled.
 
 ## How It Works
 

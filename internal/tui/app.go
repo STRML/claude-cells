@@ -60,6 +60,8 @@ type AppModel struct {
 	height         int
 	quitting       bool
 	inputMode      bool                 // True when input is being routed to focused pane
+	mouseEnabled   bool                 // True when mouse capture is enabled (click-to-focus)
+	dragHintShown  bool                 // True if we've shown the Shift+drag hint this session
 	lastEscapeTime time.Time            // For double-escape detection
 	pendingEscape  bool                 // True when first Esc pressed, waiting to see if double-tap
 	toast          string               // Temporary notification message
@@ -134,7 +136,8 @@ func NewAppModel(ctx context.Context) AppModel {
 		workingDir:          cwd,
 		stateDir:            stateDir,
 		repoInfo:            repoInfo,
-		nextPaneIndex:       1, // Start pane numbering at 1
+		nextPaneIndex:       1,    // Start pane numbering at 1
+		mouseEnabled:        true, // Enable mouse click-to-focus by default
 		logPanel:            logPanel,
 		pairingOrchestrator: sync.NewPairing(gitOps, mutagenOps),
 	}
@@ -326,6 +329,9 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.MouseClickMsg:
 		// Handle mouse clicks to focus panes and enter input mode
+		if !m.mouseEnabled {
+			return m, nil
+		}
 		if msg.Button == tea.MouseLeft {
 			// Don't handle clicks when dialog is active
 			if m.dialog != nil {
@@ -353,6 +359,15 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.inputMode = true
 				return m, nil
 			}
+		}
+		return m, nil
+
+	case tea.MouseMotionMsg:
+		// Detect dragging and show hint about Shift+drag for text selection
+		if m.mouseEnabled && !m.dragHintShown && msg.Button == tea.MouseLeft {
+			m.dragHintShown = true
+			m.toast = "Tip: Hold Shift while dragging to select text, or Ctrl+B m to toggle mouse mode"
+			m.toastExpiry = time.Now().Add(5 * time.Second) // Longer duration for this tip
 		}
 		return m, nil
 
@@ -527,6 +542,24 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
 						m.panes[m.focusedPane].EnterScrollMode()
 					}
+					return m, nil
+				}
+				// Not a tmux sequence - pass to pane
+				m.tmuxPrefix = false
+				var cmd tea.Cmd
+				m.panes[m.focusedPane], cmd = m.panes[m.focusedPane].Update(msg)
+				return m, cmd
+			case "m":
+				// Check for tmux-style prefix (ctrl-b + m) - toggle mouse mode
+				if m.tmuxPrefix && time.Since(m.tmuxPrefixTime) < tmuxPrefixTimeout {
+					m.tmuxPrefix = false
+					m.mouseEnabled = !m.mouseEnabled
+					if m.mouseEnabled {
+						m.toast = "Mouse mode ON (click to focus, Shift+drag to select)"
+					} else {
+						m.toast = "Mouse mode OFF (drag to select text)"
+					}
+					m.toastExpiry = time.Now().Add(toastDuration)
 					return m, nil
 				}
 				// Not a tmux sequence - pass to pane
@@ -730,6 +763,18 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, EnablePairingCmd(m.pairingOrchestrator, ws, previousBranch)
 
 		case "m":
+			// Ctrl+B m toggles mouse mode
+			if m.tmuxPrefix && time.Since(m.tmuxPrefixTime) < tmuxPrefixTimeout {
+				m.tmuxPrefix = false
+				m.mouseEnabled = !m.mouseEnabled
+				if m.mouseEnabled {
+					m.toast = "Mouse mode ON (click to focus, Shift+drag to select)"
+				} else {
+					m.toast = "Mouse mode OFF (drag to select text)"
+				}
+				m.toastExpiry = time.Now().Add(toastDuration)
+				return m, nil
+			}
 			// Merge/PR menu - first check for uncommitted changes
 			if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
 				ws := m.panes[m.focusedPane].Workstream()
@@ -2042,9 +2087,11 @@ func (m AppModel) View() tea.View {
 	// Create tea.View - basic keyboard enhancements (shift+enter) enabled by default in v2
 	v := tea.NewView(view)
 	v.AltScreen = true
-	// NOTE: Mouse mode disabled to allow native terminal text selection (copy with drag)
-	// Click-to-focus is disabled, use Ctrl+B+arrow or Ctrl+B+number to switch panes
-	// v.MouseMode = tea.MouseModeCellMotion
+	// Enable mouse mode for click-to-focus panes (toggleable with Ctrl+B m)
+	// Note: Hold Shift while dragging to use native terminal text selection
+	if m.mouseEnabled {
+		v.MouseMode = tea.MouseModeCellMotion
+	}
 	// Show cursor in input mode, hide in nav mode
 	if m.inputMode {
 		v.Cursor = &tea.Cursor{}
