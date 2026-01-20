@@ -929,20 +929,22 @@ Scroll Mode:
 			// User chose to keep - do nothing
 
 		case DialogMergeConflict:
+			// Clear the global dialog first (merge conflict uses global dialog)
+			m.dialog = nil
 			// Value is "0" for "Rebase onto main", "1" for "Cancel"
 			if msg.Value == "0" {
 				// User chose to rebase
-				for _, pane := range m.panes {
-					if pane.Workstream().ID == msg.WorkstreamID {
-						ws := pane.Workstream()
+				for i := range m.panes {
+					if m.panes[i].Workstream().ID == msg.WorkstreamID {
+						ws := m.panes[i].Workstream()
 						m.toast = "Rebasing onto main..."
 						m.toastExpiry = time.Now().Add(toastDuration)
-						pane.AppendOutput("Rebasing branch onto main...\n")
+						m.panes[i].AppendOutput("\nRebasing branch onto main...\n")
 						return m, RebaseBranchCmd(ws)
 					}
 				}
 			}
-			// User chose to cancel - do nothing
+			// User chose to cancel - nothing else to do
 
 		case DialogFirstRunIntroduction:
 			// Mark introduction as shown and persist
