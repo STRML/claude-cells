@@ -187,11 +187,20 @@ func validatePrerequisites() error {
 			if cliStatus.Available {
 				spin := newSpinner(fmt.Sprintf("Building image '%s' with devcontainer CLI...", result.ImageName))
 				spin.Start()
-				_, err := docker.BuildWithDevcontainerCLI(buildCtx, projectPath, &buildOutput)
+				baseImage, err := docker.BuildWithDevcontainerCLI(buildCtx, projectPath, &buildOutput)
 				spin.Stop()
 				if err != nil {
 					fmt.Println(buildOutput.String()) // Show output on error
 					return fmt.Errorf("failed to build with devcontainer CLI: %w", err)
+				}
+				// Build enhanced image with Claude Code on top
+				spin = newSpinner("Adding Claude Code to image...")
+				spin.Start()
+				err = docker.BuildEnhancedImage(buildCtx, baseImage, result.ImageName, &buildOutput)
+				spin.Stop()
+				if err != nil {
+					fmt.Println(buildOutput.String())
+					return fmt.Errorf("failed to build enhanced image: %w", err)
 				}
 			} else {
 				// Fall back to simple docker build
@@ -232,8 +241,10 @@ func validatePrerequisites() error {
 			return fmt.Errorf("image '%s' from devcontainer.json not found. Run: docker pull %s", result.ImageName, result.ImageName)
 		}
 
-		// Re-validate to confirm
-		result, err = docker.ValidatePrerequisites(ctx, projectPath)
+		// Re-validate to confirm (use fresh context since build may have taken a while)
+		revalidateCtx, revalidateCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer revalidateCancel()
+		result, err = docker.ValidatePrerequisites(revalidateCtx, projectPath)
 		if err != nil {
 			return fmt.Errorf("failed to validate after build: %w", err)
 		}

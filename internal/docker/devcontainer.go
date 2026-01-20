@@ -374,15 +374,11 @@ func BuildEnhancedImage(ctx context.Context, baseImage, targetImage string, outp
 	// Create a temporary Dockerfile
 	dockerfile := fmt.Sprintf(`FROM %s
 
-# Install curl if not present (needed for Claude Code installer)
-RUN which curl || (apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/* || (apk add --no-cache curl 2>/dev/null || true))
+# Install curl and bash if not present (needed for Claude Code installer)
+RUN command -v curl || (apt-get update && apt-get install -y curl bash && rm -rf /var/lib/apt/lists/*) || (apk add --no-cache curl bash) || true
 
 # Install Claude Code globally via npm if npm is available, otherwise use installer script
-RUN if which npm >/dev/null 2>&1; then \
-      npm install -g @anthropic-ai/claude-code; \
-    else \
-      curl -fsSL https://claude.ai/install.sh | sh; \
-    fi
+RUN command -v npm && npm install -g @anthropic-ai/claude-code || curl -fsSL https://claude.ai/install.sh | bash
 `, baseImage)
 
 	// Create temp directory for build context
