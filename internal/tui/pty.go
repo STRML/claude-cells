@@ -50,6 +50,122 @@ func escapeShellArg(s string) string {
 // program holds the tea.Program reference for sending messages from goroutines
 var program *tea.Program
 
+// containerSetupScript is the shell script that runs inside containers to set up
+// the Claude Code environment. It's exported as a package-level variable for testing.
+// The script:
+// 1. Sets up credentials from mounted files
+// 2. Copies essential config (settings.json, CLAUDE.md, plugins, commands, agents)
+// 3. Installs Claude Code if not available
+// 4. Launches Claude Code with appropriate flags
+const containerSetupScript = `
+# Helper function for logging (quiet on resume)
+log() {
+  test -z "$IS_RESUME" && echo "[ccells] $1"
+}
+
+log "Starting container setup..."
+log "User: $(whoami), Home: $HOME"
+
+# Ensure PATH includes user's local bin directories
+export PATH="$HOME/.local/bin:$HOME/.claude/local/bin:$PATH"
+
+# Kill any existing claude CLI processes (from previous sessions that weren't cleaned up)
+# This happens when ccells quits - the container stays running but the PTY is orphaned
+# Use specific pattern to avoid killing this script (which contains "claude" in paths)
+if pgrep -x "claude" >/dev/null 2>&1; then
+  log "Killing existing Claude processes from previous session..."
+  pkill -9 -x "claude" 2>/dev/null
+  sleep 1
+fi
+
+# Setup credentials - check both $HOME and /home/claude (for devcontainers running as root)
+CREDS_SRC=""
+if test -f "$HOME/.claude-credentials"; then
+  CREDS_SRC="$HOME/.claude-credentials"
+elif test -f "/home/claude/.claude-credentials"; then
+  CREDS_SRC="/home/claude/.claude-credentials"
+fi
+
+if test -n "$CREDS_SRC"; then
+  log "Copying credentials from $CREDS_SRC..."
+  mkdir -p "$HOME/.claude" 2>/dev/null
+  cp "$CREDS_SRC" "$HOME/.claude/.credentials.json" 2>/dev/null
+fi
+
+# Copy essential .claude files (NOT the whole directory - it's huge!)
+if test -d "/home/claude/.claude" && test "$HOME" != "/home/claude"; then
+  log "Copying .claude config from /home/claude..."
+  # Only copy essential config files, not cache/telemetry/shell-snapshots
+  for f in settings.json CLAUDE.md statsig; do
+    test -e "/home/claude/.claude/$f" && cp -r "/home/claude/.claude/$f" "$HOME/.claude/" 2>/dev/null
+  done
+  # Copy plugins config if it exists
+  if test -d "/home/claude/.claude/plugins"; then
+    mkdir -p "$HOME/.claude/plugins"
+    test -f "/home/claude/.claude/plugins/installed_plugins.json" && \
+      cp "/home/claude/.claude/plugins/installed_plugins.json" "$HOME/.claude/plugins/" 2>/dev/null
+  fi
+
+  # Copy custom commands if they exist (for custom status line, etc.)
+  if test -d "/home/claude/.claude/commands"; then
+    cp -r "/home/claude/.claude/commands" "$HOME/.claude/" 2>/dev/null
+  fi
+
+  # Copy custom agents if they exist
+  if test -d "/home/claude/.claude/agents"; then
+    cp -r "/home/claude/.claude/agents" "$HOME/.claude/" 2>/dev/null
+  fi
+  # Copy session data for --continue
+  # Session data on host is stored under encoded HOST path (e.g., -Users-samuelreed-git-oss-docker-tui)
+  # But container runs in /workspace, so Claude looks for -workspace
+  # We need to copy from host-encoded path to -workspace
+  if test -n "$HOST_PROJECT_PATH"; then
+    # Encode host path: replace / with -
+    HOST_ENCODED=$(echo "$HOST_PROJECT_PATH" | sed 's|/|-|g')
+    HOST_SESSION_DIR="/home/claude/.claude/projects/$HOST_ENCODED"
+    if test -d "$HOST_SESSION_DIR"; then
+      log "Copying session data from $HOST_ENCODED to -workspace..."
+      mkdir -p "$HOME/.claude/projects/-workspace"
+      cp -r "$HOST_SESSION_DIR"/* "$HOME/.claude/projects/-workspace/" 2>/dev/null
+    else
+      log "No session data found at $HOST_SESSION_DIR"
+    fi
+  fi
+fi
+
+# Copy .claude.json (onboarding state, settings) if mounted at /home/claude
+if test -f "/home/claude/.claude.json" && test "$HOME" != "/home/claude"; then
+  log "Copying .claude.json from /home/claude..."
+  cp /home/claude/.claude.json "$HOME/.claude.json" 2>/dev/null || true
+fi
+
+# Copy .gitconfig for git user identity (name/email) - this is critical!
+# Without this, commits show as "Claude" instead of the actual user
+if test -f "/home/claude/.gitconfig" && test "$HOME" != "/home/claude"; then
+  log "Copying .gitconfig from /home/claude..."
+  cp /home/claude/.gitconfig "$HOME/.gitconfig" 2>/dev/null || true
+fi
+
+mkdir -p "$HOME/.local/bin" 2>/dev/null
+test ! -f "$HOME/.local/bin/claude" && which claude >/dev/null 2>&1 && ln -sf "$(which claude)" "$HOME/.local/bin/claude" 2>/dev/null
+
+# Install Claude Code if not available
+if ! which claude >/dev/null 2>&1; then
+  echo "[ccells] Claude Code not found, installing..."
+  curl -fsSL https://claude.ai/install.sh | bash 2>&1
+  export PATH="$HOME/.claude/local/bin:$PATH"
+  if ! which claude >/dev/null 2>&1; then
+    echo "[ccells] ERROR: Claude Code installation failed!"
+    echo "[ccells] Checking install location..."
+    ls -la "$HOME/.claude/local/bin/" 2>&1 || echo "[ccells] Install dir not found"
+    exit 1
+  fi
+fi
+
+log "Claude Code found at: $(which claude)"
+log "Starting Claude Code..."
+`
+
 // SetProgram sets the program reference for PTY sessions to use
 func SetProgram(p *tea.Program) {
 	program = p
@@ -114,130 +230,23 @@ func NewPTYSession(ctx context.Context, dockerClient *client.Client, containerID
 		}
 	}
 
-	// Build the command to run Claude Code
-	// Setup steps:
-	// 1. Copy credentials file to expected location (uses $HOME for portability)
-	// 2. Create ~/.local/bin and symlink claude if needed (suppresses "native install" warning)
-	// 3. If claude is not installed, install it via npm (for devcontainer images without claude)
-	// 4. Run claude with --dangerously-skip-permissions since we're in an isolated container
-	//    - If resuming, use --continue to resume the previous session
-	//    - If new session with prompt, pass the prompt as argument
-	//
-	// On resume (IS_RESUME=1), the script is quieter since container is already configured.
-	setupScript := `
-# Helper function for logging (quiet on resume)
-log() {
-  test -z "$IS_RESUME" && echo "[ccells] $1"
-}
-
-log "Starting container setup..."
-log "User: $(whoami), Home: $HOME"
-
-# Ensure PATH includes user's local bin directories
-export PATH="$HOME/.local/bin:$HOME/.claude/local/bin:$PATH"
-
-# Kill any existing claude CLI processes (from previous sessions that weren't cleaned up)
-# This happens when ccells quits - the container stays running but the PTY is orphaned
-# Use specific pattern to avoid killing this script (which contains "claude" in paths)
-if pgrep -x "claude" >/dev/null 2>&1; then
-  log "Killing existing Claude processes from previous session..."
-  pkill -9 -x "claude" 2>/dev/null
-  sleep 1
-fi
-
-# Setup credentials - check both $HOME and /home/claude (for devcontainers running as root)
-CREDS_SRC=""
-if test -f "$HOME/.claude-credentials"; then
-  CREDS_SRC="$HOME/.claude-credentials"
-elif test -f "/home/claude/.claude-credentials"; then
-  CREDS_SRC="/home/claude/.claude-credentials"
-fi
-
-if test -n "$CREDS_SRC"; then
-  log "Copying credentials from $CREDS_SRC..."
-  mkdir -p "$HOME/.claude" 2>/dev/null
-  cp "$CREDS_SRC" "$HOME/.claude/.credentials.json" 2>/dev/null
-fi
-
-# Copy essential .claude files (NOT the whole directory - it's huge!)
-if test -d "/home/claude/.claude" && test "$HOME" != "/home/claude"; then
-  log "Copying .claude config from /home/claude..."
-  # Only copy essential config files, not cache/telemetry/shell-snapshots
-  for f in settings.json CLAUDE.md statsig; do
-    test -e "/home/claude/.claude/$f" && cp -r "/home/claude/.claude/$f" "$HOME/.claude/" 2>/dev/null
-  done
-  # Copy plugins config if it exists
-  if test -d "/home/claude/.claude/plugins"; then
-    mkdir -p "$HOME/.claude/plugins"
-    test -f "/home/claude/.claude/plugins/installed_plugins.json" && \
-      cp "/home/claude/.claude/plugins/installed_plugins.json" "$HOME/.claude/plugins/" 2>/dev/null
-  fi
-  # Copy session data for --continue
-  # Session data on host is stored under encoded HOST path (e.g., -Users-samuelreed-git-oss-docker-tui)
-  # But container runs in /workspace, so Claude looks for -workspace
-  # We need to copy from host-encoded path to -workspace
-  if test -n "$HOST_PROJECT_PATH"; then
-    # Encode host path: replace / with -
-    HOST_ENCODED=$(echo "$HOST_PROJECT_PATH" | sed 's|/|-|g')
-    HOST_SESSION_DIR="/home/claude/.claude/projects/$HOST_ENCODED"
-    if test -d "$HOST_SESSION_DIR"; then
-      log "Copying session data from $HOST_ENCODED to -workspace..."
-      mkdir -p "$HOME/.claude/projects/-workspace"
-      cp -r "$HOST_SESSION_DIR"/* "$HOME/.claude/projects/-workspace/" 2>/dev/null
-    else
-      log "No session data found at $HOST_SESSION_DIR"
-    fi
-  fi
-fi
-
-# Copy .claude.json (onboarding state, settings) if mounted at /home/claude
-if test -f "/home/claude/.claude.json" && test "$HOME" != "/home/claude"; then
-  log "Copying .claude.json from /home/claude..."
-  cp /home/claude/.claude.json "$HOME/.claude.json" 2>/dev/null || true
-fi
-
-# Copy .gitconfig for git user identity (name/email) - this is critical!
-# Without this, commits show as "Claude" instead of the actual user
-if test -f "/home/claude/.gitconfig" && test "$HOME" != "/home/claude"; then
-  log "Copying .gitconfig from /home/claude..."
-  cp /home/claude/.gitconfig "$HOME/.gitconfig" 2>/dev/null || true
-fi
-
-mkdir -p "$HOME/.local/bin" 2>/dev/null
-test ! -f "$HOME/.local/bin/claude" && which claude >/dev/null 2>&1 && ln -sf "$(which claude)" "$HOME/.local/bin/claude" 2>/dev/null
-
-# Install Claude Code if not available
-if ! which claude >/dev/null 2>&1; then
-  echo "[ccells] Claude Code not found, installing..."
-  curl -fsSL https://claude.ai/install.sh | bash 2>&1
-  export PATH="$HOME/.claude/local/bin:$PATH"
-  if ! which claude >/dev/null 2>&1; then
-    echo "[ccells] ERROR: Claude Code installation failed!"
-    echo "[ccells] Checking install location..."
-    ls -la "$HOME/.claude/local/bin/" 2>&1 || echo "[ccells] Install dir not found"
-    exit 1
-  fi
-fi
-
-log "Claude Code found at: $(which claude)"
-log "Starting Claude Code..."
-`
+	// Build the command to run Claude Code using the shared setup script
 	var setupCmd string
 	if opts != nil && opts.IsResume {
 		// Resume existing session
 		if opts.ClaudeSessionID != "" {
 			// Use --resume with explicit session ID (preferred)
-			setupCmd = setupScript + `exec claude --dangerously-skip-permissions --resume "` + escapeShellArg(opts.ClaudeSessionID) + `"`
+			setupCmd = containerSetupScript + `exec claude --dangerously-skip-permissions --resume "` + escapeShellArg(opts.ClaudeSessionID) + `"`
 		} else {
 			// Fall back to --continue if no session ID available
-			setupCmd = setupScript + `exec claude --dangerously-skip-permissions --continue`
+			setupCmd = containerSetupScript + `exec claude --dangerously-skip-permissions --continue`
 		}
 	} else if initialPrompt != "" {
 		// New session with initial prompt
-		setupCmd = setupScript + `exec claude --dangerously-skip-permissions "` + escapeShellArg(initialPrompt) + `"`
+		setupCmd = containerSetupScript + `exec claude --dangerously-skip-permissions "` + escapeShellArg(initialPrompt) + `"`
 	} else {
 		// New session without prompt
-		setupCmd = setupScript + `exec claude --dangerously-skip-permissions`
+		setupCmd = containerSetupScript + `exec claude --dangerously-skip-permissions`
 	}
 	cmd := []string{"/bin/bash", "-c", setupCmd}
 

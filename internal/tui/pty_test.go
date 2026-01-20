@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -830,5 +831,57 @@ func TestPTYOptionsWithSessionID(t *testing.T) {
 				t.Errorf("IsResume = %v, want %v", tt.opts.IsResume, tt.wantIsResume)
 			}
 		})
+	}
+}
+
+// TestContainerSetupScript_CopiesCustomConfig verifies that the container setup script
+// includes logic to copy custom commands and agents directories for status line customizations.
+func TestContainerSetupScript_CopiesCustomConfig(t *testing.T) {
+	tests := []struct {
+		name     string
+		contains string
+		desc     string
+	}{
+		{
+			name:     "copies settings.json",
+			contains: "settings.json",
+			desc:     "settings.json should be copied for status line and other settings",
+		},
+		{
+			name:     "copies commands directory",
+			contains: `"/home/claude/.claude/commands"`,
+			desc:     "commands/ directory should be copied for custom slash commands",
+		},
+		{
+			name:     "copies agents directory",
+			contains: `"/home/claude/.claude/agents"`,
+			desc:     "agents/ directory should be copied for custom agents",
+		},
+		{
+			name:     "copies plugins directory",
+			contains: `"/home/claude/.claude/plugins"`,
+			desc:     "plugins/ directory should be copied for plugin config",
+		},
+		{
+			name:     "copies CLAUDE.md",
+			contains: "CLAUDE.md",
+			desc:     "CLAUDE.md should be copied for global instructions",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !strings.Contains(containerSetupScript, tt.contains) {
+				t.Errorf("containerSetupScript should contain %q: %s", tt.contains, tt.desc)
+			}
+		})
+	}
+}
+
+// TestContainerSetupScript_CustomStatusLineComment verifies the script has a comment
+// explaining that commands are used for custom status line.
+func TestContainerSetupScript_CustomStatusLineComment(t *testing.T) {
+	if !strings.Contains(containerSetupScript, "custom status line") {
+		t.Error("containerSetupScript should document that commands/ is used for custom status line")
 	}
 }

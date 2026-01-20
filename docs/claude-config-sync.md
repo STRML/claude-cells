@@ -15,8 +15,8 @@ The main configuration directory containing:
 | `.credentials.json` | OAuth tokens (access_token, refresh_token, expiresAt) - **NOTE: leading dot!** | **YES - Critical** |
 | `CLAUDE.md` | User's global instructions | YES |
 | `plugins/` | Installed plugins | YES |
-| `commands/` | Custom slash commands | YES |
-| `agents/` | Custom agents | YES |
+| `commands/` | Custom slash commands (status line, etc.) | **YES - Critical for customizations** |
+| `agents/` | Custom agents | **YES - Critical for customizations** |
 | `history.jsonl` | Command history | Optional |
 | `projects/` | Project-specific state | Optional |
 | `debug/` | Debug logs | NO (skip) |
@@ -69,7 +69,15 @@ On macOS, OAuth credentials are stored in the system keychain:
 | `~/.claude-cells/claude-config/.gitconfig` | `/home/claude/.gitconfig` | RO |
 
 ### PTY Startup
-The PTY startup command copies credentials to the expected location:
+The PTY startup script copies configuration to the container user's home:
+- `settings.json` - User settings including status line configuration
+- `CLAUDE.md` - Global instructions (overwritten with ccells-specific instructions)
+- `statsig` - Feature flags
+- `plugins/` - Plugin configuration
+- `commands/` - Custom slash commands (for custom status line, etc.)
+- `agents/` - Custom agents
+
+Credentials are also copied to the expected location:
 ```bash
 test -f /home/claude/.claude-credentials && \
   cp /home/claude/.claude-credentials /home/claude/.claude/.credentials.json
