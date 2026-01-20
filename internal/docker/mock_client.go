@@ -2,6 +2,7 @@ package docker
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
 
@@ -18,6 +19,7 @@ type MockClient struct {
 
 type mockContainer struct {
 	ID     string
+	Name   string
 	State  string // "created", "running", "paused", "exited"
 	Config *ContainerConfig
 }
@@ -48,6 +50,7 @@ func (m *MockClient) CreateContainer(ctx context.Context, cfg *ContainerConfig) 
 	id := "mock-" + cfg.Name
 	m.containers[id] = &mockContainer{
 		ID:     id,
+		Name:   cfg.Name,
 		State:  "created",
 		Config: cfg,
 	}
@@ -75,6 +78,25 @@ func (m *MockClient) StopContainer(ctx context.Context, containerID string) erro
 }
 
 func (m *MockClient) RemoveContainer(ctx context.Context, containerID string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	delete(m.containers, containerID)
+	return nil
+}
+
+func (m *MockClient) GetContainerName(ctx context.Context, containerID string) (string, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if c, ok := m.containers[containerID]; ok {
+		return c.Name, nil
+	}
+	return "", fmt.Errorf("container not found: %s", containerID)
+}
+
+func (m *MockClient) RemoveContainerAndConfig(ctx context.Context, containerID string) error {
+	// Get name first (for mock purposes, we just remove the container)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

@@ -14,6 +14,8 @@ type DockerClient interface {
 	StartContainer(ctx context.Context, containerID string) error
 	StopContainer(ctx context.Context, containerID string) error
 	RemoveContainer(ctx context.Context, containerID string) error
+	GetContainerName(ctx context.Context, containerID string) (string, error)
+	RemoveContainerAndConfig(ctx context.Context, containerID string) error
 	PauseContainer(ctx context.Context, containerID string) error
 	UnpauseContainer(ctx context.Context, containerID string) error
 	GetContainerState(ctx context.Context, containerID string) (string, error)

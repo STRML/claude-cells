@@ -194,6 +194,35 @@ func (c *Client) RemoveContainer(ctx context.Context, containerID string) error 
 	return c.cli.ContainerRemove(ctx, containerID, container.RemoveOptions{Force: true})
 }
 
+// GetContainerName returns the name of a container by ID.
+func (c *Client) GetContainerName(ctx context.Context, containerID string) (string, error) {
+	info, err := c.cli.ContainerInspect(ctx, containerID)
+	if err != nil {
+		return "", err
+	}
+	// Docker container names have a leading slash
+	return strings.TrimPrefix(info.Name, "/"), nil
+}
+
+// RemoveContainerAndConfig removes a container and its associated config directory.
+// This should be called when destroying a workstream to clean up all resources.
+func (c *Client) RemoveContainerAndConfig(ctx context.Context, containerID string) error {
+	// Get container name before removing (needed for config cleanup)
+	containerName, _ := c.GetContainerName(ctx, containerID)
+
+	// Remove the container
+	if err := c.RemoveContainer(ctx, containerID); err != nil {
+		return err
+	}
+
+	// Clean up config directory if we got the name
+	if containerName != "" {
+		_ = CleanupContainerConfig(containerName)
+	}
+
+	return nil
+}
+
 // PauseContainer pauses a running container.
 func (c *Client) PauseContainer(ctx context.Context, containerID string) error {
 	return c.cli.ContainerPause(ctx, containerID)

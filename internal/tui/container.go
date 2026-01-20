@@ -809,9 +809,9 @@ func StopContainerCmd(ws *workstream.Workstream) tea.Cmd {
 			client, err := docker.NewClient()
 			if err == nil {
 				_ = client.StopContainer(ctx, ws.ContainerID)
-				LogDebug("Container stopped, removing")
-				_ = client.RemoveContainer(ctx, ws.ContainerID)
-				LogDebug("Container removed")
+				LogDebug("Container stopped, removing with config cleanup")
+				_ = client.RemoveContainerAndConfig(ctx, ws.ContainerID)
+				LogDebug("Container and config removed")
 				client.Close()
 			}
 			// Untrack the container since it's been removed
