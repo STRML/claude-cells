@@ -483,23 +483,29 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				pane := m.panes[m.focusedPane]
 				ws := pane.Workstream()
 
-				// If initializing or no output, fetch container logs
-				if pane.IsInitializing() || pane.GetFullOutput() == "" {
-					if ws.ContainerID != "" {
-						// Show a loading dialog while fetching logs
-						dialog := NewLogDialog(ws.BranchName, "Fetching container logs...")
-						dialog.SetSize(m.width-10, m.height-6)
-						m.dialog = &dialog
-						return m, FetchContainerLogsCmd(ws)
-					}
-					// No container yet
-					dialog := NewLogDialog(ws.BranchName, "(Container not started yet)")
-					dialog.SetSize(m.width-10, m.height-6)
-					m.dialog = &dialog
-					return m, nil
+				var logContent string
+				paneOutput := pane.GetFullOutput()
+
+				if paneOutput != "" {
+					logContent = paneOutput
+				} else if pane.IsInitializing() {
+					// Show initialization status
+					var status strings.Builder
+					status.WriteString("=== Container Initialization ===\n\n")
+					status.WriteString(fmt.Sprintf("Branch: %s\n", ws.BranchName))
+					status.WriteString(fmt.Sprintf("Container ID: %s\n", ws.ContainerID))
+					status.WriteString(fmt.Sprintf("Status: %s\n", pane.GetInitStatus()))
+					elapsed := time.Since(pane.GetInitStartTime())
+					status.WriteString(fmt.Sprintf("Elapsed: %v\n", elapsed.Round(time.Second)))
+					status.WriteString("\nWaiting for Claude Code to start...\n")
+					status.WriteString("This may take a few minutes if building an image.\n")
+					logContent = status.String()
+				} else if ws.ContainerID == "" {
+					logContent = "(Container not started yet)"
+				} else {
+					logContent = "(No output captured yet)"
 				}
 
-				logContent := pane.GetFullOutput()
 				dialog := NewLogDialog(ws.BranchName, logContent)
 				dialog.SetSize(m.width-10, m.height-6)
 				m.dialog = &dialog

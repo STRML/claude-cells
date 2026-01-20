@@ -15,7 +15,8 @@ import (
 )
 
 // initTimeout is how long to wait for initialization before showing a warning
-const initTimeout = 60 * time.Second
+// 5 minutes allows time for image builds and Claude Code installation
+const initTimeout = 5 * time.Minute
 
 // ansiRegex matches ANSI escape sequences
 var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
@@ -111,6 +112,16 @@ func (p *PaneModel) InitElapsed() time.Duration {
 		return 0
 	}
 	return time.Since(p.initStartTime)
+}
+
+// GetInitStatus returns the current initialization status message
+func (p *PaneModel) GetInitStatus() string {
+	return p.initStatus
+}
+
+// GetInitStartTime returns when initialization started
+func (p *PaneModel) GetInitStartTime() time.Time {
+	return p.initStartTime
 }
 
 // SetInitStatus sets the initialization status message and step
