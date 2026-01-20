@@ -2016,6 +2016,7 @@ func (m AppModel) View() tea.View {
 	m.statusBar.SetWorkstreamCount(m.manager.Count())
 	m.statusBar.SetInputMode(m.inputMode)
 	m.statusBar.SetLayoutName(m.layout.String())
+	m.statusBar.SetRepoPath(m.workingDir)
 	if pairing := m.manager.GetPairing(); pairing != nil {
 		m.statusBar.SetPairingBranch(pairing.BranchName)
 	} else {

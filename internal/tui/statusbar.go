@@ -15,6 +15,7 @@ type StatusBarModel struct {
 	showHelp        bool
 	inputMode       bool
 	layoutName      string
+	repoPath        string
 }
 
 // NewStatusBarModel creates a new status bar
@@ -52,8 +53,9 @@ func (s StatusBarModel) View() string {
 		modeIndicator = navStyle.Render("NAV")
 	}
 
-	// Left section: mode + app name and count
-	left := fmt.Sprintf("%s ccells: %d workstreams", modeIndicator, s.workstreamCount)
+	// Left section: mode + repo path + app name and count
+	repoPathStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
+	left := fmt.Sprintf("%s %s ccells: %d workstreams", modeIndicator, repoPathStyle.Render(s.repoPath), s.workstreamCount)
 
 	// Layout indicator (only show if more than 1 workstream)
 	if s.layoutName != "" && s.workstreamCount > 1 {
@@ -130,4 +132,9 @@ func (s *StatusBarModel) SetInputMode(inputMode bool) {
 // SetLayoutName sets the current layout name for display
 func (s *StatusBarModel) SetLayoutName(name string) {
 	s.layoutName = name
+}
+
+// SetRepoPath sets the repository path to display
+func (s *StatusBarModel) SetRepoPath(path string) {
+	s.repoPath = path
 }
