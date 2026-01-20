@@ -439,3 +439,59 @@ func TestSaveStateConcurrent(t *testing.T) {
 		}
 	}
 }
+
+func TestSaveStatePreservesClaudeSessionID(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create workstream with ClaudeSessionID set
+	ws := New("test prompt")
+	ws.ContainerID = "container-123"
+	ws.ClaudeSessionID = "01HZ8Y3QPXKJNM5VG2DTCW9RAE"
+
+	err = SaveState(tmpDir, []*Workstream{ws}, 0, 0)
+	if err != nil {
+		t.Fatalf("SaveState() error = %v", err)
+	}
+
+	state, err := LoadState(tmpDir)
+	if err != nil {
+		t.Fatalf("LoadState() error = %v", err)
+	}
+
+	saved := state.Workstreams[0]
+	if saved.ClaudeSessionID != ws.ClaudeSessionID {
+		t.Errorf("ClaudeSessionID mismatch: got %q, want %q", saved.ClaudeSessionID, ws.ClaudeSessionID)
+	}
+}
+
+func TestSaveStateEmptyClaudeSessionID(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Create workstream without ClaudeSessionID
+	ws := New("test prompt")
+	ws.ContainerID = "container-123"
+	// ClaudeSessionID is intentionally left empty
+
+	err = SaveState(tmpDir, []*Workstream{ws}, 0, 0)
+	if err != nil {
+		t.Fatalf("SaveState() error = %v", err)
+	}
+
+	state, err := LoadState(tmpDir)
+	if err != nil {
+		t.Fatalf("LoadState() error = %v", err)
+	}
+
+	saved := state.Workstreams[0]
+	if saved.ClaudeSessionID != "" {
+		t.Errorf("ClaudeSessionID should be empty, got %q", saved.ClaudeSessionID)
+	}
+}

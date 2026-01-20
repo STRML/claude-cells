@@ -16,12 +16,13 @@ const stateFileName = ".ccells-state.json"
 
 // SavedWorkstream represents a workstream saved to disk
 type SavedWorkstream struct {
-	ID          string    `json:"id"`
-	BranchName  string    `json:"branch_name"`
-	Prompt      string    `json:"prompt"`
-	Title       string    `json:"title,omitempty"` // Short summary title
-	ContainerID string    `json:"container_id"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID              string    `json:"id"`
+	BranchName      string    `json:"branch_name"`
+	Prompt          string    `json:"prompt"`
+	Title           string    `json:"title,omitempty"` // Short summary title
+	ContainerID     string    `json:"container_id"`
+	ClaudeSessionID string    `json:"claude_session_id,omitempty"` // Claude Code session ID for --resume
+	CreatedAt       time.Time `json:"created_at"`
 }
 
 // AppState represents the saved application state
@@ -54,12 +55,13 @@ func SaveState(dir string, workstreams []*Workstream, focusedIndex int, layout i
 
 	for _, ws := range workstreams {
 		state.Workstreams = append(state.Workstreams, SavedWorkstream{
-			ID:          ws.ID,
-			BranchName:  ws.BranchName,
-			Prompt:      ws.Prompt,
-			Title:       ws.Title,
-			ContainerID: ws.ContainerID,
-			CreatedAt:   ws.CreatedAt,
+			ID:              ws.ID,
+			BranchName:      ws.BranchName,
+			Prompt:          ws.Prompt,
+			Title:           ws.Title,
+			ContainerID:     ws.ContainerID,
+			ClaudeSessionID: ws.ClaudeSessionID,
+			CreatedAt:       ws.CreatedAt,
 		})
 	}
 

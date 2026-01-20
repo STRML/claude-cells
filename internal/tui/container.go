@@ -721,7 +721,7 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 }
 
 // StartPTYCmd returns a command that starts a PTY session in a container.
-// If isResume is true, uses 'claude --continue' to resume the previous session.
+// If isResume is true, uses 'claude --resume <session_id>' (or --continue as fallback).
 func StartPTYCmd(ws *workstream.Workstream, initialPrompt string, width, height int, isResume bool) tea.Cmd {
 	return func() tea.Msg {
 		// Use a timeout for PTY session creation
@@ -744,6 +744,7 @@ func StartPTYCmd(ws *workstream.Workstream, initialPrompt string, width, height 
 			Width:           width,
 			Height:          height,
 			IsResume:        isResume,
+			ClaudeSessionID: ws.GetClaudeSessionID(), // Pass session ID for --resume
 			HostProjectPath: hostProjectPath,
 		}
 

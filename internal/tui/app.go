@@ -1272,6 +1272,23 @@ Scroll Mode:
 		}
 		return m, nil
 
+	case SessionIDCapturedMsg:
+		// Session ID captured from Claude output - store it for future --resume
+		for i := range m.panes {
+			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				ws := m.panes[i].Workstream()
+				ws.SetClaudeSessionID(msg.SessionID)
+				// Save state immediately to persist the session ID
+				var workstreams []*workstream.Workstream
+				for _, pane := range m.panes {
+					workstreams = append(workstreams, pane.Workstream())
+				}
+				_ = workstream.SaveState(m.workingDir, workstreams, m.focusedPane, int(m.layout))
+				break
+			}
+		}
+		return m, nil
+
 	case ContainerLogsMsg:
 		// If there's a log dialog open, update it with the fetched logs
 		if m.dialog != nil && m.dialog.Type == DialogLog {
@@ -1651,7 +1668,8 @@ Scroll Mode:
 			ws := workstream.NewWithID(saved.ID, saved.BranchName, saved.Prompt)
 			ws.ContainerID = saved.ContainerID
 			ws.CreatedAt = saved.CreatedAt
-			ws.Title = saved.Title // Restore generated title
+			ws.Title = saved.Title                     // Restore generated title
+			ws.ClaudeSessionID = saved.ClaudeSessionID // Restore session ID for --resume
 			if err := m.manager.Add(ws); err != nil {
 				// Skip workstreams that exceed the limit during restore
 				continue

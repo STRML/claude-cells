@@ -157,3 +157,32 @@ func TestWorkstream_GetTitle_FallbackToBranchName(t *testing.T) {
 		t.Errorf("GetTitle() = %q, want %q (branch name)", got, ws.BranchName)
 	}
 }
+
+func TestWorkstream_SetClaudeSessionID(t *testing.T) {
+	ws := New("test workstream")
+	sessionID := "01HZ8Y3QPXKJNM5VG2DTCW9RAE"
+
+	ws.SetClaudeSessionID(sessionID)
+
+	if ws.ClaudeSessionID != sessionID {
+		t.Errorf("ClaudeSessionID = %q, want %q", ws.ClaudeSessionID, sessionID)
+	}
+}
+
+func TestWorkstream_GetClaudeSessionID(t *testing.T) {
+	ws := New("test workstream")
+	sessionID := "01HZ8Y3QPXKJNM5VG2DTCW9RAE"
+	ws.ClaudeSessionID = sessionID
+
+	if got := ws.GetClaudeSessionID(); got != sessionID {
+		t.Errorf("GetClaudeSessionID() = %q, want %q", got, sessionID)
+	}
+}
+
+func TestWorkstream_GetClaudeSessionID_Empty(t *testing.T) {
+	ws := New("test workstream")
+
+	if got := ws.GetClaudeSessionID(); got != "" {
+		t.Errorf("GetClaudeSessionID() = %q, want empty string", got)
+	}
+}
