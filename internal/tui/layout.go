@@ -57,6 +57,14 @@ type PanePosition struct {
 	Col    int // Which column this pane is in (for rendering)
 }
 
+// PaneBounds holds the screen coordinates and dimensions for hit testing
+type PaneBounds struct {
+	X      int
+	Y      int
+	Width  int
+	Height int
+}
+
 // CalculateLayout computes pane sizes based on layout type and available space
 func CalculateLayout(layout LayoutType, paneCount, totalWidth, totalHeight int) []PaneSize {
 	if paneCount == 0 {
@@ -496,4 +504,119 @@ func abs(x int) int {
 		return -x
 	}
 	return x
+}
+
+// CalculatePaneBounds computes screen bounds for each pane based on layout
+// The startY parameter is the Y offset where panes start (after title bar)
+func CalculatePaneBounds(layout LayoutType, paneCount, totalWidth, totalHeight, startY int) []PaneBounds {
+	if paneCount == 0 {
+		return nil
+	}
+
+	sizes := CalculateLayout(layout, paneCount, totalWidth, totalHeight)
+	bounds := make([]PaneBounds, paneCount)
+
+	switch layout {
+	case LayoutGrid:
+		cols, _ := calculateGridDimensions(paneCount)
+		x, y := 0, startY
+		for i := 0; i < paneCount; i++ {
+			col := i % cols
+			if col == 0 && i > 0 {
+				// New row
+				x = 0
+				y += sizes[i-1].Height
+			}
+			bounds[i] = PaneBounds{
+				X:      x,
+				Y:      y,
+				Width:  sizes[i].Width,
+				Height: sizes[i].Height,
+			}
+			x += sizes[i].Width
+		}
+
+	case LayoutMainLeft:
+		// Main pane on left
+		bounds[0] = PaneBounds{
+			X:      0,
+			Y:      startY,
+			Width:  sizes[0].Width,
+			Height: sizes[0].Height,
+		}
+		// Side panes stacked on right
+		y := startY
+		for i := 1; i < paneCount; i++ {
+			bounds[i] = PaneBounds{
+				X:      sizes[0].Width,
+				Y:      y,
+				Width:  sizes[i].Width,
+				Height: sizes[i].Height,
+			}
+			y += sizes[i].Height
+		}
+
+	case LayoutMainTop:
+		// Main pane on top
+		bounds[0] = PaneBounds{
+			X:      0,
+			Y:      startY,
+			Width:  sizes[0].Width,
+			Height: sizes[0].Height,
+		}
+		// Bottom panes in a row
+		x := 0
+		for i := 1; i < paneCount; i++ {
+			bounds[i] = PaneBounds{
+				X:      x,
+				Y:      startY + sizes[0].Height,
+				Width:  sizes[i].Width,
+				Height: sizes[i].Height,
+			}
+			x += sizes[i].Width
+		}
+
+	case LayoutRows:
+		// Full-width panes stacked vertically
+		y := startY
+		for i := 0; i < paneCount; i++ {
+			bounds[i] = PaneBounds{
+				X:      0,
+				Y:      y,
+				Width:  sizes[i].Width,
+				Height: sizes[i].Height,
+			}
+			y += sizes[i].Height
+		}
+
+	case LayoutColumns:
+		// Full-height panes side by side
+		x := 0
+		for i := 0; i < paneCount; i++ {
+			bounds[i] = PaneBounds{
+				X:      x,
+				Y:      startY,
+				Width:  sizes[i].Width,
+				Height: sizes[i].Height,
+			}
+			x += sizes[i].Width
+		}
+
+	default:
+		// Fall back to grid
+		return CalculatePaneBounds(LayoutGrid, paneCount, totalWidth, totalHeight, startY)
+	}
+
+	return bounds
+}
+
+// FindPaneAtPosition returns the index of the pane at the given screen coordinates
+// Returns -1 if no pane is at that position
+func FindPaneAtPosition(bounds []PaneBounds, x, y int) int {
+	for i, b := range bounds {
+		if x >= b.X && x < b.X+b.Width && y >= b.Y && y < b.Y+b.Height {
+			return i
+		}
+	}
+	return -1
 }

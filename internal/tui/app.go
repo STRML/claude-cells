@@ -180,6 +180,37 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.updateLayout()
 		return m, nil
 
+	case tea.MouseMsg:
+		// Handle mouse clicks to focus panes and enter input mode
+		if msg.Button == tea.MouseButtonLeft && msg.Action == tea.MouseActionPress {
+			// Don't handle clicks when dialog is active
+			if m.dialog != nil {
+				return m, nil
+			}
+
+			// Calculate pane bounds (title bar is 1 line, panes start at Y=1)
+			titleBarHeight := 1
+			statusBarHeight := 1
+			availableHeight := m.height - titleBarHeight - statusBarHeight
+
+			bounds := CalculatePaneBounds(m.layout, len(m.panes), m.width, availableHeight, titleBarHeight)
+			clickedPane := FindPaneAtPosition(bounds, msg.X, msg.Y)
+
+			if clickedPane >= 0 && clickedPane < len(m.panes) {
+				// Focus the clicked pane
+				if m.focusedPane < len(m.panes) {
+					m.panes[m.focusedPane].SetFocused(false)
+				}
+				m.focusedPane = clickedPane
+				m.panes[m.focusedPane].SetFocused(true)
+
+				// Enter input mode
+				m.inputMode = true
+				return m, tea.ShowCursor
+			}
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		// If dialog is active, handle dialog input
 		if m.dialog != nil {
