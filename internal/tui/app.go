@@ -541,8 +541,14 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			if time.Since(m.lastEscapeTime) < escapeTimeout {
-				// Double escape in nav mode - show quit confirmation
+				// Double escape in nav mode - quit (with confirmation if workstreams exist)
 				m.lastEscapeTime = time.Time{}
+				if len(m.panes) == 0 {
+					// No workstreams - quit immediately without confirmation
+					m.quitting = true
+					m.manager.Close()
+					return m, SaveStateAndQuitCmd(m.stateDir, nil, 0, int(m.layout))
+				}
 				dialog := NewQuitConfirmDialog()
 				dialog.SetSize(50, 12)
 				m.dialog = &dialog
@@ -555,7 +561,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Navigation mode keybinds
 		switch msg.String() {
 		case "q", "ctrl+c":
-			// Show quit confirmation dialog
+			// Quit (with confirmation if workstreams exist)
+			if len(m.panes) == 0 {
+				// No workstreams - quit immediately without confirmation
+				m.quitting = true
+				m.manager.Close()
+				return m, SaveStateAndQuitCmd(m.stateDir, nil, 0, int(m.layout))
+			}
 			dialog := NewQuitConfirmDialog()
 			dialog.SetSize(50, 12)
 			m.dialog = &dialog

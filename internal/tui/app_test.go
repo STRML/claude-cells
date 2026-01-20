@@ -67,7 +67,8 @@ func TestNewAppModel(t *testing.T) {
 	}
 }
 
-func TestAppModel_Update_QuitDialog(t *testing.T) {
+func TestAppModel_Update_QuitNoWorkstreams(t *testing.T) {
+	// When no workstreams exist, quit immediately without confirmation
 	tests := []struct {
 		name string
 		key  string
@@ -85,20 +86,139 @@ func TestAppModel_Update_QuitDialog(t *testing.T) {
 			} else {
 				msg = keyPressStr(tt.key)
 			}
-			model, _ := app.Update(msg)
+			model, cmd := app.Update(msg)
+
+			appModel := model.(AppModel)
+			// Should quit immediately without dialog when no workstreams
+			if !appModel.quitting {
+				t.Errorf("Should be quitting immediately after '%s' with no workstreams", tt.key)
+			}
+			if appModel.dialog != nil {
+				t.Errorf("Dialog should not be open after '%s' with no workstreams", tt.key)
+			}
+			if cmd == nil {
+				t.Errorf("Should return quit command after '%s' with no workstreams", tt.key)
+			}
+		})
+	}
+}
+
+func TestAppModel_Update_QuitWithWorkstreams(t *testing.T) {
+	// When workstreams exist, show confirmation dialog
+	tests := []struct {
+		name string
+		key  string
+	}{
+		{"q key", "q"},
+		{"ctrl+c", "ctrl+c"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := NewAppModel(context.Background())
+			app.width = 100
+			app.height = 40
+
+			// Create a workstream first
+			model, _ := app.Update(DialogConfirmMsg{
+				Type:  DialogNewWorkstream,
+				Value: "test feature",
+			})
+			app = model.(AppModel)
+
+			if len(app.panes) == 0 {
+				t.Fatal("Should have created a workstream")
+			}
+
+			var msg tea.KeyPressMsg
+			if tt.key == "ctrl+c" {
+				msg = ctrlKey('c')
+			} else {
+				msg = keyPressStr(tt.key)
+			}
+			model, _ = app.Update(msg)
 
 			appModel := model.(AppModel)
 			// Should show quit confirmation dialog, not quit immediately
 			if appModel.quitting {
-				t.Errorf("Should not be quitting immediately after '%s'", tt.key)
+				t.Errorf("Should not be quitting immediately after '%s' with workstreams", tt.key)
 			}
 			if appModel.dialog == nil {
-				t.Errorf("Dialog should be open after '%s'", tt.key)
+				t.Errorf("Dialog should be open after '%s' with workstreams", tt.key)
 			}
 			if appModel.dialog.Type != DialogQuitConfirm {
 				t.Errorf("Dialog should be DialogQuitConfirm type after '%s'", tt.key)
 			}
 		})
+	}
+}
+
+func TestAppModel_Update_DoubleEscapeQuitNoWorkstreams(t *testing.T) {
+	// Double-escape in nav mode with no workstreams should quit immediately
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// First escape - sets lastEscapeTime
+	model, _ := app.Update(specialKey(tea.KeyEscape))
+	app = model.(AppModel)
+
+	if app.quitting {
+		t.Error("Should not be quitting after first escape")
+	}
+
+	// Second escape (within timeout) - should quit immediately without dialog
+	model, cmd := app.Update(specialKey(tea.KeyEscape))
+	app = model.(AppModel)
+
+	if !app.quitting {
+		t.Error("Should be quitting after double-escape with no workstreams")
+	}
+	if app.dialog != nil {
+		t.Error("Dialog should not be open after double-escape with no workstreams")
+	}
+	if cmd == nil {
+		t.Error("Should return quit command after double-escape with no workstreams")
+	}
+}
+
+func TestAppModel_Update_DoubleEscapeQuitWithWorkstreams(t *testing.T) {
+	// Double-escape in nav mode with workstreams should show confirmation dialog
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream first
+	model, _ := app.Update(DialogConfirmMsg{
+		Type:  DialogNewWorkstream,
+		Value: "test feature",
+	})
+	app = model.(AppModel)
+
+	if len(app.panes) == 0 {
+		t.Fatal("Should have created a workstream")
+	}
+
+	// First escape - sets lastEscapeTime
+	model, _ = app.Update(specialKey(tea.KeyEscape))
+	app = model.(AppModel)
+
+	if app.quitting {
+		t.Error("Should not be quitting after first escape")
+	}
+
+	// Second escape (within timeout) - should show dialog
+	model, _ = app.Update(specialKey(tea.KeyEscape))
+	app = model.(AppModel)
+
+	if app.quitting {
+		t.Error("Should not be quitting immediately after double-escape with workstreams")
+	}
+	if app.dialog == nil {
+		t.Error("Dialog should be open after double-escape with workstreams")
+	}
+	if app.dialog.Type != DialogQuitConfirm {
+		t.Error("Dialog should be DialogQuitConfirm type")
 	}
 }
 
