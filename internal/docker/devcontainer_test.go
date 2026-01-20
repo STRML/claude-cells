@@ -25,10 +25,10 @@ func TestLoadDevcontainerConfig(t *testing.T) {
 			setupFiles: map[string]string{
 				".devcontainer/devcontainer.json": `{
 					"name": "Test",
-					"image": "golang:1.23"
+					"image": "golang:1.25"
 				}`,
 			},
-			wantImage: "golang:1.23",
+			wantImage: "golang:1.25",
 			wantBuild: nil,
 			wantEnv:   nil,
 		},
@@ -45,10 +45,10 @@ func TestLoadDevcontainerConfig(t *testing.T) {
 		{
 			name: "prefer .devcontainer folder over root",
 			setupFiles: map[string]string{
-				".devcontainer/devcontainer.json": `{"image": "golang:1.23"}`,
+				".devcontainer/devcontainer.json": `{"image": "golang:1.25"}`,
 				".devcontainer.json":              `{"image": "node:20"}`,
 			},
-			wantImage: "golang:1.23",
+			wantImage: "golang:1.25",
 		},
 		{
 			name: "build section with dockerfile",
@@ -91,14 +91,14 @@ func TestLoadDevcontainerConfig(t *testing.T) {
 			name: "containerEnv parsing",
 			setupFiles: map[string]string{
 				".devcontainer/devcontainer.json": `{
-					"image": "golang:1.23",
+					"image": "golang:1.25",
 					"containerEnv": {
 						"GOPROXY": "https://proxy.golang.org",
 						"CGO_ENABLED": "0"
 					}
 				}`,
 			},
-			wantImage: "golang:1.23",
+			wantImage: "golang:1.25",
 			wantEnv: map[string]string{
 				"GOPROXY":     "https://proxy.golang.org",
 				"CGO_ENABLED": "0",
@@ -248,7 +248,7 @@ func TestGetProjectImage(t *testing.T) {
 		{
 			name: "builds derived image when devcontainer.json has image",
 			setupFiles: map[string]string{
-				".devcontainer/devcontainer.json": `{"image": "golang:1.23"}`,
+				".devcontainer/devcontainer.json": `{"image": "golang:1.25"}`,
 			},
 			// When devcontainer.json has an image, we build a derived image with Claude Code
 			wantBuild: true,
@@ -263,7 +263,7 @@ func TestGetProjectImage(t *testing.T) {
 			name: "build required when only dockerfile specified",
 			setupFiles: map[string]string{
 				".devcontainer/devcontainer.json": `{"build": {"dockerfile": "Dockerfile"}}`,
-				".devcontainer/Dockerfile":        `FROM golang:1.23`,
+				".devcontainer/Dockerfile":        `FROM golang:1.25`,
 			},
 			wantBuild: true,
 		},
