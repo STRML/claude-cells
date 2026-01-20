@@ -1,6 +1,6 @@
 {
   "name": "Claude Cells Dev",
-  "image": "golang:1.23",
+  "image": "golang:1.25.5",
   "customizations": {
     "vscode": {
       "extensions": ["golang.go"]
