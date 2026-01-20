@@ -56,7 +56,7 @@ func TestNewPRDialog(t *testing.T) {
 
 func TestDialogModel_Update_Escape(t *testing.T) {
 	d := NewWorkstreamDialog()
-	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEsc})
 
 	if cmd == nil {
 		t.Error("Should return a command on escape")
@@ -72,7 +72,7 @@ func TestDialogModel_Update_Escape(t *testing.T) {
 func TestDialogModel_Update_Enter_Empty(t *testing.T) {
 	d := NewWorkstreamDialog()
 	// Don't type anything, just press enter
-	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	// Should not confirm with empty input
 	if cmd != nil {
@@ -474,7 +474,7 @@ func TestLogDialog_Scrolling(t *testing.T) {
 
 func TestLogDialog_DismissOnEnter(t *testing.T) {
 	d := NewLogDialog("test-branch", "Some log content")
-	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	_, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
 
 	if cmd == nil {
 		t.Fatal("Should return a command on enter")
@@ -488,7 +488,7 @@ func TestLogDialog_DismissOnEnter(t *testing.T) {
 
 func TestLogDialog_DismissOnEscape(t *testing.T) {
 	d := NewLogDialog("test-branch", "Some log content")
-	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEsc})
 
 	if cmd == nil {
 		t.Fatal("Should return a command on escape")
@@ -553,7 +553,7 @@ func TestProgressDialog_CantDismissWhileInProgress(t *testing.T) {
 	}
 
 	// Try to dismiss with Escape - should not work
-	d, cmd = d.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	_, cmd = d.Update(tea.KeyMsg{Type: tea.KeyEsc})
 	if cmd != nil {
 		msg := cmd()
 		if _, ok := msg.(DialogCancelMsg); ok {
