@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"fmt"
 	"testing"
 )
 
@@ -57,8 +58,15 @@ func (m *MockGit) CurrentBranch(ctx context.Context) (string, error) {
 
 // MockMutagen for testing
 type MockMutagen struct {
-	createCalled    bool
-	terminateCalled bool
+	createCalled      bool
+	terminateCalled   bool
+	checkInstalledErr error
+	sessionExists     bool
+	conflicts         []string
+}
+
+func (m *MockMutagen) CheckInstalled(ctx context.Context) error {
+	return m.checkInstalledErr
 }
 
 func (m *MockMutagen) CreateSession(ctx context.Context, branch, container, path string) error {
@@ -71,13 +79,21 @@ func (m *MockMutagen) TerminateSession(ctx context.Context, branch string) error
 	return nil
 }
 
+func (m *MockMutagen) SessionExists(ctx context.Context, branch string) (bool, error) {
+	return m.sessionExists, nil
+}
+
+func (m *MockMutagen) GetConflicts(ctx context.Context, branch string) ([]string, error) {
+	return m.conflicts, nil
+}
+
 func TestPairing_Enable_NoChanges(t *testing.T) {
 	git := &MockGit{hasChanges: false}
 	mutagen := &MockMutagen{}
 	p := NewPairingWithMocks(git, mutagen)
 	ctx := context.Background()
 
-	err := p.Enable(ctx, "feature-branch", "container-123", "/path/to/repo")
+	err := p.Enable(ctx, "feature-branch", "container-123", "/path/to/repo", "main")
 	if err != nil {
 		t.Fatalf("Enable() error = %v", err)
 	}
@@ -94,6 +110,9 @@ func TestPairing_Enable_NoChanges(t *testing.T) {
 	if !p.IsActive() {
 		t.Error("IsActive() should be true after Enable()")
 	}
+	if p.PreviousBranch() != "main" {
+		t.Errorf("PreviousBranch() = %q, want %q", p.PreviousBranch(), "main")
+	}
 }
 
 func TestPairing_Enable_WithChanges(t *testing.T) {
@@ -102,7 +121,7 @@ func TestPairing_Enable_WithChanges(t *testing.T) {
 	p := NewPairingWithMocks(git, mutagen)
 	ctx := context.Background()
 
-	err := p.Enable(ctx, "feature-branch", "container-123", "/path/to/repo")
+	err := p.Enable(ctx, "feature-branch", "container-123", "/path/to/repo", "develop")
 	if err != nil {
 		t.Fatalf("Enable() error = %v", err)
 	}
@@ -122,7 +141,7 @@ func TestPairing_Disable(t *testing.T) {
 	ctx := context.Background()
 
 	// First enable
-	_ = p.Enable(ctx, "feature-branch", "container-123", "/path/to/repo")
+	_ = p.Enable(ctx, "feature-branch", "container-123", "/path/to/repo", "main")
 
 	// Then disable
 	err := p.Disable(ctx)
@@ -135,5 +154,96 @@ func TestPairing_Disable(t *testing.T) {
 	}
 	if p.IsActive() {
 		t.Error("IsActive() should be false after Disable()")
+	}
+}
+
+func TestPairing_CheckPrerequisites_MutagenNotInstalled(t *testing.T) {
+	mutagen := &MockMutagen{checkInstalledErr: fmt.Errorf("mutagen not found")}
+	p := NewPairingWithMocks(nil, mutagen)
+	ctx := context.Background()
+
+	err := p.CheckPrerequisites(ctx)
+	if err == nil {
+		t.Error("CheckPrerequisites() should fail when mutagen not installed")
+	}
+}
+
+func TestPairing_GetState(t *testing.T) {
+	git := &MockGit{}
+	mutagen := &MockMutagen{}
+	p := NewPairingWithMocks(git, mutagen)
+	ctx := context.Background()
+
+	// Check initial state
+	state := p.GetState()
+	if state.Active {
+		t.Error("Initial state should not be active")
+	}
+
+	// Enable pairing
+	_ = p.Enable(ctx, "feature-branch", "container-123", "/path/to/repo", "main")
+
+	// Check state after enable
+	state = p.GetState()
+	if !state.Active {
+		t.Error("State should be active after Enable")
+	}
+	if state.CurrentBranch != "feature-branch" {
+		t.Errorf("CurrentBranch = %q, want %q", state.CurrentBranch, "feature-branch")
+	}
+	if state.PreviousBranch != "main" {
+		t.Errorf("PreviousBranch = %q, want %q", state.PreviousBranch, "main")
+	}
+	if state.ContainerID != "container-123" {
+		t.Errorf("ContainerID = %q, want %q", state.ContainerID, "container-123")
+	}
+	if !state.SyncHealthy {
+		t.Error("SyncHealthy should be true after Enable")
+	}
+}
+
+func TestPairing_SyncHealth_DetectsLostSession(t *testing.T) {
+	git := &MockGit{}
+	mutagen := &MockMutagen{sessionExists: false}
+	p := NewPairingWithMocks(git, mutagen)
+	ctx := context.Background()
+
+	// Enable pairing (need session to exist during enable)
+	mutagen.sessionExists = true
+	_ = p.Enable(ctx, "feature-branch", "container-123", "/path/to/repo", "main")
+
+	// Simulate session being lost
+	mutagen.sessionExists = false
+
+	err := p.CheckSyncHealth(ctx)
+	if err == nil {
+		t.Error("CheckSyncHealth() should return error when session lost")
+	}
+
+	healthy, _ := p.GetSyncHealth()
+	if healthy {
+		t.Error("GetSyncHealth() should report unhealthy when session lost")
+	}
+}
+
+func TestPairing_SyncHealth_DetectsConflicts(t *testing.T) {
+	git := &MockGit{}
+	mutagen := &MockMutagen{sessionExists: true, conflicts: []string{"file1.go", "file2.go"}}
+	p := NewPairingWithMocks(git, mutagen)
+	ctx := context.Background()
+
+	_ = p.Enable(ctx, "feature-branch", "container-123", "/path/to/repo", "main")
+
+	err := p.CheckSyncHealth(ctx)
+	if err == nil {
+		t.Error("CheckSyncHealth() should return error when conflicts exist")
+	}
+
+	healthy, conflicts := p.GetSyncHealth()
+	if healthy {
+		t.Error("GetSyncHealth() should report unhealthy with conflicts")
+	}
+	if len(conflicts) != 2 {
+		t.Errorf("GetSyncHealth() conflicts = %d, want 2", len(conflicts))
 	}
 }

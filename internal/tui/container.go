@@ -1381,6 +1381,7 @@ func RebaseBranchCmd(ws *workstream.Workstream) tea.Cmd {
 type PairingEnabledMsg struct {
 	WorkstreamID   string
 	StashedChanges bool
+	PreviousBranch string
 	Error          error
 }
 
@@ -1392,7 +1393,7 @@ type PairingDisabledMsg struct {
 }
 
 // EnablePairingCmd returns a command that enables pairing mode for a workstream.
-func EnablePairingCmd(ws *workstream.Workstream) tea.Cmd {
+func EnablePairingCmd(orchestrator *sync.Pairing, ws *workstream.Workstream, previousBranch string) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
@@ -1402,77 +1403,72 @@ func EnablePairingCmd(ws *workstream.Workstream) tea.Cmd {
 			return PairingEnabledMsg{WorkstreamID: ws.ID, Error: err}
 		}
 
-		gitRepo := git.New(repoPath)
-		var stashedChanges bool
-
-		// Check for uncommitted changes
-		hasChanges, err := gitRepo.HasUncommittedChanges(ctx)
-		if err != nil {
-			return PairingEnabledMsg{WorkstreamID: ws.ID, Error: fmt.Errorf("failed to check git status: %w", err)}
+		// Check prerequisites first (is mutagen installed?)
+		if err := orchestrator.CheckPrerequisites(ctx); err != nil {
+			return PairingEnabledMsg{WorkstreamID: ws.ID, Error: err}
 		}
 
-		// Stash if needed
-		if hasChanges {
-			if err := gitRepo.Stash(ctx); err != nil {
-				return PairingEnabledMsg{WorkstreamID: ws.ID, Error: fmt.Errorf("failed to stash changes: %w", err)}
-			}
-			stashedChanges = true
+		// Use orchestrator to enable pairing
+		if err := orchestrator.Enable(ctx, ws.BranchName, ws.ContainerID, repoPath, previousBranch); err != nil {
+			return PairingEnabledMsg{WorkstreamID: ws.ID, Error: err}
 		}
 
-		// Start mutagen sync
-		mutagen := sync.NewMutagen()
-		if err := mutagen.CreateSession(ctx, ws.BranchName, ws.ContainerID, repoPath); err != nil {
-			// Try to unstash on failure
-			if stashedChanges {
-				_ = gitRepo.StashPop(ctx)
-			}
-			return PairingEnabledMsg{WorkstreamID: ws.ID, Error: fmt.Errorf("failed to start mutagen: %w", err)}
-		}
-
-		// Checkout workstream branch locally
-		if err := gitRepo.Checkout(ctx, ws.BranchName); err != nil {
-			// Try to clean up on failure
-			_ = mutagen.TerminateSession(ctx, ws.BranchName)
-			if stashedChanges {
-				_ = gitRepo.StashPop(ctx)
-			}
-			return PairingEnabledMsg{WorkstreamID: ws.ID, Error: fmt.Errorf("failed to checkout branch: %w", err)}
-		}
+		// Get stashed status from orchestrator state
+		state := orchestrator.GetState()
 
 		return PairingEnabledMsg{
 			WorkstreamID:   ws.ID,
-			StashedChanges: stashedChanges,
+			StashedChanges: state.StashedChanges,
+			PreviousBranch: state.PreviousBranch,
 		}
 	}
 }
 
 // DisablePairingCmd returns a command that disables pairing mode.
-func DisablePairingCmd(ws *workstream.Workstream, previousBranch string, stashedChanges bool) tea.Cmd {
+func DisablePairingCmd(orchestrator *sync.Pairing, ws *workstream.Workstream) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		repoPath, err := os.Getwd()
-		if err != nil {
-			return PairingDisabledMsg{WorkstreamID: ws.ID, Error: err}
-		}
+		// Get state before disabling (to know if we should remind about stash pop)
+		state := orchestrator.GetState()
 
-		gitRepo := git.New(repoPath)
-		mutagen := sync.NewMutagen()
-
-		// Terminate mutagen sync
-		_ = mutagen.TerminateSession(ctx, ws.BranchName)
-
-		// Checkout previous branch
-		if previousBranch != "" && previousBranch != ws.BranchName {
-			if err := gitRepo.Checkout(ctx, previousBranch); err != nil {
-				return PairingDisabledMsg{WorkstreamID: ws.ID, StashedChanges: stashedChanges, Error: fmt.Errorf("failed to checkout %s: %w", previousBranch, err)}
+		// Use orchestrator to disable pairing
+		if err := orchestrator.Disable(ctx); err != nil {
+			return PairingDisabledMsg{
+				WorkstreamID:   ws.ID,
+				StashedChanges: state.StashedChanges,
+				Error:          err,
 			}
 		}
 
 		return PairingDisabledMsg{
 			WorkstreamID:   ws.ID,
-			StashedChanges: stashedChanges,
+			StashedChanges: state.StashedChanges,
+		}
+	}
+}
+
+// PairingSyncHealthMsg is sent when pairing sync health is checked.
+type PairingSyncHealthMsg struct {
+	Healthy   bool
+	Conflicts []string
+	Error     error
+}
+
+// CheckPairingSyncHealthCmd returns a command that checks pairing sync health.
+func CheckPairingSyncHealthCmd(orchestrator *sync.Pairing) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		err := orchestrator.CheckSyncHealth(ctx)
+		healthy, conflicts := orchestrator.GetSyncHealth()
+
+		return PairingSyncHealthMsg{
+			Healthy:   healthy,
+			Conflicts: conflicts,
+			Error:     err,
 		}
 	}
 }
