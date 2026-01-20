@@ -7,11 +7,14 @@ import (
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/STRML/claude-cells/internal/docker"
+	"github.com/STRML/claude-cells/internal/git"
 	"github.com/STRML/claude-cells/internal/tui"
 	"github.com/STRML/claude-cells/internal/workstream"
 )
@@ -62,6 +65,77 @@ func (s *spinner) Stop() {
 	close(s.done)
 	// Small delay to ensure spinner is cleared
 	time.Sleep(100 * time.Millisecond)
+}
+
+const lockFileName = ".ccells.lock"
+
+// lockFile represents an acquired lock
+type lockFile struct {
+	path string
+}
+
+// acquireLock attempts to acquire an exclusive lock for this repo.
+// Returns a lockFile on success, or an error if another instance is running.
+func acquireLock(stateDir string) (*lockFile, error) {
+	lockPath := filepath.Join(stateDir, lockFileName)
+
+	// Check if lock file exists
+	if data, err := os.ReadFile(lockPath); err == nil {
+		// Lock file exists - check if the process is still running
+		pidStr := strings.TrimSpace(string(data))
+		if pid, err := strconv.Atoi(pidStr); err == nil {
+			// Check if process is still alive
+			if process, err := os.FindProcess(pid); err == nil {
+				// On Unix, FindProcess always succeeds, so we need to send signal 0
+				if err := process.Signal(syscall.Signal(0)); err == nil {
+					// Process is still running
+					return nil, fmt.Errorf("another ccells instance is already running (PID %d)", pid)
+				}
+			}
+		}
+		// Stale lock file - remove it
+		os.Remove(lockPath)
+	}
+
+	// Create lock file with our PID
+	pid := os.Getpid()
+	if err := os.WriteFile(lockPath, []byte(strconv.Itoa(pid)), 0644); err != nil {
+		return nil, fmt.Errorf("failed to create lock file: %w", err)
+	}
+
+	return &lockFile{path: lockPath}, nil
+}
+
+// Release removes the lock file
+func (l *lockFile) Release() {
+	if l != nil && l.path != "" {
+		os.Remove(l.path)
+	}
+}
+
+// getStateDir returns the state directory for the current repo.
+// Falls back to cwd if repo ID cannot be determined.
+func getStateDir() string {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return cwd
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	gitOps := git.New(cwd)
+	repoID, err := gitOps.RepoID(ctx)
+	if err != nil || repoID == "" {
+		return cwd
+	}
+
+	stateDir, err := workstream.GetStateDir(repoID)
+	if err != nil {
+		return cwd
+	}
+
+	return stateDir
 }
 
 func printHelp() {
@@ -117,6 +191,16 @@ func main() {
 			os.Exit(0)
 		}
 	}
+
+	// Acquire lock to ensure only one instance runs per repo
+	stateDir := getStateDir()
+	lock, err := acquireLock(stateDir)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "If the other instance crashed, delete: %s/%s\n", stateDir, lockFileName)
+		os.Exit(1)
+	}
+	defer lock.Release()
 
 	// Create a cancellable context for the entire application.
 	// This context is cancelled on SIGINT/SIGTERM and propagates
