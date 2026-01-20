@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"io"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -237,94 +238,13 @@ echo "[ccells] Starting Claude Code..."
 		height:       height,
 	}
 
-	// Auto-accept the bypass permissions prompt
-	// Read output until we see the prompt, then send down+enter to accept
-	if err := session.autoAcceptBypassPermissions(); err != nil {
-		// Log but don't fail - the prompt may not appear
-		// (e.g., if already accepted or different Claude version)
-	}
-
-	// Start reading from PTY immediately to avoid losing output
-	// between autoAcceptBypassPermissions returning and PTYReadyMsg being processed
+	// Start the read loop immediately - it will handle both:
+	// 1. Forwarding output to the pane
+	// 2. Auto-accepting the bypass permissions prompt if it appears
+	log.Printf("[PTY %s] Starting read loop", workstreamID)
 	go session.StartReadLoop()
 
 	return session, nil
-}
-
-// autoAcceptBypassPermissions reads PTY output looking for the bypass permissions
-// prompt and automatically accepts it by sending down arrow + enter.
-// It forwards all output to the pane in real-time so the user sees startup progress.
-func (p *PTYSession) autoAcceptBypassPermissions() error {
-	// Buffer to detect the bypass prompt (we need to see the full phrase)
-	var accumulated strings.Builder
-	buf := make([]byte, 1024)
-
-	// Create a timeout context
-	ctx, cancel := context.WithTimeout(p.ctx, 10*time.Second)
-	defer cancel()
-
-	for {
-		select {
-		case <-ctx.Done():
-			// Timeout or cancelled - prompt may not have appeared, continue anyway
-			return nil
-		default:
-		}
-
-		// Set a short read deadline to avoid blocking forever
-		// Note: Docker hijacked connections don't support SetReadDeadline,
-		// so we use a goroutine with channel instead
-		readDone := make(chan struct {
-			n   int
-			err error
-		}, 1)
-
-		go func() {
-			n, err := p.conn.Reader.Read(buf)
-			readDone <- struct {
-				n   int
-				err error
-			}{n, err}
-		}()
-
-		select {
-		case <-ctx.Done():
-			return nil
-		case result := <-readDone:
-			if result.err != nil {
-				return result.err
-			}
-			if result.n > 0 {
-				// Forward output to the pane so user sees startup progress
-				if program != nil {
-					output := make([]byte, result.n)
-					copy(output, buf[:result.n])
-					program.Send(PTYOutputMsg{
-						WorkstreamID: p.workstreamID,
-						Output:       output,
-					})
-				}
-
-				accumulated.Write(buf[:result.n])
-				content := accumulated.String()
-
-				// Check if we see the bypass permissions prompt
-				if strings.Contains(content, "Bypass Permissions mode") {
-					// Wait a moment for the full prompt to render
-					time.Sleep(100 * time.Millisecond)
-
-					// Send down arrow to select "Yes, I accept"
-					p.Write([]byte{27, '[', 'B'}) // Down arrow
-					time.Sleep(50 * time.Millisecond)
-
-					// Send enter to confirm
-					p.Write([]byte{'\r'})
-
-					return nil
-				}
-			}
-		}
-	}
 }
 
 // Resize changes the terminal size of the PTY session.
@@ -352,8 +272,16 @@ func (p *PTYSession) Resize(width, height int) error {
 // StartReadLoop starts reading from the PTY and sending output messages.
 // This should be called in a goroutine. Uses context-based cancellation
 // to avoid race conditions with Close().
+// It also handles auto-accepting the bypass permissions prompt if it appears.
 func (p *PTYSession) StartReadLoop() {
+	log.Printf("[PTY %s] StartReadLoop started, program=%v", p.workstreamID, program != nil)
 	buf := make([]byte, 4096)
+
+	// For detecting the bypass permissions prompt during startup
+	var accumulated strings.Builder
+	bypassHandled := false
+	startTime := time.Now()
+	const bypassTimeout = 10 * time.Second
 
 	for {
 		// Check context first (non-blocking)
@@ -399,6 +327,7 @@ func (p *PTYSession) StartReadLoop() {
 			return
 		case result := <-readCh:
 			if result.err != nil {
+				log.Printf("[PTY %s] Read error: %v", p.workstreamID, result.err)
 				// Check context before sending error message
 				// This prevents sending spurious error messages during shutdown
 				select {
@@ -416,14 +345,35 @@ func (p *PTYSession) StartReadLoop() {
 				return
 			}
 
-			if result.n > 0 && program != nil {
-				// Make a copy of the buffer to send
-				output := make([]byte, result.n)
-				copy(output, buf[:result.n])
-				program.Send(PTYOutputMsg{
-					WorkstreamID: p.workstreamID,
-					Output:       output,
-				})
+			if result.n > 0 {
+				log.Printf("[PTY %s] Read %d bytes, program=%v", p.workstreamID, result.n, program != nil)
+
+				// Check for bypass permissions prompt during startup (first 10 seconds)
+				if !bypassHandled && time.Since(startTime) < bypassTimeout {
+					accumulated.Write(buf[:result.n])
+					content := accumulated.String()
+					if strings.Contains(content, "Bypass Permissions mode") {
+						log.Printf("[PTY %s] Detected bypass permissions prompt, auto-accepting", p.workstreamID)
+						// Wait a moment for the full prompt to render
+						time.Sleep(100 * time.Millisecond)
+						// Send down arrow to select "Yes, I accept"
+						p.Write([]byte{27, '[', 'B'}) // Down arrow
+						time.Sleep(50 * time.Millisecond)
+						// Send enter to confirm
+						p.Write([]byte{'\r'})
+						bypassHandled = true
+					}
+				}
+
+				if program != nil {
+					// Make a copy of the buffer to send
+					output := make([]byte, result.n)
+					copy(output, buf[:result.n])
+					program.Send(PTYOutputMsg{
+						WorkstreamID: p.workstreamID,
+						Output:       output,
+					})
+				}
 			}
 		}
 	}
