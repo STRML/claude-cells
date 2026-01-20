@@ -2,6 +2,7 @@ package sync
 
 import (
 	"context"
+	"fmt"
 	"sync"
 )
 
@@ -15,8 +16,11 @@ type GitOperations interface {
 
 // MutagenOperations defines mutagen operations needed for pairing.
 type MutagenOperations interface {
+	CheckInstalled(ctx context.Context) error
 	CreateSession(ctx context.Context, branch, container, path string) error
 	TerminateSession(ctx context.Context, branch string) error
+	SessionExists(ctx context.Context, branch string) (bool, error)
+	GetConflicts(ctx context.Context, branch string) ([]string, error)
 }
 
 // Pairing orchestrates file sync between container and local.
@@ -32,6 +36,19 @@ type Pairing struct {
 	containerID    string
 	localPath      string
 	stashedChanges bool
+	syncHealthy    bool
+	lastConflicts  []string
+}
+
+// PairingState represents the current state of pairing mode.
+type PairingState struct {
+	Active         bool
+	CurrentBranch  string
+	PreviousBranch string
+	ContainerID    string
+	StashedChanges bool
+	SyncHealthy    bool
+	Conflicts      []string
 }
 
 // NewPairing creates a new pairing orchestrator.
@@ -75,8 +92,91 @@ func (p *Pairing) SetStashedChanges(stashed bool) {
 	p.stashedChanges = stashed
 }
 
+// GetState returns the current pairing state (thread-safe snapshot).
+func (p *Pairing) GetState() PairingState {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return PairingState{
+		Active:         p.active,
+		CurrentBranch:  p.currentBranch,
+		PreviousBranch: p.previousBranch,
+		ContainerID:    p.containerID,
+		StashedChanges: p.stashedChanges,
+		SyncHealthy:    p.syncHealthy,
+		Conflicts:      append([]string(nil), p.lastConflicts...),
+	}
+}
+
+// PreviousBranch returns the branch that was active before pairing started.
+func (p *Pairing) PreviousBranch() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.previousBranch
+}
+
+// ContainerID returns the container ID being paired.
+func (p *Pairing) ContainerID() string {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.containerID
+}
+
+// CheckPrerequisites verifies that all requirements for pairing are met.
+func (p *Pairing) CheckPrerequisites(ctx context.Context) error {
+	if err := p.mutagen.CheckInstalled(ctx); err != nil {
+		return fmt.Errorf("mutagen not installed: %w", err)
+	}
+	return nil
+}
+
+// GetSyncHealth returns the current sync health status and any conflicts.
+func (p *Pairing) GetSyncHealth() (healthy bool, conflicts []string) {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	return p.syncHealthy, append([]string(nil), p.lastConflicts...)
+}
+
+// CheckSyncHealth checks the health of the mutagen sync session.
+// Returns an error if the session is unhealthy or lost.
+func (p *Pairing) CheckSyncHealth(ctx context.Context) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	if !p.active {
+		return nil
+	}
+
+	// Check if session still exists
+	exists, err := p.mutagen.SessionExists(ctx, p.currentBranch)
+	if err != nil {
+		p.syncHealthy = false
+		return fmt.Errorf("failed to check session: %w", err)
+	}
+	if !exists {
+		p.syncHealthy = false
+		return fmt.Errorf("sync session lost for branch %s", p.currentBranch)
+	}
+
+	// Check for conflicts
+	conflicts, err := p.mutagen.GetConflicts(ctx, p.currentBranch)
+	if err != nil {
+		// Don't fail on conflict check error, just clear conflicts
+		p.lastConflicts = nil
+	} else {
+		p.lastConflicts = conflicts
+	}
+
+	p.syncHealthy = len(conflicts) == 0
+	if len(conflicts) > 0 {
+		return fmt.Errorf("sync has %d conflict(s)", len(conflicts))
+	}
+
+	return nil
+}
+
 // Enable starts pairing mode for a workstream.
-func (p *Pairing) Enable(ctx context.Context, branchName, containerID, localPath string) error {
+// previousBranch is the branch to restore when pairing ends (captured by caller before async dispatch).
+func (p *Pairing) Enable(ctx context.Context, branchName, containerID, localPath, previousBranch string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
@@ -94,12 +194,8 @@ func (p *Pairing) Enable(ctx context.Context, branchName, containerID, localPath
 		p.stashedChanges = true
 	}
 
-	// Get current branch before switching
-	prevBranch, err := p.git.CurrentBranch(ctx)
-	if err != nil {
-		return err
-	}
-	p.previousBranch = prevBranch
+	// Store previous branch (passed in to avoid race condition with async dispatch)
+	p.previousBranch = previousBranch
 
 	// Start mutagen sync
 	if err := p.mutagen.CreateSession(ctx, branchName, containerID, localPath); err != nil {
@@ -117,6 +213,8 @@ func (p *Pairing) Enable(ctx context.Context, branchName, containerID, localPath
 	p.currentBranch = branchName
 	p.containerID = containerID
 	p.localPath = localPath
+	p.syncHealthy = true
+	p.lastConflicts = nil
 
 	return nil
 }
@@ -145,6 +243,8 @@ func (p *Pairing) Disable(ctx context.Context) error {
 	p.active = false
 	p.currentBranch = ""
 	p.containerID = ""
+	p.syncHealthy = false
+	p.lastConflicts = nil
 
 	return nil
 }

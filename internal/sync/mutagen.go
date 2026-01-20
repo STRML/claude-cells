@@ -2,6 +2,8 @@ package sync
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -16,9 +18,16 @@ func NewMutagen() *Mutagen {
 }
 
 // SessionName generates a mutagen session name for a branch.
+// Uses a hash suffix to avoid collisions between similar branch names.
 func SessionName(branchName string) string {
+	h := sha256.Sum256([]byte(branchName))
+	hashSuffix := hex.EncodeToString(h[:4]) // 8 hex chars
+
 	safe := strings.ReplaceAll(branchName, "/", "-")
-	return "ccells-" + safe
+	if len(safe) > 20 {
+		safe = safe[:20]
+	}
+	return "ccells-" + safe + "-" + hashSuffix
 }
 
 // CheckInstalled verifies mutagen is available.

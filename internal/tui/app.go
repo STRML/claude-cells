@@ -10,6 +10,8 @@ import (
 
 	"github.com/STRML/claude-cells/internal/config"
 	"github.com/STRML/claude-cells/internal/docker"
+	"github.com/STRML/claude-cells/internal/git"
+	"github.com/STRML/claude-cells/internal/sync"
 	"github.com/STRML/claude-cells/internal/workstream"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -19,6 +21,8 @@ import (
 const escapeTimeout = 300 * time.Millisecond
 
 const toastDuration = 2 * time.Second
+
+const pairingHealthCheckInterval = 30 * time.Second
 
 // formatFileList formats a list of files for display
 func formatFileList(files []string) string {
@@ -65,10 +69,8 @@ type AppModel struct {
 	resuming       bool      // True if resuming from saved state
 	tmuxPrefix     bool      // True after ctrl-b is pressed (tmux-style prefix)
 	tmuxPrefixTime time.Time // When prefix was pressed
-	// Pairing mode state
-	pairingWorkstreamID string // ID of workstream in pairing mode (empty if none)
-	pairingPrevBranch   string // Branch to restore when pairing ends
-	pairingStashed      bool   // True if we stashed changes when enabling pairing
+	// Pairing mode orchestrator (single source of truth)
+	pairingOrchestrator *sync.Pairing
 	// Pane swap state
 	lastSwapPosition int // Position to swap back to when pressing Space at main (0 = none)
 	// Log panel
@@ -82,13 +84,19 @@ func NewAppModel(ctx context.Context) AppModel {
 	cwd, _ := os.Getwd()
 	logPanel := NewLogPanelModel()
 	SetLogPanel(logPanel) // Set global for logging functions
+
+	// Initialize pairing orchestrator with real git and mutagen implementations
+	gitOps := git.New(cwd)
+	mutagenOps := sync.NewMutagen()
+
 	return AppModel{
-		ctx:           ctx,
-		manager:       workstream.NewManager(),
-		statusBar:     NewStatusBarModel(),
-		workingDir:    cwd,
-		nextPaneIndex: 1, // Start pane numbering at 1
-		logPanel:      logPanel,
+		ctx:                 ctx,
+		manager:             workstream.NewManager(),
+		statusBar:           NewStatusBarModel(),
+		workingDir:          cwd,
+		nextPaneIndex:       1, // Start pane numbering at 1
+		logPanel:            logPanel,
+		pairingOrchestrator: sync.NewPairing(gitOps, mutagenOps),
 	}
 }
 
@@ -121,6 +129,16 @@ type fadeTickMsg struct{}
 // escapeTimeoutMsg is sent when the escape timeout expires (first Esc should be forwarded)
 type escapeTimeoutMsg struct {
 	timestamp time.Time // The timestamp of the Esc that started this timeout
+}
+
+// pairingHealthTickMsg is sent periodically to check pairing sync health
+type pairingHealthTickMsg struct{}
+
+// pairingHealthTickCmd returns a command that sends a health tick after a delay
+func pairingHealthTickCmd() tea.Cmd {
+	return tea.Tick(pairingHealthCheckInterval, func(t time.Time) tea.Msg {
+		return pairingHealthTickMsg{}
+	})
 }
 
 // spinnerTickCmd returns a command that sends a spinner tick after a delay
@@ -559,31 +577,40 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+			// Get current pairing state from orchestrator
+			pairingState := m.pairingOrchestrator.GetState()
+
 			// If this workstream is already in pairing mode, disable it
-			if m.pairingWorkstreamID == ws.ID {
+			if pairingState.Active && pairingState.ContainerID == ws.ContainerID {
 				m.panes[m.focusedPane].AppendOutput("\nDisabling pairing mode...\n")
-				return m, DisablePairingCmd(ws, m.pairingPrevBranch, m.pairingStashed)
+				return m, DisablePairingCmd(m.pairingOrchestrator, ws)
 			}
 
 			// If another workstream is in pairing mode, disable it first
-			if m.pairingWorkstreamID != "" {
+			if pairingState.Active {
 				// Find and disable the other pairing
 				for i := range m.panes {
-					if m.panes[i].Workstream().ID == m.pairingWorkstreamID {
-						oldWs := m.panes[i].Workstream()
+					otherWs := m.panes[i].Workstream()
+					if otherWs.ContainerID == pairingState.ContainerID {
 						m.panes[i].AppendOutput("\nDisabling pairing mode (switching to new workstream)...\n")
+						// Capture previousBranch BEFORE async dispatch to avoid race
+						gitOps := git.New(m.workingDir)
+						previousBranch, _ := gitOps.CurrentBranch(m.ctx)
 						// Disable old pairing then enable new one
 						return m, tea.Sequence(
-							DisablePairingCmd(oldWs, m.pairingPrevBranch, m.pairingStashed),
-							EnablePairingCmd(ws),
+							DisablePairingCmd(m.pairingOrchestrator, otherWs),
+							EnablePairingCmd(m.pairingOrchestrator, ws, previousBranch),
 						)
 					}
 				}
 			}
 
-			// Get current branch before enabling pairing
+			// Capture previousBranch BEFORE async dispatch to avoid race
+			gitOps := git.New(m.workingDir)
+			previousBranch, _ := gitOps.CurrentBranch(m.ctx)
+
 			m.panes[m.focusedPane].AppendOutput("\nEnabling pairing mode...\n")
-			return m, EnablePairingCmd(ws)
+			return m, EnablePairingCmd(m.pairingOrchestrator, ws, previousBranch)
 
 		case "m":
 			// Merge/PR menu - first check for uncommitted changes
@@ -1506,11 +1533,8 @@ Scroll Mode:
 			return m, nil
 		}
 
-		// Store pairing state
-		m.pairingWorkstreamID = msg.WorkstreamID
-		m.pairingStashed = msg.StashedChanges
-		// Get current branch (we'll use "main" as fallback, ideally we'd get it before enabling)
-		m.pairingPrevBranch = "main"
+		// Get state from orchestrator (single source of truth)
+		pairingState := m.pairingOrchestrator.GetState()
 
 		for i := range m.panes {
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
@@ -1518,7 +1542,7 @@ Scroll Mode:
 				m.panes[i].AppendOutput("Pairing mode enabled!\n")
 				m.panes[i].AppendOutput(fmt.Sprintf("Local branch: %s\n", ws.BranchName))
 				m.panes[i].AppendOutput("Mutagen sync active - changes sync bidirectionally\n")
-				if msg.StashedChanges {
+				if pairingState.StashedChanges {
 					m.panes[i].AppendOutput("(Local changes have been stashed)\n")
 				}
 				// Set workstream state to pairing
@@ -1529,7 +1553,8 @@ Scroll Mode:
 
 		m.toast = "Pairing mode enabled"
 		m.toastExpiry = time.Now().Add(toastDuration)
-		return m, nil
+		// Start health monitoring ticker
+		return m, pairingHealthTickCmd()
 
 	case PairingDisabledMsg:
 		if msg.Error != nil {
@@ -1541,10 +1566,7 @@ Scroll Mode:
 			}
 		}
 
-		// Clear pairing state
-		m.pairingWorkstreamID = ""
-		m.pairingPrevBranch = ""
-		m.pairingStashed = false
+		// State is managed by orchestrator (already cleared via Disable())
 
 		for i := range m.panes {
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
@@ -1730,6 +1752,29 @@ Scroll Mode:
 				m.panes[m.focusedPane], cmd = m.panes[m.focusedPane].Update(tea.KeyMsg{Type: tea.KeyEscape})
 				return m, cmd
 			}
+		}
+		return m, nil
+
+	case pairingHealthTickMsg:
+		// Periodic health check for pairing mode
+		if m.pairingOrchestrator.IsActive() {
+			// Run health check and schedule next tick
+			return m, tea.Batch(
+				CheckPairingSyncHealthCmd(m.pairingOrchestrator),
+				pairingHealthTickCmd(),
+			)
+		}
+		// Pairing not active, don't schedule another tick
+		return m, nil
+
+	case PairingSyncHealthMsg:
+		// Handle health check result
+		if msg.Error != nil {
+			m.toast = fmt.Sprintf("Pairing sync issue: %v", msg.Error)
+			m.toastExpiry = time.Now().Add(toastDuration * 2)
+		} else if len(msg.Conflicts) > 0 {
+			m.toast = fmt.Sprintf("Pairing: %d sync conflict(s)", len(msg.Conflicts))
+			m.toastExpiry = time.Now().Add(toastDuration * 2)
 		}
 		return m, nil
 	}

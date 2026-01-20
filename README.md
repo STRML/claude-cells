@@ -178,6 +178,50 @@ Claude Cells uses **git worktrees** to achieve true isolation without modifying 
 - All worktrees share the same git objects (no disk bloat)
 - Changes are part of the main repo's history (can push, create PRs)
 
+### Pairing Mode
+
+Pairing mode enables **bidirectional file synchronization** between your local filesystem and a container, allowing you to edit files locally while Claude works in the container.
+
+#### How It Works
+
+1. **Press `p`** on any running workstream to enable pairing
+2. Your local repo **switches to that workstream's branch**
+3. **Mutagen** starts syncing files bidirectionally between your local repo and the container
+4. Edit files in your local IDE - changes appear in the container instantly
+5. Claude's changes in the container sync back to your local filesystem
+6. **Press `p` again** to disable pairing and restore your previous branch
+
+#### Prerequisites
+
+Pairing mode requires [Mutagen](https://mutagen.io/) to be installed:
+
+```bash
+# macOS
+brew install mutagen-io/mutagen/mutagen
+
+# Linux (via script)
+curl -fsSL https://mutagen.io/install.sh | bash
+
+# Other platforms: https://mutagen.io/documentation/introduction/installation
+```
+
+If Mutagen is not installed, you'll see a clear error message when trying to enable pairing.
+
+#### Health Monitoring
+
+Pairing mode includes automatic health monitoring:
+
+- **Every 30 seconds**, the sync session health is checked
+- If the sync session is lost (e.g., Mutagen crashed), you'll see a toast notification
+- If there are **sync conflicts**, you'll be notified with the count of conflicting files
+
+#### Important Notes
+
+- **Only one workstream** can be in pairing mode at a time
+- Switching pairing to a different workstream automatically disables the previous one
+- **Local uncommitted changes are stashed** when enabling pairing (you'll be reminded to `git stash pop` when disabling)
+- The `.git` directory is excluded from sync to prevent corruption
+
 ### Session Persistence
 
 When you quit ccells (`q` or `Ctrl+c`):
@@ -251,13 +295,32 @@ If startup times out (default: 60s), check your Docker resources.
 
 ### Pairing mode not working
 
-Ensure Mutagen is installed:
+**"mutagen not installed" error:**
+
+Ensure Mutagen is installed and in your PATH:
 ```bash
 # macOS
 brew install mutagen-io/mutagen/mutagen
 
+# Verify installation
+mutagen version
+
 # Other platforms: https://mutagen.io/documentation/introduction/installation
 ```
+
+**Sync session lost:**
+
+If you see "sync session lost" notifications:
+1. Check if Mutagen daemon is running: `mutagen daemon status`
+2. Start daemon if needed: `mutagen daemon start`
+3. Disable and re-enable pairing mode
+
+**Sync conflicts:**
+
+If you see conflict notifications:
+1. Check conflict details: `mutagen sync list`
+2. Resolve conflicts manually in your local editor
+3. The sync will automatically resume once conflicts are resolved
 
 ## Limitations
 
