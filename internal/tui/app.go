@@ -573,6 +573,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
+		case "r":
+			// Resource usage dialog
+			dialog := NewResourceUsageDialog(false) // Start with project view
+			dialog.SetSize(65, 30) // Taller to accommodate disk usage section
+			m.dialog = &dialog
+			return m, FetchResourceStatsCmd(false, m.getContainerIDs())
+
 		case "s":
 			// Settings dialog - first get container count
 			return m, ListContainersCmd()
@@ -586,6 +593,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
   d           Destroy workstream
   m           Merge/PR options
   p           Toggle pairing mode
+  r           Resource usage (CPU/memory)
   s           Settings
   l           Show logs
   L           Cycle layout (Grid/Main+Stack/Main+Row/Rows/Columns)
@@ -1217,6 +1225,41 @@ Scroll Mode:
 		}
 		return m, nil
 
+	case ResourceStatsMsg:
+		// Update resource dialog with stats
+		if m.dialog != nil && m.dialog.Type == DialogResourceUsage {
+			if msg.Error != nil {
+				m.dialog.SetStatsError(msg.Error.Error())
+			} else {
+				// Format stats as table
+				body := m.formatResourceStats(msg.Stats, msg.TotalCPU, msg.TotalMemory, msg.DiskUsage)
+				m.dialog.SetStatsContent(body)
+			}
+		}
+		return m, nil
+
+	case ResourceStatsToggleMsg:
+		// Handle view toggle - fetch new stats
+		if m.dialog != nil && m.dialog.Type == DialogResourceUsage {
+			var containerIDs []string
+			if !msg.IsGlobal {
+				containerIDs = m.getContainerIDs()
+			}
+			return m, FetchResourceStatsCmd(msg.IsGlobal, containerIDs)
+		}
+		return m, nil
+
+	case ResourceStatsRefreshMsg:
+		// Handle refresh - fetch new stats
+		if m.dialog != nil && m.dialog.Type == DialogResourceUsage {
+			var containerIDs []string
+			if !msg.IsGlobal {
+				containerIDs = m.getContainerIDs()
+			}
+			return m, FetchResourceStatsCmd(msg.IsGlobal, containerIDs)
+		}
+		return m, nil
+
 	case PromptMsg:
 		// Handle prompt from pane
 		for i := range m.panes {
@@ -1624,4 +1667,77 @@ func (m *AppModel) Manager() *workstream.Manager {
 // InputMode returns true if the app is in input mode
 func (m *AppModel) InputMode() bool {
 	return m.inputMode
+}
+
+// getContainerIDs returns the container IDs for all current panes
+func (m *AppModel) getContainerIDs() []string {
+	var ids []string
+	for _, pane := range m.panes {
+		ws := pane.Workstream()
+		if ws.ContainerID != "" {
+			ids = append(ids, ws.ContainerID)
+		}
+	}
+	return ids
+}
+
+// formatResourceStats formats resource stats as a table for display
+func (m *AppModel) formatResourceStats(stats []docker.ContainerStats, totalCPU float64, totalMemory uint64, diskUsage *docker.DiskUsage) string {
+	var sb strings.Builder
+
+	// Container stats section
+	if len(stats) == 0 {
+		sb.WriteString("No containers found.\n")
+	} else {
+		// Header
+		header := fmt.Sprintf("%-24s %8s %12s %8s", "Container", "CPU%", "Memory", "Mem%")
+		sb.WriteString(header)
+		sb.WriteString("\n")
+		sb.WriteString(strings.Repeat("─", 56))
+		sb.WriteString("\n")
+
+		// Rows
+		for _, s := range stats {
+			name := s.ContainerName
+			if len(name) > 24 {
+				name = name[:21] + "..."
+			}
+			memStr := docker.FormatBytes(s.MemoryUsage)
+			row := fmt.Sprintf("%-24s %7.1f%% %12s %7.1f%%", name, s.CPUPercent, memStr, s.MemoryPercent)
+			sb.WriteString(row)
+			sb.WriteString("\n")
+		}
+
+		// Total line
+		sb.WriteString(strings.Repeat("─", 56))
+		sb.WriteString("\n")
+		totalMemStr := docker.FormatBytes(totalMemory)
+		totalRow := fmt.Sprintf("%-24s %7.1f%% %12s", "TOTAL", totalCPU, totalMemStr)
+		sb.WriteString(totalRow)
+	}
+
+	// Disk usage section
+	if diskUsage != nil {
+		sb.WriteString("\n\n")
+		sb.WriteString("Disk Usage\n")
+		sb.WriteString(strings.Repeat("─", 56))
+		sb.WriteString("\n")
+
+		sb.WriteString(fmt.Sprintf("%-24s %12s   (%d)\n", "Containers",
+			docker.FormatBytesInt64(diskUsage.ContainersSize), diskUsage.ContainersCount))
+		sb.WriteString(fmt.Sprintf("%-24s %12s\n", "  ccells containers",
+			docker.FormatBytesInt64(diskUsage.CCellsContainerSize)))
+		sb.WriteString(fmt.Sprintf("%-24s %12s   (%d)\n", "Images",
+			docker.FormatBytesInt64(diskUsage.ImagesSize), diskUsage.ImagesCount))
+		sb.WriteString(fmt.Sprintf("%-24s %12s   (%d)\n", "Volumes",
+			docker.FormatBytesInt64(diskUsage.VolumesSize), diskUsage.VolumesCount))
+		sb.WriteString(fmt.Sprintf("%-24s %12s\n", "Build cache",
+			docker.FormatBytesInt64(diskUsage.BuildCacheSize)))
+		sb.WriteString(strings.Repeat("─", 56))
+		sb.WriteString("\n")
+		sb.WriteString(fmt.Sprintf("%-24s %12s\n", "TOTAL",
+			docker.FormatBytesInt64(diskUsage.TotalSize)))
+	}
+
+	return sb.String()
 }
