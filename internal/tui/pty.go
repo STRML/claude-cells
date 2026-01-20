@@ -121,11 +121,24 @@ if pgrep -f "claude" >/dev/null 2>&1; then
   sleep 1
 fi
 
-# Setup credentials
+# Setup credentials - check both $HOME and /home/claude (for devcontainers running as root)
+CREDS_SRC=""
 if test -f "$HOME/.claude-credentials"; then
-  echo "[ccells] Copying credentials..."
+  CREDS_SRC="$HOME/.claude-credentials"
+elif test -f "/home/claude/.claude-credentials"; then
+  CREDS_SRC="/home/claude/.claude-credentials"
+fi
+
+if test -n "$CREDS_SRC"; then
+  echo "[ccells] Copying credentials from $CREDS_SRC..."
   mkdir -p "$HOME/.claude" 2>/dev/null
-  cp "$HOME/.claude-credentials" "$HOME/.claude/.credentials.json" 2>/dev/null
+  cp "$CREDS_SRC" "$HOME/.claude/.credentials.json" 2>/dev/null
+fi
+
+# Also copy .claude directory contents if mounted at /home/claude
+if test -d "/home/claude/.claude" && test "$HOME" != "/home/claude"; then
+  echo "[ccells] Copying .claude config from /home/claude..."
+  cp -r /home/claude/.claude/* "$HOME/.claude/" 2>/dev/null || true
 fi
 
 mkdir -p "$HOME/.local/bin" 2>/dev/null
