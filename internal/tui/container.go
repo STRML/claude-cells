@@ -369,10 +369,18 @@ func RebuildContainerCmd(ws *workstream.Workstream) tea.Cmd {
 
 			cliStatus := docker.CheckDevcontainerCLI()
 			if cliStatus.Available {
-				if _, err := docker.BuildWithDevcontainerCLI(buildCtx, repoPath, io.Discard); err != nil {
+				baseImage, err := docker.BuildWithDevcontainerCLI(buildCtx, repoPath, io.Discard)
+				if err != nil {
 					return ContainerErrorMsg{
 						WorkstreamID: ws.ID,
 						Error:        fmt.Errorf("failed to build with devcontainer CLI: %w", err),
+					}
+				}
+				// Build enhanced image with Claude Code on top
+				if err := docker.BuildEnhancedImage(buildCtx, baseImage, imageName, io.Discard); err != nil {
+					return ContainerErrorMsg{
+						WorkstreamID: ws.ID,
+						Error:        fmt.Errorf("failed to build enhanced image: %w", err),
 					}
 				}
 			} else {
@@ -569,15 +577,24 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 			// Use devcontainer CLI if available for proper feature support
 			cliStatus := docker.CheckDevcontainerCLI()
 			if cliStatus.Available {
-				if _, err := docker.BuildWithDevcontainerCLI(buildCtx, repoPath, io.Discard); err != nil {
+				baseImage, err := docker.BuildWithDevcontainerCLI(buildCtx, repoPath, io.Discard)
+				if err != nil {
 					_ = gitRepo.RemoveWorktree(ctx, worktreePath)
 					return ContainerErrorMsg{
 						WorkstreamID: ws.ID,
 						Error:        fmt.Errorf("failed to build with devcontainer CLI: %w", err),
 					}
 				}
+				// Build enhanced image with Claude Code on top
+				if err := docker.BuildEnhancedImage(buildCtx, baseImage, imageName, io.Discard); err != nil {
+					_ = gitRepo.RemoveWorktree(ctx, worktreePath)
+					return ContainerErrorMsg{
+						WorkstreamID: ws.ID,
+						Error:        fmt.Errorf("failed to build enhanced image: %w", err),
+					}
+				}
 			} else {
-				// Fall back to simple docker build (features won't be installed)
+				// Fall back to simple docker build (handles both Dockerfile and image-only configs)
 				if err := docker.BuildProjectImage(buildCtx, repoPath, devCfg, io.Discard); err != nil {
 					_ = gitRepo.RemoveWorktree(ctx, worktreePath)
 					return ContainerErrorMsg{
