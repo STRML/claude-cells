@@ -423,23 +423,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 
 			if time.Since(m.lastEscapeTime) < escapeTimeout {
-				// Double escape in nav mode - quit
+				// Double escape in nav mode - show quit confirmation
 				m.lastEscapeTime = time.Time{}
-				if len(m.panes) > 0 {
-					var workstreams []*workstream.Workstream
-					for _, pane := range m.panes {
-						ws := pane.Workstream()
-						workstreams = append(workstreams, ws)
-						if pane.HasPTY() {
-							pane.PTY().Close()
-						}
-					}
-					m.quitting = true
-					return m, PauseAllAndSaveCmd(m.workingDir, workstreams, m.focusedPane, int(m.layout))
-				}
-				m.quitting = true
-				_ = workstream.DeleteState(m.workingDir)
-				return m, tea.Quit
+				dialog := NewQuitConfirmDialog()
+				dialog.SetSize(50, 12)
+				m.dialog = &dialog
+				return m, nil
 			}
 			m.lastEscapeTime = time.Now()
 			return m, nil
@@ -448,25 +437,11 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Navigation mode keybinds
 		switch msg.String() {
 		case "q", "ctrl+c":
-			// Pause containers and save state before quitting
-			if len(m.panes) > 0 {
-				var workstreams []*workstream.Workstream
-				for _, pane := range m.panes {
-					ws := pane.Workstream()
-					workstreams = append(workstreams, ws)
-					// Close PTY session if active
-					if pane.HasPTY() {
-						pane.PTY().Close()
-					}
-				}
-				m.quitting = true
-				// Use synchronous pause+save command
-				return m, PauseAllAndSaveCmd(m.workingDir, workstreams, m.focusedPane, int(m.layout))
-			}
-			m.quitting = true
-			// Delete state file if no panes (clean exit)
-			_ = workstream.DeleteState(m.workingDir)
-			return m, tea.Quit
+			// Show quit confirmation dialog
+			dialog := NewQuitConfirmDialog()
+			dialog.SetSize(50, 12)
+			m.dialog = &dialog
+			return m, nil
 
 		case "ctrl+b":
 			// Tmux-style prefix
@@ -951,6 +926,26 @@ Scroll Mode:
 				m.toast = "Note: Could not save introduction state"
 				m.toastExpiry = time.Now().Add(toastDuration)
 			}
+
+		case DialogQuitConfirm:
+			// User confirmed quit - pause containers and save state
+			if len(m.panes) > 0 {
+				var workstreams []*workstream.Workstream
+				for _, pane := range m.panes {
+					ws := pane.Workstream()
+					workstreams = append(workstreams, ws)
+					// Close PTY session if active
+					if pane.HasPTY() {
+						pane.PTY().Close()
+					}
+				}
+				m.quitting = true
+				return m, PauseAllAndSaveCmd(m.workingDir, workstreams, m.focusedPane, int(m.layout))
+			}
+			m.quitting = true
+			// Delete state file if no panes (clean exit)
+			_ = workstream.DeleteState(m.workingDir)
+			return m, tea.Quit
 		}
 		return m, nil
 

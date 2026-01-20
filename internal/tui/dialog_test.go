@@ -1131,3 +1131,213 @@ func TestWorkstreamDialog_ViewShowsShiftEnterHint(t *testing.T) {
 		t.Error("View should contain 'newline' in the hint")
 	}
 }
+
+func TestNewQuitConfirmDialog(t *testing.T) {
+	d := NewQuitConfirmDialog()
+
+	if d.Type != DialogQuitConfirm {
+		t.Error("Type should be DialogQuitConfirm")
+	}
+	if !strings.Contains(d.Title, "Quit") {
+		t.Error("Title should contain 'Quit'")
+	}
+	if !strings.Contains(d.Body, "pause") || !strings.Contains(d.Body, "resume") {
+		t.Error("Body should mention that containers will be paused and can resume")
+	}
+	if len(d.MenuItems) != 2 {
+		t.Errorf("Should have 2 menu items (Yes/No), got %d", len(d.MenuItems))
+	}
+	if d.MenuSelection != 1 {
+		t.Error("Initial selection should be 1 (No) for safety")
+	}
+}
+
+func TestQuitConfirmDialog_Navigation(t *testing.T) {
+	d := NewQuitConfirmDialog()
+
+	// Initial selection should be 1 (No)
+	if d.MenuSelection != 1 {
+		t.Errorf("Initial selection should be 1, got %d", d.MenuSelection)
+	}
+
+	// Navigate up to Yes
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if d.MenuSelection != 0 {
+		t.Errorf("Selection should be 0 after up, got %d", d.MenuSelection)
+	}
+
+	// Navigate up at top - should stay at 0
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if d.MenuSelection != 0 {
+		t.Errorf("Selection should stay at 0 at top, got %d", d.MenuSelection)
+	}
+
+	// Navigate down to No
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if d.MenuSelection != 1 {
+		t.Errorf("Selection should be 1 after down, got %d", d.MenuSelection)
+	}
+
+	// Navigate down at bottom - should stay at 1
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if d.MenuSelection != 1 {
+		t.Errorf("Selection should stay at 1 at bottom, got %d", d.MenuSelection)
+	}
+}
+
+func TestQuitConfirmDialog_VimNavigation(t *testing.T) {
+	d := NewQuitConfirmDialog()
+
+	// Navigate with k (up)
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'k'}})
+	if d.MenuSelection != 0 {
+		t.Errorf("Selection should be 0 after 'k', got %d", d.MenuSelection)
+	}
+
+	// Navigate with j (down)
+	d, _ = d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
+	if d.MenuSelection != 1 {
+		t.Errorf("Selection should be 1 after 'j', got %d", d.MenuSelection)
+	}
+}
+
+func TestQuitConfirmDialog_EnterYes(t *testing.T) {
+	d := NewQuitConfirmDialog()
+	// Selection 0 = Yes
+	d.MenuSelection = 0
+	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if cmd == nil {
+		t.Fatal("Should return a command on enter")
+	}
+
+	msg := cmd()
+	confirmMsg, ok := msg.(DialogConfirmMsg)
+	if !ok {
+		t.Fatalf("Should return DialogConfirmMsg, got %T", msg)
+	}
+	if confirmMsg.Type != DialogQuitConfirm {
+		t.Error("Type should be DialogQuitConfirm")
+	}
+}
+
+func TestQuitConfirmDialog_EnterNo(t *testing.T) {
+	d := NewQuitConfirmDialog()
+	// Selection 1 = No (default)
+	d.MenuSelection = 1
+	d, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEnter})
+
+	if cmd == nil {
+		t.Fatal("Should return a command on enter")
+	}
+
+	msg := cmd()
+	if _, ok := msg.(DialogCancelMsg); !ok {
+		t.Errorf("Should return DialogCancelMsg on No selection, got %T", msg)
+	}
+}
+
+func TestQuitConfirmDialog_YKeyConfirms(t *testing.T) {
+	d := NewQuitConfirmDialog()
+	_, cmd := d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'y'}})
+
+	if cmd == nil {
+		t.Fatal("Should return a command on 'y'")
+	}
+
+	msg := cmd()
+	confirmMsg, ok := msg.(DialogConfirmMsg)
+	if !ok {
+		t.Fatalf("Should return DialogConfirmMsg on 'y', got %T", msg)
+	}
+	if confirmMsg.Type != DialogQuitConfirm {
+		t.Error("Type should be DialogQuitConfirm")
+	}
+}
+
+func TestQuitConfirmDialog_YKeyUppercaseConfirms(t *testing.T) {
+	d := NewQuitConfirmDialog()
+	_, cmd := d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'Y'}})
+
+	if cmd == nil {
+		t.Fatal("Should return a command on 'Y'")
+	}
+
+	msg := cmd()
+	confirmMsg, ok := msg.(DialogConfirmMsg)
+	if !ok {
+		t.Fatalf("Should return DialogConfirmMsg on 'Y', got %T", msg)
+	}
+	if confirmMsg.Type != DialogQuitConfirm {
+		t.Error("Type should be DialogQuitConfirm")
+	}
+}
+
+func TestQuitConfirmDialog_NKeyCancels(t *testing.T) {
+	d := NewQuitConfirmDialog()
+	_, cmd := d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
+
+	if cmd == nil {
+		t.Fatal("Should return a command on 'n'")
+	}
+
+	msg := cmd()
+	if _, ok := msg.(DialogCancelMsg); !ok {
+		t.Errorf("Should return DialogCancelMsg on 'n', got %T", msg)
+	}
+}
+
+func TestQuitConfirmDialog_NKeyUppercaseCancels(t *testing.T) {
+	d := NewQuitConfirmDialog()
+	_, cmd := d.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}})
+
+	if cmd == nil {
+		t.Fatal("Should return a command on 'N'")
+	}
+
+	msg := cmd()
+	if _, ok := msg.(DialogCancelMsg); !ok {
+		t.Errorf("Should return DialogCancelMsg on 'N', got %T", msg)
+	}
+}
+
+func TestQuitConfirmDialog_EscapeCancels(t *testing.T) {
+	d := NewQuitConfirmDialog()
+	_, cmd := d.Update(tea.KeyMsg{Type: tea.KeyEsc})
+
+	if cmd == nil {
+		t.Fatal("Should return a command on escape")
+	}
+
+	msg := cmd()
+	if _, ok := msg.(DialogCancelMsg); !ok {
+		t.Errorf("Should return DialogCancelMsg on escape, got %T", msg)
+	}
+}
+
+func TestQuitConfirmDialog_View(t *testing.T) {
+	d := NewQuitConfirmDialog()
+	d.SetSize(50, 12)
+
+	view := d.View()
+
+	if !strings.Contains(view, "Quit") {
+		t.Error("View should contain 'Quit'")
+	}
+	if !strings.Contains(view, "Yes") {
+		t.Error("View should contain 'Yes' menu item")
+	}
+	if !strings.Contains(view, "No") {
+		t.Error("View should contain 'No' menu item")
+	}
+	if !strings.Contains(view, "→") {
+		t.Error("View should contain selection indicator")
+	}
+	// Check for y/n hints
+	if !strings.Contains(view, "y") {
+		t.Error("View should contain 'y' key hint")
+	}
+	if !strings.Contains(view, "n") {
+		t.Error("View should contain 'n' key hint")
+	}
+}
