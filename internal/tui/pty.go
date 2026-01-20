@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"io"
+	"log"
 	"strings"
 	"sync"
 	"time"
@@ -347,13 +348,19 @@ func (p *PTYSession) StartReadLoop() {
 					accumulated.Write(buf[:result.n])
 					content := accumulated.String()
 					if strings.Contains(content, "Bypass Permissions mode") {
+						log.Printf("[PTY %s] DETECTED bypass prompt, sending keys", p.workstreamID)
 						// Wait a moment for the full prompt to render
 						time.Sleep(100 * time.Millisecond)
 						// Send down arrow to select "Yes, I accept"
-						p.Write([]byte{27, '[', 'B'}) // Down arrow
+						if err := p.Write([]byte{27, '[', 'B'}); err != nil {
+							log.Printf("[PTY %s] Error sending down arrow: %v", p.workstreamID, err)
+						}
 						time.Sleep(50 * time.Millisecond)
 						// Send enter to confirm
-						p.Write([]byte{'\r'})
+						if err := p.Write([]byte{'\r'}); err != nil {
+							log.Printf("[PTY %s] Error sending enter: %v", p.workstreamID, err)
+						}
+						log.Printf("[PTY %s] Bypass prompt accepted", p.workstreamID)
 						bypassHandled = true
 					}
 				}

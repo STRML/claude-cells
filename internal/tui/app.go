@@ -944,6 +944,7 @@ Scroll Mode:
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
 				ws := m.panes[i].Workstream()
 				ws.SetState(workstream.StateIdle)
+				m.panes[i].SetInitializing(false) // Stop spinner if still initializing
 				if msg.Error != nil {
 					m.panes[i].AppendOutput(fmt.Sprintf("\nSession ended: %v\n", msg.Error))
 				} else {
