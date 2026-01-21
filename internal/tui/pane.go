@@ -687,7 +687,7 @@ func (p PaneModel) View() string {
 
 	// Show summarizing animation (before container creation)
 	if p.summarizing {
-		viewportHeight := p.height - 4
+		viewportHeight := p.height - 6 // Must match viewport.SetHeight in SetSize()
 		viewportWidth := p.width - 4
 		if viewportHeight > 0 && viewportWidth > 0 {
 			// Create empty background
@@ -843,7 +843,7 @@ func (p PaneModel) View() string {
 		spinnerText := spinnerStyle.Render(spinner) + " " + messageStyle.Render(statusMsg)
 
 		// Center the spinner in the viewport
-		viewportHeight := p.height - 4 // Account for header and borders
+		viewportHeight := p.height - 6 // Must match viewport.SetHeight in SetSize()
 		viewportWidth := p.width - 4
 		if viewportHeight > 0 && viewportWidth > 0 {
 			lines := strings.Split(outputView, "\n")
@@ -893,7 +893,7 @@ func (p PaneModel) View() string {
 
 	// Overlay fading title during initialization (after container starts)
 	if p.IsSummarizeFading() && p.summarizeTitle != "" {
-		viewportHeight := p.height - 4
+		viewportHeight := p.height - 6 // Must match viewport.SetHeight in SetSize()
 		viewportWidth := p.width - 4
 		if viewportHeight > 0 && viewportWidth > 0 {
 			lines := strings.Split(outputView, "\n")
