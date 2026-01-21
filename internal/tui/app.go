@@ -1564,6 +1564,8 @@ Scroll Mode:
 						strings.Contains(outputStr, "\r> ")
 					if claudeReady {
 						m.panes[i].SetInitializing(false)
+						// Clear scrollback so setup messages don't appear when scrolling up
+						m.panes[i].ClearScrollback()
 						ws := m.panes[i].Workstream()
 						// Start fade animation and auto-enter input mode if focused
 						var cmds []tea.Cmd

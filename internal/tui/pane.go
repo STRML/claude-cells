@@ -1519,6 +1519,13 @@ func (p *PaneModel) ScrollToBottom() {
 	p.scrollMode = false
 }
 
+// ClearScrollback clears the scrollback buffer.
+// This is called when Claude Code becomes ready to give the user a fresh pane
+// without setup messages visible when scrolling up.
+func (p *PaneModel) ClearScrollback() {
+	p.scrollback = nil
+}
+
 // IsScrollMode returns true if the pane is in scroll mode (not following live output)
 func (p *PaneModel) IsScrollMode() bool {
 	return p.scrollMode

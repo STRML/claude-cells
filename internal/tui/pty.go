@@ -125,6 +125,10 @@ fi
 
 log "Claude Code found at: $(which claude)"
 log "Starting Claude Code..."
+
+# Clear the screen before starting Claude Code so the pane is fresh
+# (no detritus from container setup visible at the top)
+printf '\033[2J\033[H'
 `
 
 // SetProgram sets the program reference for PTY sessions to use
