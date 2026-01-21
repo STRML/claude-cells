@@ -142,6 +142,52 @@ func containsCtrlL(data []byte) bool {
 	return false
 }
 
+func countCtrlO(data []byte) int {
+	count := 0
+	for _, b := range data {
+		if b == 0x0F { // Ctrl+O
+			count++
+		}
+	}
+	return count
+}
+
+// TestPaneModel_SetSize_SendsCtrlOTwiceOnResize verifies that Ctrl+O is sent twice
+// after resize to fix Claude Code display corruption. Empirically, this fixes issues
+// where the text input floats to the top or other visual corruption occurs.
+func TestPaneModel_SetSize_SendsCtrlOTwiceOnResize(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+
+	// Create a PTYSession with a mock stdin to capture writes
+	mockStdin := &mockWriteCloser{}
+	pty := &PTYSession{
+		stdin:        mockStdin,
+		closed:       false,
+		workstreamID: "test",
+	}
+	pane.SetPTY(pty)
+
+	// Initial size
+	pane.SetSize(100, 50)
+	mockStdin.buf.Reset() // Clear any initial writes
+
+	// Resize - should send Ctrl+O twice
+	pane.SetSize(80, 50)
+	ctrlOCount := countCtrlO(mockStdin.buf.Bytes())
+	if ctrlOCount != 2 {
+		t.Errorf("Expected 2 Ctrl+O on resize, got %d", ctrlOCount)
+	}
+	mockStdin.buf.Reset()
+
+	// Same exact size - should NOT send Ctrl+O
+	pane.SetSize(80, 50)
+	ctrlOCount = countCtrlO(mockStdin.buf.Bytes())
+	if ctrlOCount != 0 {
+		t.Errorf("Expected 0 Ctrl+O when size unchanged, got %d", ctrlOCount)
+	}
+}
+
 // TestPaneModel_ResizeCreatesNewVterm verifies that resizing creates a fresh vterm
 // instead of trying to resize in-place. This prevents corruption from output that
 // was generated for the old terminal size being written to the new-sized vterm.

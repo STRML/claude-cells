@@ -1212,6 +1212,12 @@ func (p *PaneModel) SetSize(width, height int) {
 		// This ensures the process redraws for the new size, preventing corruption
 		// from output generated for the old size.
 		_ = p.pty.Write([]byte{12}) // Ctrl+L (form feed) - triggers screen redraw
+
+		// Send Ctrl+O twice after resize to fix Claude Code display corruption.
+		// Empirically, this fixes issues where the text input floats to the top
+		// or other visual corruption occurs after resize.
+		_ = p.pty.Write([]byte{0x0F}) // Ctrl+O
+		_ = p.pty.Write([]byte{0x0F}) // Ctrl+O again
 	}
 
 	// Now resize the vterm. Creating a fresh vterm instead of resizing in-place
