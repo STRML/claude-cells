@@ -939,3 +939,29 @@ func TestPTYSession_WriteString_EnterKey(t *testing.T) {
 		})
 	}
 }
+
+// TestKittyEnterKey verifies that the KittyEnterKey constant contains the correct
+// Kitty keyboard protocol sequence for the Enter key (CSI 13 u).
+func TestKittyEnterKey(t *testing.T) {
+	// Kitty keyboard protocol: CSI 13 u
+	// CSI = ESC [ (27, 91)
+	// 13 = Enter key codepoint (character codes '1' and '3')
+	// u = terminator (117)
+	expected := []byte{27, '[', '1', '3', 'u'}
+
+	if len(KittyEnterKey) != len(expected) {
+		t.Errorf("KittyEnterKey length = %d, want %d", len(KittyEnterKey), len(expected))
+	}
+
+	for i, b := range expected {
+		if i < len(KittyEnterKey) && KittyEnterKey[i] != b {
+			t.Errorf("KittyEnterKey[%d] = %v (%c), want %v (%c)", i, KittyEnterKey[i], KittyEnterKey[i], b, b)
+		}
+	}
+
+	// Also verify the string representation
+	expectedStr := "\x1b[13u"
+	if string(KittyEnterKey) != expectedStr {
+		t.Errorf("KittyEnterKey = %q, want %q", string(KittyEnterKey), expectedStr)
+	}
+}

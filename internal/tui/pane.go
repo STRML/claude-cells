@@ -435,7 +435,11 @@ func (p PaneModel) Update(msg tea.Msg) (PaneModel, tea.Cmd) {
 				var data []byte
 				switch keyStr {
 				case "enter":
-					data = []byte("\r")
+					// Kitty keyboard protocol: CSI 13 u (13=Enter/CR codepoint, no modifiers)
+					// This is the standard format for Enter in terminals that support Kitty protocol.
+					// Using this instead of \r ensures Enter works in Claude Code (bubbletea app)
+					// which enables Kitty keyboard protocol for enhanced key handling.
+					data = []byte{27, '[', '1', '3', 'u'}
 				case "shift+enter", "ctrl+j":
 					// Kitty keyboard protocol: CSI 13;2u (13=Enter codepoint, 2=Shift modifier)
 					// ctrl+j is the legacy escape sequence some terminals send for shift+enter
@@ -1265,6 +1269,19 @@ func (p *PaneModel) SendToPTY(text string) error {
 		return fmt.Errorf("PTY session not available")
 	}
 	return p.pty.WriteString(text)
+}
+
+// SendToPTYWithEnter sends text to the PTY followed by an Enter key press.
+// This uses the Kitty keyboard protocol for Enter to ensure it works in
+// Claude Code (bubbletea app) which enables Kitty protocol for enhanced key handling.
+func (p *PaneModel) SendToPTYWithEnter(text string) error {
+	if p.pty == nil || p.pty.IsClosed() {
+		return fmt.Errorf("PTY session not available")
+	}
+	if err := p.pty.WriteString(text); err != nil {
+		return err
+	}
+	return p.pty.Write(KittyEnterKey)
 }
 
 // WritePTYOutput writes raw PTY output to the virtual terminal

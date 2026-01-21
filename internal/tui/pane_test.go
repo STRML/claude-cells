@@ -198,6 +198,65 @@ func TestPaneModel_HasPTY(t *testing.T) {
 	}
 }
 
+func TestPaneModel_SendToPTYWithEnter(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+
+	// Test error when no PTY
+	err := pane.SendToPTYWithEnter("test")
+	if err == nil {
+		t.Error("SendToPTYWithEnter() should return error when no PTY")
+	}
+
+	// Create a mock PTY with a mock stdin
+	mockStdin := &mockWriteCloser{}
+	pty := &PTYSession{
+		workstreamID: "test",
+		closed:       false,
+		done:         make(chan struct{}),
+		stdin:        mockStdin,
+	}
+	pane.SetPTY(pty)
+
+	// Test sending text with enter
+	err = pane.SendToPTYWithEnter("hello world")
+	if err != nil {
+		t.Errorf("SendToPTYWithEnter() unexpected error: %v", err)
+	}
+
+	// Verify the output: should be "hello world" followed by Kitty Enter key
+	expected := "hello world\x1b[13u"
+	if string(mockStdin.Bytes()) != expected {
+		t.Errorf("Written data = %q, want %q", string(mockStdin.Bytes()), expected)
+	}
+}
+
+func TestPaneModel_SendToPTYWithEnter_EmptyText(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+
+	mockStdin := &mockWriteCloser{}
+	pty := &PTYSession{
+		workstreamID: "test",
+		closed:       false,
+		done:         make(chan struct{}),
+		stdin:        mockStdin,
+	}
+	pane.SetPTY(pty)
+
+	// Test sending just enter (empty text)
+	err := pane.SendToPTYWithEnter("")
+	if err != nil {
+		t.Errorf("SendToPTYWithEnter() unexpected error: %v", err)
+	}
+
+	// Verify the output: should just be Kitty Enter key
+	expected := "\x1b[13u"
+	if string(mockStdin.Bytes()) != expected {
+		t.Errorf("Written data = %q, want %q", string(mockStdin.Bytes()), expected)
+	}
+}
+
 func TestPaneModel_ScrollMode(t *testing.T) {
 	ws := workstream.New("test")
 	pane := NewPaneModel(ws)
@@ -916,9 +975,10 @@ func TestPaneModel_WritePTYOutput_ScrollbackPreservesColors(t *testing.T) {
 	}
 }
 
-// TestPaneModel_EnterKey_SendsCarriageReturn verifies that pressing Enter sends \r (carriage return)
-// to the PTY, not \n (line feed). This is crucial for proper terminal input handling.
-func TestPaneModel_EnterKey_SendsCarriageReturn(t *testing.T) {
+// TestPaneModel_EnterKey_SendsKittyProtocol verifies that pressing Enter sends the Kitty
+// keyboard protocol sequence (CSI 13 u) to the PTY. This is crucial for proper terminal
+// input handling with Claude Code which uses bubbletea with Kitty protocol support.
+func TestPaneModel_EnterKey_SendsKittyProtocol(t *testing.T) {
 	ws := workstream.New("test")
 	pane := NewPaneModel(ws)
 	pane.SetSize(80, 24)
@@ -938,9 +998,10 @@ func TestPaneModel_EnterKey_SendsCarriageReturn(t *testing.T) {
 	enterMsg := tea.KeyPressMsg{Code: tea.KeyEnter}
 	pane.Update(enterMsg)
 
-	// Verify that \r was sent, not \n
+	// Verify that Kitty Enter sequence was sent (CSI 13 u = ESC [ 1 3 u)
 	written := mockStdin.Bytes()
-	if string(written) != "\r" {
-		t.Errorf("Enter key should send \\r (carriage return), got %q", string(written))
+	expected := "\x1b[13u"
+	if string(written) != expected {
+		t.Errorf("Enter key should send Kitty protocol sequence %q, got %q", expected, string(written))
 	}
 }

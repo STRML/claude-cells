@@ -21,6 +21,13 @@ import (
 // ULID format: 26 alphanumeric characters
 var sessionIDRegex = regexp.MustCompile(`(?:session(?:[_\s]?id)?[:\s]+|Resuming session[:\s]+)([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}|[0-9A-Za-z]{26})`)
 
+// KittyEnterKey is the Kitty keyboard protocol sequence for the Enter key.
+// Kitty protocol: CSI 13 u (13=Enter/CR codepoint, no modifiers)
+// This is the standard format for Enter in terminals that support Kitty protocol.
+// Using this instead of \r ensures Enter works in bubbletea apps like Claude Code
+// that enable Kitty keyboard protocol for enhanced key handling.
+var KittyEnterKey = []byte{27, '[', '1', '3', 'u'}
+
 // escapeShellArg escapes a string for safe use in a shell command.
 // It handles special characters that could break out of double-quoted strings
 // or cause command injection.
@@ -412,13 +419,13 @@ func (p *PTYSession) StartReadLoop() {
 							// Send down arrow to select "Yes, I accept"
 							p.Write([]byte{27, '[', 'B'})
 							time.Sleep(50 * time.Millisecond)
-							// Send enter to confirm
-							p.Write([]byte{'\r'})
+							// Send enter to confirm (use Kitty protocol for Enter)
+							p.Write(KittyEnterKey)
 							bypassHandled = true
 						} else if strings.Contains(content, "Enter to confirm") {
-							// Simple confirmation prompt - just send enter
+							// Simple confirmation prompt - just send enter (use Kitty protocol)
 							time.Sleep(100 * time.Millisecond)
-							p.Write([]byte{'\r'})
+							p.Write(KittyEnterKey)
 							bypassHandled = true
 						} else if strings.Contains(content, "Resume Session") {
 							// Session picker appeared - the specified session ID wasn't found

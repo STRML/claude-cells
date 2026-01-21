@@ -1181,10 +1181,10 @@ Scroll Mode:
 
 						// Build the prompt for Claude
 						fileList := strings.Join(msg.ConflictFiles, ", ")
-						prompt := fmt.Sprintf("Please run `git fetch origin main && git rebase origin/main` to start the rebase, then resolve the merge conflicts in these files: %s. After resolving each conflict, run `git add <file>` and then `git rebase --continue`. Let me know when done.\r", fileList)
+						prompt := fmt.Sprintf("Please run `git fetch origin main && git rebase origin/main` to start the rebase, then resolve the merge conflicts in these files: %s. After resolving each conflict, run `git add <file>` and then `git rebase --continue`. Let me know when done.", fileList)
 
-						// Send the prompt to Claude (with \r to submit)
-						_ = m.panes[i].SendToPTY(prompt)
+						// Send the prompt to Claude with Enter (uses Kitty keyboard protocol)
+						_ = m.panes[i].SendToPTYWithEnter(prompt)
 						return m, nil
 					}
 				}
@@ -1396,10 +1396,10 @@ Scroll Mode:
 				ws := m.panes[i].Workstream()
 				switch msg.Action {
 				case CommitBeforeMergeYes:
-					// Send /ccells-commit skill to Claude Code in the container (use \r for Enter)
+					// Send /ccells-commit skill to Claude Code in the container (uses Kitty Enter)
 					if m.panes[i].HasPTY() {
 						m.panes[i].AppendOutput("\nAsking Claude to commit changes...\n")
-						_ = m.panes[i].PTY().WriteString("/ccells-commit\r")
+						_ = m.panes[i].SendToPTYWithEnter("/ccells-commit")
 					} else {
 						m.panes[i].AppendOutput("\nNo active session to commit.\n")
 					}
@@ -1625,8 +1625,8 @@ Scroll Mode:
 		for i := range m.panes {
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
 				if m.panes[i].HasPTY() {
-					// Send "continue" followed by enter to resume the interrupted task (use \r for Enter)
-					_ = m.panes[i].SendToPTY("continue\r")
+					// Send "continue" followed by enter to resume the interrupted task (uses Kitty Enter)
+					_ = m.panes[i].SendToPTYWithEnter("continue")
 				}
 				break
 			}
@@ -1638,8 +1638,8 @@ Scroll Mode:
 		for i := range m.panes {
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
 				if m.panes[i].HasPTY() {
-					// Just send enter to confirm the continue prompt (use \r for Enter)
-					_ = m.panes[i].SendToPTY("\r")
+					// Just send enter to confirm the continue prompt (uses Kitty Enter)
+					_ = m.panes[i].SendToPTYWithEnter("")
 				}
 				break
 			}
@@ -1796,8 +1796,8 @@ Scroll Mode:
 					}
 				} else {
 					m.panes[i].AppendOutput(fmt.Sprintf("PR created: %s\n", msg.PRURL))
-					// Notify Claude Code about the PR creation (use \r to simulate Enter keypress)
-					_ = m.panes[i].SendToPTY(fmt.Sprintf("[ccells] ✓ PR #%d created: %s\r", msg.PRNumber, msg.PRURL))
+					// Notify Claude Code about the PR creation (uses Kitty Enter)
+					_ = m.panes[i].SendToPTYWithEnter(fmt.Sprintf("[ccells] ✓ PR #%d created: %s", msg.PRNumber, msg.PRURL))
 					// Update in-pane progress dialog if open
 					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
 						dialog.SetComplete(fmt.Sprintf("Pull Request Created!\n\nPR #%d: %s\n\nPress Enter or Esc to close.", msg.PRNumber, msg.PRURL))
@@ -1828,8 +1828,8 @@ Scroll Mode:
 					}
 				} else {
 					m.panes[i].AppendOutput("Branch merged into main successfully!\n")
-					// Notify Claude Code about the merge (use \r to simulate Enter keypress)
-					_ = m.panes[i].SendToPTY(fmt.Sprintf("[ccells] ✓ Branch '%s' merged into main\r", ws.BranchName))
+					// Notify Claude Code about the merge (uses Kitty Enter)
+					_ = m.panes[i].SendToPTYWithEnter(fmt.Sprintf("[ccells] ✓ Branch '%s' merged into main", ws.BranchName))
 					// Show post-merge destroy dialog in pane
 					dialog := NewPostMergeDestroyDialog(ws.BranchName, ws.ID)
 					m.panes[i].SetInPaneDialog(&dialog)
@@ -1845,16 +1845,16 @@ Scroll Mode:
 				ws := m.panes[i].Workstream()
 				if msg.Error != nil {
 					if len(msg.ConflictFiles) > 0 {
-						// Rebase has conflicts - notify Claude to resolve (use \r to simulate Enter keypress)
+						// Rebase has conflicts - notify Claude to resolve (uses Kitty Enter)
 						m.panes[i].AppendOutput("Rebase has conflicts. Resolve in container and run 'git rebase --continue'\n")
-						_ = m.panes[i].SendToPTY(fmt.Sprintf("[ccells] ⚠ Rebase has conflicts. Please resolve the following files and run 'git rebase --continue': %s\r", formatFileList(msg.ConflictFiles)))
+						_ = m.panes[i].SendToPTYWithEnter(fmt.Sprintf("[ccells] ⚠ Rebase has conflicts. Please resolve the following files and run 'git rebase --continue': %s", formatFileList(msg.ConflictFiles)))
 					} else {
 						m.panes[i].AppendOutput(fmt.Sprintf("Rebase failed: %v\n", msg.Error))
 					}
 				} else {
 					m.panes[i].AppendOutput("Rebase successful! Branch is now up to date with main.\n")
-					// Notify Claude Code about the rebase (use \r to simulate Enter keypress)
-					_ = m.panes[i].SendToPTY(fmt.Sprintf("[ccells] ✓ Branch '%s' rebased onto main. You can now try merging again.\r", ws.BranchName))
+					// Notify Claude Code about the rebase (uses Kitty Enter)
+					_ = m.panes[i].SendToPTYWithEnter(fmt.Sprintf("[ccells] ✓ Branch '%s' rebased onto main. You can now try merging again.", ws.BranchName))
 					m.toast = "Rebase successful"
 					m.toastExpiry = time.Now().Add(toastDuration)
 				}
