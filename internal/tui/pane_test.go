@@ -1,9 +1,13 @@
 package tui
 
 import (
+	"bytes"
+	"io"
 	"strings"
+	"sync"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
 	"github.com/STRML/claude-cells/internal/workstream"
 )
 
@@ -746,5 +750,63 @@ func TestPaneModel_IsClaudeWorking_NilVterm(t *testing.T) {
 	result := pane.IsClaudeWorking()
 	if result {
 		t.Error("IsClaudeWorking() should return false when vterm has no content")
+	}
+}
+
+// mockPTYStdin is a mock io.WriteCloser for testing PTY input
+type mockPTYStdin struct {
+	buf    bytes.Buffer
+	closed bool
+	mu     sync.Mutex
+}
+
+func (m *mockPTYStdin) Write(p []byte) (n int, err error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.closed {
+		return 0, io.ErrClosedPipe
+	}
+	return m.buf.Write(p)
+}
+
+func (m *mockPTYStdin) Close() error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.closed = true
+	return nil
+}
+
+func (m *mockPTYStdin) Bytes() []byte {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.buf.Bytes()
+}
+
+// TestPaneModel_EnterKey_SendsCarriageReturn verifies that pressing Enter sends \r (carriage return)
+// to the PTY, not \n (line feed). This is crucial for proper terminal input handling.
+func TestPaneModel_EnterKey_SendsCarriageReturn(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24)
+	pane.SetFocused(true) // Pane must be focused to process key events
+
+	// Create a mock PTY session with a mock stdin
+	mockStdin := &mockPTYStdin{}
+	pty := &PTYSession{
+		workstreamID: ws.ID,
+		closed:       false,
+		done:         make(chan struct{}),
+		stdin:        mockStdin,
+	}
+	pane.SetPTY(pty)
+
+	// Send Enter key
+	enterMsg := tea.KeyPressMsg{Code: tea.KeyEnter}
+	pane.Update(enterMsg)
+
+	// Verify that \r was sent, not \n
+	written := mockStdin.Bytes()
+	if string(written) != "\r" {
+		t.Errorf("Enter key should send \\r (carriage return), got %q", string(written))
 	}
 }

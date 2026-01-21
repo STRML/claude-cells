@@ -867,6 +867,11 @@ func TestContainerSetupScript_CopiesCustomConfig(t *testing.T) {
 			contains: "CLAUDE.md",
 			desc:     "CLAUDE.md should be copied for global instructions",
 		},
+		{
+			name:     "creates ccells-commit command",
+			contains: "ccells-commit.md",
+			desc:     "ccells-commit.md should be created for the /ccells-commit skill",
+		},
 	}
 
 	for _, tt := range tests {
@@ -883,5 +888,72 @@ func TestContainerSetupScript_CopiesCustomConfig(t *testing.T) {
 func TestContainerSetupScript_CustomStatusLineComment(t *testing.T) {
 	if !strings.Contains(containerSetupScript, "custom status line") {
 		t.Error("containerSetupScript should document that commands/ is used for custom status line")
+	}
+}
+
+// TestContainerSetupScript_CcellsCommitCommand verifies the ccells-commit command content.
+func TestContainerSetupScript_CcellsCommitCommand(t *testing.T) {
+	// Verify the command contains essential information
+	checks := []struct {
+		contains string
+		desc     string
+	}{
+		{"Claude Cells", "should mention Claude Cells"},
+		{"commit all changes", "should instruct to commit changes"},
+		{"Esc Esc m", "should mention the merge shortcut"},
+		{"merge dialog", "should mention the merge dialog"},
+	}
+
+	for _, check := range checks {
+		if !strings.Contains(containerSetupScript, check.contains) {
+			t.Errorf("ccells-commit command should contain %q: %s", check.contains, check.desc)
+		}
+	}
+}
+
+// TestPTYSession_WriteString_EnterKey verifies that Enter key is sent as carriage return (\r)
+// rather than line feed (\n). This is important for PTY interaction where \r simulates
+// pressing the Enter key.
+func TestPTYSession_WriteString_EnterKey(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "ccells-commit skill with carriage return",
+			input:    "/ccells-commit\r",
+			expected: "/ccells-commit\r",
+		},
+		{
+			name:     "just carriage return for enter",
+			input:    "\r",
+			expected: "\r",
+		},
+		{
+			name:     "continue command with enter",
+			input:    "continue\r",
+			expected: "continue\r",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mock := &mockWriteCloser{}
+			session := &PTYSession{
+				workstreamID: "test",
+				closed:       false,
+				done:         make(chan struct{}),
+				stdin:        mock,
+			}
+
+			err := session.WriteString(tt.input)
+			if err != nil {
+				t.Errorf("WriteString() error = %v", err)
+			}
+			if string(mock.Bytes()) != tt.expected {
+				t.Errorf("Written data = %q, want %q", string(mock.Bytes()), tt.expected)
+			}
+		})
 	}
 }

@@ -111,6 +111,18 @@ if test -d "/home/claude/.claude" && test "$HOME" != "/home/claude"; then
     cp -r "/home/claude/.claude/commands" "$HOME/.claude/" 2>/dev/null
   fi
 
+  # Create ccells-specific commands
+  mkdir -p "$HOME/.claude/commands" 2>/dev/null
+  cat > "$HOME/.claude/commands/ccells-commit.md" << 'CCELLS_CMD'
+You are running inside Claude Cells (ccells), a terminal UI that manages multiple Claude Code instances in isolated Docker containers.
+
+Please commit all changes in this repository with an appropriate commit message that summarizes what was done.
+
+After the commit is complete, inform the user:
+- Briefly summarize what was committed
+- Tell them they can press **Esc Esc m** to open the merge dialog and merge this branch into main
+CCELLS_CMD
+
   # Copy custom agents if they exist
   if test -d "/home/claude/.claude/agents"; then
     cp -r "/home/claude/.claude/agents" "$HOME/.claude/" 2>/dev/null

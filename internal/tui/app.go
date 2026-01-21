@@ -1328,10 +1328,10 @@ Scroll Mode:
 				ws := m.panes[i].Workstream()
 				switch msg.Action {
 				case CommitBeforeMergeYes:
-					// Send /commit command to Claude Code in the container
+					// Send /ccells-commit skill to Claude Code in the container (use \r for Enter)
 					if m.panes[i].HasPTY() {
 						m.panes[i].AppendOutput("\nAsking Claude to commit changes...\n")
-						_ = m.panes[i].PTY().WriteString("/commit\n")
+						_ = m.panes[i].PTY().WriteString("/ccells-commit\r")
 					} else {
 						m.panes[i].AppendOutput("\nNo active session to commit.\n")
 					}
@@ -1557,8 +1557,8 @@ Scroll Mode:
 		for i := range m.panes {
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
 				if m.panes[i].HasPTY() {
-					// Send "continue" followed by enter to resume the interrupted task
-					_ = m.panes[i].SendToPTY("continue\n")
+					// Send "continue" followed by enter to resume the interrupted task (use \r for Enter)
+					_ = m.panes[i].SendToPTY("continue\r")
 				}
 				break
 			}
@@ -1570,8 +1570,8 @@ Scroll Mode:
 		for i := range m.panes {
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
 				if m.panes[i].HasPTY() {
-					// Just send enter to confirm the continue prompt
-					_ = m.panes[i].SendToPTY("\n")
+					// Just send enter to confirm the continue prompt (use \r for Enter)
+					_ = m.panes[i].SendToPTY("\r")
 				}
 				break
 			}
