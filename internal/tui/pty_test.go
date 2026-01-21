@@ -911,6 +911,25 @@ func TestContainerSetupScript_CcellsCommitCommand(t *testing.T) {
 	}
 }
 
+// TestContainerSetupScript_CcellsCommitCLAUDE_CONFIG_DIR verifies that ccells-commit is also
+// created at the CLAUDE_CONFIG_DIR location when set, ensuring Claude Code can find it.
+func TestContainerSetupScript_CcellsCommitCLAUDE_CONFIG_DIR(t *testing.T) {
+	// The script should write to CLAUDE_CONFIG_DIR location when it differs from HOME
+	checks := []struct {
+		contains string
+		desc     string
+	}{
+		{"CLAUDE_CONFIG_DIR", "should check CLAUDE_CONFIG_DIR environment variable"},
+		{"$CLAUDE_CONFIG_DIR/.claude/commands", "should create commands at CLAUDE_CONFIG_DIR"},
+	}
+
+	for _, check := range checks {
+		if !strings.Contains(containerSetupScript, check.contains) {
+			t.Errorf("containerSetupScript should contain %q: %s", check.contains, check.desc)
+		}
+	}
+}
+
 // TestPTYSession_WriteString_EnterKey verifies that Enter key is sent as carriage return (\r)
 // rather than line feed (\n). This is important for PTY interaction where \r simulates
 // pressing the Enter key.

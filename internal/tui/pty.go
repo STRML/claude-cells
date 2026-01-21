@@ -67,7 +67,7 @@ log "Starting container setup..."
 log "User: $(whoami), Home: $HOME"
 
 # Ensure PATH includes user's local bin directories
-export PATH="$HOME/.local/bin:$HOME/.claude/local/bin:$PATH"
+export PATH="$HOME/.local/bin:$HOME/.claude/local/bin:/usr/local/go/bin:$PATH"
 
 # Kill any existing claude CLI processes (from previous sessions that weren't cleaned up)
 # This happens when ccells quits - the container stays running but the PTY is orphaned
@@ -112,6 +112,20 @@ if test -d "/home/claude/.claude" && test "$HOME" != "/home/claude"; then
   fi
 
   # Create ccells-specific commands
+  # Write to CLAUDE_CONFIG_DIR location (where Claude Code looks) if set and different from HOME
+  if test -n "$CLAUDE_CONFIG_DIR" && test "$CLAUDE_CONFIG_DIR" != "$HOME"; then
+    mkdir -p "$CLAUDE_CONFIG_DIR/.claude/commands" 2>/dev/null
+    cat > "$CLAUDE_CONFIG_DIR/.claude/commands/ccells-commit.md" << 'CCELLS_CMD'
+You are running inside Claude Cells (ccells), a terminal UI that manages multiple Claude Code instances in isolated Docker containers.
+
+Please commit all changes in this repository with an appropriate commit message that summarizes what was done.
+
+After the commit is complete, inform the user:
+- Briefly summarize what was committed
+- Tell them they can press **Esc Esc m** to open the merge dialog and merge this branch into main
+CCELLS_CMD
+  fi
+  # Also write to $HOME/.claude for backwards compatibility
   mkdir -p "$HOME/.claude/commands" 2>/dev/null
   cat > "$HOME/.claude/commands/ccells-commit.md" << 'CCELLS_CMD'
 You are running inside Claude Cells (ccells), a terminal UI that manages multiple Claude Code instances in isolated Docker containers.
