@@ -251,7 +251,7 @@ func (r *CredentialRefresher) checkAndRefresh() {
 }
 
 func (r *CredentialRefresher) updateContainerCredentials(configDir, rawCreds string) error {
-	// Update .credentials.json inside the .claude directory (legacy location)
+	// Update .credentials.json inside the .claude directory
 	claudeDir := filepath.Join(configDir, ClaudeDir)
 	credsPath := filepath.Join(claudeDir, ".credentials.json")
 
@@ -262,12 +262,6 @@ func (r *CredentialRefresher) updateContainerCredentials(configDir, rawCreds str
 
 	// Write credentials with restrictive permissions
 	if err := os.WriteFile(credsPath, []byte(rawCreds), 0600); err != nil {
-		return err
-	}
-
-	// Also update root-level .credentials.json for CLAUDE_CONFIG_DIR (claude-code#1736)
-	rootCredsPath := filepath.Join(configDir, ".credentials.json")
-	if err := os.WriteFile(rootCredsPath, []byte(rawCreds), 0600); err != nil {
 		return err
 	}
 

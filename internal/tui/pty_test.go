@@ -835,7 +835,7 @@ func TestPTYOptionsWithSessionID(t *testing.T) {
 }
 
 // TestContainerSetupScript_SingleConfigDir verifies that the container setup script
-// uses a single config directory (CONFIG_DIR) based on CLAUDE_CONFIG_DIR.
+// uses $HOME/.claude as the config directory.
 func TestContainerSetupScript_SingleConfigDir(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -843,14 +843,9 @@ func TestContainerSetupScript_SingleConfigDir(t *testing.T) {
 		desc     string
 	}{
 		{
-			name:     "determines config base from CLAUDE_CONFIG_DIR",
-			contains: `CONFIG_BASE="${CLAUDE_CONFIG_DIR:-$HOME}"`,
-			desc:     "should use CLAUDE_CONFIG_DIR if set, otherwise HOME",
-		},
-		{
-			name:     "sets CONFIG_DIR",
-			contains: `CONFIG_DIR="$CONFIG_BASE/.claude"`,
-			desc:     "should set CONFIG_DIR to .claude under the base",
+			name:     "sets CONFIG_DIR to HOME/.claude",
+			contains: `CONFIG_DIR="$HOME/.claude"`,
+			desc:     "should use $HOME/.claude as config directory",
 		},
 		{
 			name:     "creates ccells-commit command",
@@ -897,7 +892,6 @@ func TestContainerSetupScript_CcellsCommitCommand(t *testing.T) {
 		}
 	}
 }
-
 
 // TestPTYSession_WriteString_EnterKey verifies that Enter key is sent as carriage return (\r)
 // rather than line feed (\n). This is important for PTY interaction where \r simulates

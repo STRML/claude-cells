@@ -53,10 +53,13 @@ var program *tea.Program
 // containerSetupScript is the shell script that runs inside containers to set up
 // the Claude Code environment. It's exported as a package-level variable for testing.
 // The script:
-// 1. Sets up credentials from mounted files
-// 2. Copies essential config (settings.json, CLAUDE.md, plugins, commands, agents)
+// 1. Creates ccells-specific commands
+// 2. Copies session data for --continue
 // 3. Installs Claude Code if not available
 // 4. Launches Claude Code with appropriate flags
+//
+// Note: Containers run as root with IS_SANDBOX=1, which allows --dangerously-skip-permissions.
+// The ~/.claude directory is mounted from the host at /root/.claude.
 const containerSetupScript = `
 # Helper function for logging (quiet on resume)
 log() {
@@ -66,11 +69,8 @@ log() {
 log "Starting container setup..."
 log "User: $(whoami), Home: $HOME"
 
-# Determine the single config directory to use
-# CLAUDE_CONFIG_DIR is set for containers - use it as the base for all Claude config
-# This avoids confusion between multiple config locations
-CONFIG_BASE="${CLAUDE_CONFIG_DIR:-$HOME}"
-CONFIG_DIR="$CONFIG_BASE/.claude"
+# Config directory is always $HOME/.claude (mounted from host)
+CONFIG_DIR="$HOME/.claude"
 log "Using config directory: $CONFIG_DIR"
 
 # Ensure PATH includes user's local bin directories
@@ -83,13 +83,6 @@ if pgrep -x "claude" >/dev/null 2>&1; then
   log "Killing existing Claude processes from previous session..."
   pkill -9 -x "claude" 2>/dev/null
   sleep 1
-fi
-
-# Setup credentials - the mounted config should already have them, but check for legacy locations
-if test -f "$CONFIG_BASE/.claude-credentials"; then
-  log "Copying credentials to config directory..."
-  mkdir -p "$CONFIG_DIR" 2>/dev/null
-  cp "$CONFIG_BASE/.claude-credentials" "$CONFIG_DIR/.credentials.json" 2>/dev/null
 fi
 
 # Create ccells-specific commands in the config directory
@@ -117,14 +110,6 @@ if test -n "$HOST_PROJECT_PATH"; then
   else
     log "No session data found at $HOST_SESSION_DIR"
   fi
-fi
-
-# Copy .gitconfig for git user identity (name/email) - this is critical!
-# Without this, commits show as "Claude" instead of the actual user
-# Git looks in $HOME/.gitconfig, so we need to copy there if different from CONFIG_BASE
-if test -f "$CONFIG_BASE/.gitconfig" && test "$HOME" != "$CONFIG_BASE"; then
-  log "Copying .gitconfig for git identity..."
-  cp "$CONFIG_BASE/.gitconfig" "$HOME/.gitconfig" 2>/dev/null || true
 fi
 
 mkdir -p "$HOME/.local/bin" 2>/dev/null

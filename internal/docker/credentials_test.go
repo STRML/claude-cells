@@ -165,7 +165,7 @@ func TestCredentialRefresherNoDuplicateRegistration(t *testing.T) {
 	}
 }
 
-func TestCredentialRefresherWritesToBothLocations(t *testing.T) {
+func TestCredentialRefresherWritesToClaudeDir(t *testing.T) {
 	// Create a temporary config directory
 	tempDir := t.TempDir()
 	claudeDir := filepath.Join(tempDir, ".claude")
@@ -175,29 +175,20 @@ func TestCredentialRefresherWritesToBothLocations(t *testing.T) {
 
 	refresher := NewCredentialRefresher(1 * time.Hour)
 
-	// Test updateContainerCredentials writes to both locations
+	// Test updateContainerCredentials writes to .claude/.credentials.json
 	testCreds := `{"claudeAiOauth":{"accessToken":"test-token"}}`
 	err := refresher.updateContainerCredentials(tempDir, testCreds)
 	if err != nil {
 		t.Fatalf("updateContainerCredentials failed: %v", err)
 	}
 
-	// Check root-level .credentials.json (for CLAUDE_CONFIG_DIR)
-	rootCredsPath := filepath.Join(tempDir, ".credentials.json")
-	rootCreds, err := os.ReadFile(rootCredsPath)
+	// Check .claude/.credentials.json
+	credsPath := filepath.Join(claudeDir, ".credentials.json")
+	creds, err := os.ReadFile(credsPath)
 	if err != nil {
-		t.Errorf("Failed to read root .credentials.json: %v", err)
-	} else if string(rootCreds) != testCreds {
-		t.Errorf("Root credentials mismatch: got %s, want %s", string(rootCreds), testCreds)
-	}
-
-	// Check .claude/.credentials.json (legacy location)
-	legacyCredsPath := filepath.Join(claudeDir, ".credentials.json")
-	legacyCreds, err := os.ReadFile(legacyCredsPath)
-	if err != nil {
-		t.Errorf("Failed to read legacy .credentials.json: %v", err)
-	} else if string(legacyCreds) != testCreds {
-		t.Errorf("Legacy credentials mismatch: got %s, want %s", string(legacyCreds), testCreds)
+		t.Errorf("Failed to read .credentials.json: %v", err)
+	} else if string(creds) != testCreds {
+		t.Errorf("Credentials mismatch: got %s, want %s", string(creds), testCreds)
 	}
 }
 

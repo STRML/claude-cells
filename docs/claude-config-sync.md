@@ -61,27 +61,18 @@ On macOS, OAuth credentials are stored in the system keychain:
 ## ccells Sync Strategy
 
 ### Container Mounts
+Containers run as root with `IS_SANDBOX=1` (which allows `--dangerously-skip-permissions`).
+Configuration is mounted directly at `/root/`:
+
 | Host Path | Container Path | Mode |
 |-----------|----------------|------|
-| `~/.claude-cells/claude-config/.claude` | `/home/claude/.claude` | RW |
-| `~/.claude-cells/claude-config/.claude.json` | `/home/claude/.claude.json` | RW |
-| `~/.claude-cells/claude-config/.claude-credentials` | `/home/claude/.claude-credentials` | RO |
-| `~/.claude-cells/claude-config/.gitconfig` | `/home/claude/.gitconfig` | RO |
+| `~/.claude-cells/containers/<name>/.claude` | `/root/.claude` | RW |
+| `~/.claude-cells/containers/<name>/.claude.json` | `/root/.claude.json` | RW |
+| `~/.claude-cells/containers/<name>/.gitconfig` | `/root/.gitconfig` | RO |
 
 ### PTY Startup
-The PTY startup script copies configuration to the container user's home:
-- `settings.json` - User settings including status line configuration
-- `CLAUDE.md` - Global instructions (overwritten with ccells-specific instructions)
-- `statsig` - Feature flags
-- `plugins/` - Plugin configuration
-- `commands/` - Custom slash commands (for custom status line, etc.)
-- `agents/` - Custom agents
-
-Credentials are also copied to the expected location:
-```bash
-test -f /home/claude/.claude-credentials && \
-  cp /home/claude/.claude-credentials /home/claude/.claude/.credentials.json
-```
+The PTY startup script creates ccells-specific commands in the mounted config directory:
+- `commands/ccells-commit.md` - The `/ccells-commit` skill for committing changes
 
 **IMPORTANT:** On Linux, Claude Code expects `.credentials.json` (with a leading dot), not `credentials.json`.
 
@@ -90,13 +81,13 @@ test -f /home/claude/.claude-credentials && \
 ### 1. "Invalid API key" Error
 **Cause**: Credentials not synced or in wrong format
 **Fix**:
-- Verify `~/.claude-cells/claude-config/.claude/.credentials.json` exists and has valid tokens (note the leading dot!)
+- Verify `~/.claude-cells/containers/<name>/.claude/.credentials.json` exists and has valid tokens (note the leading dot!)
 - Check token hasn't expired (`expiresAt` timestamp)
 
 ### 2. Wrong Model (e.g., "Sonnet 4.5" instead of configured model)
 **Cause**: `settings.json` not synced or not mounted correctly
 **Fix**:
-- Verify `~/.claude-cells/claude-config/.claude/settings.json` exists
+- Verify `~/.claude-cells/containers/<name>/.claude/settings.json` exists
 - Check it has the correct model configuration
 
 ### 3. Missing Plugins/Permissions
@@ -116,10 +107,10 @@ test -f /home/claude/.claude-credentials && \
 
 2. Check ccells copy:
    ```bash
-   ls -la ~/.claude-cells/claude-config/
-   ls -la ~/.claude-cells/claude-config/.claude/
-   cat ~/.claude-cells/claude-config/.claude/settings.json | head -20
-   cat ~/.claude-cells/claude-config/.claude/.credentials.json | head -5
+   ls -la ~/.claude-cells/containers/<name>/
+   ls -la ~/.claude-cells/containers/<name>/.claude/
+   cat ~/.claude-cells/containers/<name>/.claude/settings.json | head -20
+   cat ~/.claude-cells/containers/<name>/.claude/.credentials.json | head -5
    ```
 
 3. Check keychain credentials:
@@ -129,9 +120,9 @@ test -f /home/claude/.claude-credentials && \
 
 4. Inside container:
    ```bash
-   docker exec <container> ls -la /home/claude/.claude/
-   docker exec <container> cat /home/claude/.claude/.credentials.json | head -5
-   docker exec <container> cat /home/claude/.claude/settings.json | head -20
+   docker exec <container> ls -la /root/.claude/
+   docker exec <container> cat /root/.claude/.credentials.json | head -5
+   docker exec <container> cat /root/.claude/settings.json | head -20
    ```
 
 ## Key Points
@@ -140,3 +131,4 @@ test -f /home/claude/.claude-credentials && \
 - **`.credentials.json` must be inside `~/.claude/`** for Claude Code to find it (note the leading dot!)
 - **settings.json controls model choice** - must be synced
 - **~/.claude.json is separate** from ~/.claude/ directory
+- **Containers run as root** with `IS_SANDBOX=1` for `--dangerously-skip-permissions`

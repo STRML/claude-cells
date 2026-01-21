@@ -201,24 +201,10 @@ func CreateContainerConfig(containerName string) (*ConfigPaths, error) {
 		if err := os.MkdirAll(dstClaudeDir, 0755); err != nil {
 			return nil, fmt.Errorf("failed to create .claude directory: %w", err)
 		}
-		// Write credentials inside .claude directory (legacy location)
+		// Write credentials inside .claude directory (where Claude Code expects them)
 		credsInClaudeDir := filepath.Join(dstClaudeDir, ".credentials.json")
 		if err := os.WriteFile(credsInClaudeDir, []byte(creds.Raw), 0600); err != nil {
 			return nil, fmt.Errorf("failed to write .credentials.json: %w", err)
-		}
-		// Also write credentials at config root for CLAUDE_CONFIG_DIR (claude-code#1736)
-		// Claude Code with CLAUDE_CONFIG_DIR looks for .credentials.json in that directory
-		credsAtRoot := filepath.Join(containerConfigDir, ".credentials.json")
-		if err := os.WriteFile(credsAtRoot, []byte(creds.Raw), 0600); err != nil {
-			return nil, fmt.Errorf("failed to write root .credentials.json: %w", err)
-		}
-	}
-
-	// Also write separate credentials file (legacy)
-	dstCredentials := filepath.Join(containerConfigDir, CredentialsFile)
-	if creds != nil && creds.Raw != "" {
-		if err := os.WriteFile(dstCredentials, []byte(creds.Raw), 0600); err != nil {
-			return nil, fmt.Errorf("failed to write credentials: %w", err)
 		}
 	}
 
@@ -242,7 +228,7 @@ func CreateContainerConfig(containerName string) (*ConfigPaths, error) {
 		ClaudeDir:   dstClaudeDir,
 		ClaudeJSON:  dstClaudeJSON,
 		GitConfig:   gitConfigPath,
-		Credentials: dstCredentials,
+		Credentials: "", // Credentials are now inside .claude/.credentials.json
 	}, nil
 }
 
@@ -377,14 +363,6 @@ func InitClaudeConfig() (*ConfigPaths, error) {
 		}
 	}
 
-	// Also write separate credentials file (for explicit mounting if needed)
-	dstCredentials := filepath.Join(configDir, CredentialsFile)
-	if creds != nil && creds.Raw != "" {
-		if err := os.WriteFile(dstCredentials, []byte(creds.Raw), 0600); err != nil {
-			return nil, fmt.Errorf("failed to write credentials: %w", err)
-		}
-	}
-
 	// Only include GitConfig path if file was actually copied
 	gitConfigPath := ""
 	if gitConfigCopied {
@@ -395,7 +373,7 @@ func InitClaudeConfig() (*ConfigPaths, error) {
 		ClaudeDir:   dstClaudeDir,
 		ClaudeJSON:  dstClaudeJSON,
 		GitConfig:   gitConfigPath,
-		Credentials: dstCredentials,
+		Credentials: "", // Credentials are now inside .claude/.credentials.json
 	}, nil
 }
 

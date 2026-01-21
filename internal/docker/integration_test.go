@@ -104,9 +104,9 @@ func TestClaudeCodeContainer(t *testing.T) {
 
 	// Test 2: Verify .claude directory is writable
 	t.Run("claude_dir_writable", func(t *testing.T) {
-		// Try to create a file in the debug directory
+		// Try to create a file in the debug directory (containers run as root)
 		output, err := client.ExecInContainer(ctx, containerID, []string{
-			"sh", "-c", "mkdir -p /home/claude/.claude/debug && echo 'test' > /home/claude/.claude/debug/test.txt && cat /home/claude/.claude/debug/test.txt",
+			"sh", "-c", "mkdir -p /root/.claude/debug && echo 'test' > /root/.claude/debug/test.txt && cat /root/.claude/debug/test.txt",
 		})
 		if err != nil {
 			t.Fatalf("ExecInContainer() error = %v", err)

@@ -207,82 +207,19 @@ func TestContainer_PauseUnpause(t *testing.T) {
 	}
 }
 
-// Integration test for PersistSessions
+// TestContainer_PersistSessions verifies PersistSessions is a no-op
+// (sessions are now written directly to the mounted ~/.claude directory)
 func TestContainer_PersistSessions(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping integration test")
-	}
 	t.Parallel()
 
-	client := skipIfDockerUnavailable(t)
-	defer client.Close()
+	client := NewMockClient()
+	ctx := context.Background()
 
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
-	defer cancel()
-
-	cfg := &ContainerConfig{
-		Name:  "ccells-persist-test-" + time.Now().Format("150405"),
-		Image: "alpine:latest",
-	}
-
-	containerID, err := client.CreateContainer(ctx, cfg)
+	// PersistSessions should be a no-op and return nil
+	err := client.PersistSessions(ctx, "any-container-id")
 	if err != nil {
-		t.Fatalf("CreateContainer() error = %v", err)
+		t.Errorf("PersistSessions() error = %v, want nil", err)
 	}
-	defer func() {
-		_ = client.StopContainer(ctx, containerID)
-		_ = client.RemoveContainer(ctx, containerID)
-	}()
-
-	err = client.StartContainer(ctx, containerID)
-	if err != nil {
-		t.Fatalf("StartContainer() error = %v", err)
-	}
-
-	// Create a mock session file in /root/.claude/projects/-workspace/
-	setupCmd := []string{"sh", "-c", `
-		mkdir -p /root/.claude/projects/-workspace
-		echo '{"test": "data"}' > /root/.claude/projects/-workspace/test-session.jsonl
-		mkdir -p /root/.claude/projects/-workspace/test-dir
-		echo 'tool result' > /root/.claude/projects/-workspace/test-dir/result.txt
-	`}
-	_, err = client.ExecInContainer(ctx, containerID, setupCmd)
-	if err != nil {
-		t.Fatalf("Failed to create test session: %v", err)
-	}
-
-	// Create the mount point destination
-	mkdirCmd := []string{"sh", "-c", "mkdir -p /home/claude/.claude/projects"}
-	_, err = client.ExecInContainer(ctx, containerID, mkdirCmd)
-	if err != nil {
-		// Might not have /home/claude, that's OK for this test
-		t.Logf("Could not create /home/claude/.claude/projects (might not exist): %v", err)
-	}
-
-	// Call PersistSessions
-	err = client.PersistSessions(ctx, containerID)
-	if err != nil {
-		t.Fatalf("PersistSessions() error = %v", err)
-	}
-
-	// Verify the session was copied (if /home/claude exists)
-	checkCmd := []string{"sh", "-c", `
-		if [ -d "/home/claude/.claude/projects/-workspace" ]; then
-			cat /home/claude/.claude/projects/-workspace/test-session.jsonl 2>/dev/null || echo "no file"
-		else
-			echo "no home/claude dir"
-		fi
-	`}
-	output, err := client.ExecInContainer(ctx, containerID, checkCmd)
-	if err != nil {
-		t.Fatalf("Failed to verify session: %v", err)
-	}
-
-	// The test passes if either:
-	// 1. The file was copied (contains "test": "data")
-	// 2. /home/claude doesn't exist (container doesn't have that path)
-	// What matters is that PersistSessions doesn't error
-	t.Logf("PersistSessions verification output: %s", output)
 }
 
 // Integration test for cleanup orphaned containers

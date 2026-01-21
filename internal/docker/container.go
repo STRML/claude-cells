@@ -96,15 +96,6 @@ func (c *Client) CreateContainer(ctx context.Context, cfg *ContainerConfig) (str
 		env = append(env, fmt.Sprintf("TZ=%s", cfg.Timezone))
 	}
 
-	// Set CLAUDE_CONFIG_DIR to tell Claude Code where to find/store all config
-	// This is the recommended approach for Docker containers (see claude-code#1736)
-	// Claude Code will read/write .claude.json, .credentials.json, and other config here
-	if cfg.ClaudeCfg != "" {
-		// Point to the parent of .claude directory (e.g., /home/claude)
-		// Claude Code expects CLAUDE_CONFIG_DIR to contain .claude/ subdirectory
-		env = append(env, "CLAUDE_CONFIG_DIR=/home/claude")
-	}
-
 	containerCfg := &container.Config{
 		Image: cfg.Image,
 		Cmd:   []string{"sleep", "infinity"},
@@ -136,24 +127,15 @@ func (c *Client) CreateContainer(ctx context.Context, cfg *ContainerConfig) (str
 		mounts = append(mounts, mount.Mount{
 			Type:   mount.TypeBind,
 			Source: cfg.ClaudeCfg,
-			Target: "/home/claude/.claude",
+			Target: "/root/.claude",
 			// Not read-only: Claude Code needs to write debug logs to ~/.claude/debug/
-		})
-		// Also mount root-level .credentials.json for CLAUDE_CONFIG_DIR (claude-code#1736)
-		// Claude Code with CLAUDE_CONFIG_DIR looks for credentials at $CLAUDE_CONFIG_DIR/.credentials.json
-		rootCredsPath := filepath.Join(filepath.Dir(cfg.ClaudeCfg), ".credentials.json")
-		mounts = append(mounts, mount.Mount{
-			Type:   mount.TypeBind,
-			Source: rootCredsPath,
-			Target: "/home/claude/.credentials.json",
-			// Not read-only: Claude Code needs to refresh tokens
 		})
 	}
 	if cfg.ClaudeJSON != "" {
 		mounts = append(mounts, mount.Mount{
 			Type:   mount.TypeBind,
 			Source: cfg.ClaudeJSON,
-			Target: "/home/claude/.claude.json",
+			Target: "/root/.claude.json",
 			// Not read-only: Claude Code updates session state
 		})
 	}
@@ -161,7 +143,7 @@ func (c *Client) CreateContainer(ctx context.Context, cfg *ContainerConfig) (str
 		mounts = append(mounts, mount.Mount{
 			Type:     mount.TypeBind,
 			Source:   cfg.GitConfig,
-			Target:   "/home/claude/.gitconfig",
+			Target:   "/root/.gitconfig",
 			ReadOnly: true, // Git identity should not be modified
 		})
 	}
@@ -169,7 +151,7 @@ func (c *Client) CreateContainer(ctx context.Context, cfg *ContainerConfig) (str
 		mounts = append(mounts, mount.Mount{
 			Type:     mount.TypeBind,
 			Source:   cfg.Credentials,
-			Target:   "/home/claude/.claude-credentials",
+			Target:   "/root/.claude-credentials",
 			ReadOnly: true, // Credentials should not be modified by container
 		})
 	}
@@ -520,57 +502,9 @@ func extractBranchFromContainerName(containerName, projectName string) string {
 	return ""
 }
 
-// PersistSessions copies Claude session files from the container's runtime location
-// to the persistent mount point, so sessions survive container rebuilds.
-//
-// Sessions created inside containers are stored at $HOME/.claude/projects/-workspace/
-// (e.g., /root/.claude/projects/-workspace/ when running as root).
-// The .claude directory is mounted at /home/claude/.claude from the host.
-// To persist sessions, we copy them from the runtime location to the mount point.
+// PersistSessions is a no-op now that we mount ~/.claude directly at /root/.claude.
+// Sessions are written directly to the mount point and persist automatically.
+// Kept for API compatibility.
 func (c *Client) PersistSessions(ctx context.Context, containerID string) error {
-	// Shell script that:
-	// 1. Finds where Claude stored sessions (varies by user: /root/.claude or /home/<user>/.claude)
-	// 2. Copies session files to the mount point at /home/claude/.claude/projects/-workspace/
-	// 3. Handles the case where sessions might be in multiple locations
-	script := `
-# Find source session directories (where Claude wrote them)
-# Check $HOME/.claude/projects/-workspace/ first
-SRC_DIR=""
-if [ -d "$HOME/.claude/projects/-workspace" ] && [ "$HOME" != "/home/claude" ]; then
-    SRC_DIR="$HOME/.claude/projects/-workspace"
-elif [ -d "/root/.claude/projects/-workspace" ]; then
-    SRC_DIR="/root/.claude/projects/-workspace"
-fi
-
-# Mount point where sessions should persist (this is mounted from host)
-DEST_DIR="/home/claude/.claude/projects/-workspace"
-
-# Only copy if source exists and has files, and is different from destination
-if [ -n "$SRC_DIR" ] && [ "$SRC_DIR" != "$DEST_DIR" ] && [ -d "$SRC_DIR" ]; then
-    # Create destination directory
-    mkdir -p "$DEST_DIR" 2>/dev/null
-
-    # Copy all session files (.jsonl files and session directories)
-    # Use -n to not overwrite existing files (preserve original sessions)
-    if ls "$SRC_DIR"/*.jsonl >/dev/null 2>&1; then
-        for f in "$SRC_DIR"/*.jsonl; do
-            if [ -f "$f" ]; then
-                cp -n "$f" "$DEST_DIR/" 2>/dev/null
-            fi
-        done
-    fi
-
-    # Copy any subdirectories (tool results, etc.)
-    for d in "$SRC_DIR"/*/; do
-        if [ -d "$d" ]; then
-            dirname=$(basename "$d")
-            mkdir -p "$DEST_DIR/$dirname" 2>/dev/null
-            cp -rn "$d"* "$DEST_DIR/$dirname/" 2>/dev/null
-        fi
-    done
-fi
-`
-	cmd := []string{"/bin/sh", "-c", script}
-	_, err := c.ExecInContainer(ctx, containerID, cmd)
-	return err
+	return nil
 }

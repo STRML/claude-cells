@@ -27,14 +27,8 @@ RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | d
     && apt-get install -y gh \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user for Claude Code (--dangerously-skip-permissions requires non-root)
-RUN useradd -m -s /bin/bash claude && \
-    echo "claude ALL=(ALL) NOPASSWD:ALL" >> /etc/sudoers
+# Set up directories (running as root with IS_SANDBOX=1)
+RUN mkdir -p /workspace /root/.claude
 
-# Set up directories with proper permissions
-RUN mkdir -p /workspace /home/claude/.claude && \
-    chown -R claude:claude /workspace /home/claude
-
-USER claude
 WORKDIR /workspace
 CMD ["sleep", "infinity"]
