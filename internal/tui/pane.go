@@ -1155,6 +1155,9 @@ func (p *PaneModel) SetSize(width, height int) {
 	// Track if size is actually changing (to trigger resize settling)
 	sizeChanged := p.width != width || p.height != height
 
+	// Track previous vterm width to detect when terminal grows wider
+	oldVtermWidth, _ := p.vterm.Size()
+
 	p.width = width
 	p.height = height
 	p.viewport.SetWidth(width - 4)   // Account for border and padding
@@ -1180,6 +1183,13 @@ func (p *PaneModel) SetSize(width, height int) {
 		// before auto-scrolling (prevents rapid scroll oscillation)
 		if sizeChanged {
 			p.resizeTime = time.Now()
+		}
+
+		// When terminal grows wider, send Ctrl+L to trigger a full redraw.
+		// This fixes the issue where content truncated during a smaller resize
+		// stays truncated when resizing back to a larger width.
+		if innerWidth > oldVtermWidth {
+			_ = p.pty.Write([]byte{12}) // Ctrl+L (form feed) - triggers screen redraw
 		}
 	}
 }
