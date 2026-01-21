@@ -35,6 +35,11 @@ internal/
   git/                     # Branch, worktree & PR operations
 ```
 
+### Data Directories
+
+- `~/.claude-cells/state/<repo-id>/state.json` - Per-repo workstream state (branches, container IDs, session IDs)
+- `~/.claude-cells/containers/<container-name>/` - Container-specific config files (credentials, .claude.json copies)
+
 ### Git Worktree Isolation
 
 Each container gets its own **git worktree** at `/tmp/ccells/worktrees/<branch-name>`. This keeps the host repository's working directory untouched while still sharing git objects. Benefits:
