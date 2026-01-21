@@ -117,6 +117,8 @@ go install github.com/STRML/claude-cells/cmd/ccells@latest
 | `p` | Toggle pairing mode |
 | `m` | Merge/PR menu |
 | `l` | View logs |
+| `` ` `` | Toggle ccells logs (system logs panel) |
+| `r` | View resource usage |
 | `L` | Cycle layout mode |
 | `s` | Settings |
 | `?` | Show help |

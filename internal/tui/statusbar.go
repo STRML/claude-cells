@@ -78,7 +78,7 @@ func (s StatusBarModel) View() string {
 		KeyHint("m", "erge/PR"),
 		KeyHint("p", "air"),
 		KeyHint("l", "ogs"),
-		KeyHint("`", "panel"),
+		KeyHint("`", "ccells logs"),
 		KeyHint("r", "esources"),
 	}
 	right := ""
