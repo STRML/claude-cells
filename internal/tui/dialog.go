@@ -613,7 +613,8 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 			// ctrl+j is the legacy escape sequence some terminals send for shift+enter
 			if d.useTextArea {
 				d.TextArea.InsertRune('\n')
-				return d, nil
+				// Return Blink to trigger view update including scroll to cursor
+				return d, textarea.Blink
 			}
 		case "enter":
 			// Progress dialog: dismiss only if complete

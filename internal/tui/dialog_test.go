@@ -1134,9 +1134,12 @@ func TestWorkstreamDialog_ShiftEnterKeyHandling(t *testing.T) {
 	// Send shift+enter to the dialog
 	d2, cmd2 := d2.Update(shiftEnterMsg)
 
-	// Shift+Enter should NOT return a confirm command
+	// Shift+Enter should NOT return a confirm command (but may return Blink for view update)
 	if cmd2 != nil {
-		t.Error("Shift+Enter should NOT return a command (should just insert newline)")
+		msg := cmd2()
+		if _, ok := msg.(DialogConfirmMsg); ok {
+			t.Error("Shift+Enter should NOT return DialogConfirmMsg")
+		}
 	}
 
 	// The dialog should have inserted a newline
@@ -1171,8 +1174,12 @@ func TestWorkstreamDialog_ShiftEnterKeyHandling(t *testing.T) {
 	}
 
 	d4, cmd4 := d4.Update(ctrlJMsg)
+	// Ctrl+J should NOT return a confirm command (but may return Blink for view update)
 	if cmd4 != nil {
-		t.Error("Ctrl+J should NOT return a command (should just insert newline)")
+		msg := cmd4()
+		if _, ok := msg.(DialogConfirmMsg); ok {
+			t.Error("Ctrl+J should NOT return DialogConfirmMsg")
+		}
 	}
 
 	if !strings.Contains(d4.TextArea.Value(), "\n") {
