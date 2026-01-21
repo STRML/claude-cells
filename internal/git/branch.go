@@ -113,28 +113,30 @@ func (g *Git) MergeBranch(ctx context.Context, branch string) error {
 // If squash is true, all commits are combined into a single commit.
 // Returns MergeConflictError if there are conflicts that need resolution.
 func (g *Git) MergeBranchWithOptions(ctx context.Context, branch string, squash bool) error {
-	// Fetch latest main from origin to ensure we're up to date
-	_, _ = g.run(ctx, "fetch", "origin", "main")
-
-	// Checkout main first
-	if _, err := g.run(ctx, "checkout", "main"); err != nil {
-		// Try master if main doesn't exist
-		if _, err := g.run(ctx, "checkout", "master"); err != nil {
-			return fmt.Errorf("failed to checkout main/master: %w", err)
-		}
+	// Determine the base branch (main or master)
+	baseBranch, err := g.GetBaseBranch(ctx)
+	if err != nil {
+		baseBranch = "main" // Default to main
 	}
 
-	// Fast-forward local main to match origin/main
-	_, _ = g.run(ctx, "merge", "origin/main", "--ff-only")
+	// Fetch latest base branch from origin to ensure we're up to date
+	_, _ = g.run(ctx, "fetch", "origin", baseBranch)
+
+	// Checkout base branch
+	if _, err := g.run(ctx, "checkout", baseBranch); err != nil {
+		return fmt.Errorf("failed to checkout %s: %w", baseBranch, err)
+	}
+
+	// Fast-forward local base branch to match origin
+	_, _ = g.run(ctx, "merge", "origin/"+baseBranch, "--ff-only")
 
 	// Merge the branch
-	var err error
 	if squash {
 		// Get commit logs before squashing so we can preserve them
 		commitLogs, _ := g.GetBranchCommitLogs(ctx, branch)
 
 		// Squash merge: combines all commits into staged changes
-		_, err = g.run(ctx, "merge", "--squash", branch)
+		_, err := g.run(ctx, "merge", "--squash", branch)
 		if err != nil {
 			// Check if this is a conflict
 			conflictFiles, conflictErr := g.GetConflictFiles(ctx)
@@ -153,13 +155,13 @@ func (g *Git) MergeBranchWithOptions(ctx context.Context, branch string, squash 
 		}
 
 		// Squash merge requires a separate commit
-		_, err = g.run(ctx, "commit", "-m", commitMsg)
+		_, err = g.run(ctx, "commit", "-m", commitMsg) //nolint:govet // err is shadowed but only used within this block
 		if err != nil {
 			return fmt.Errorf("failed to commit squash merge: %w", err)
 		}
 	} else {
 		// Regular merge commit
-		_, err = g.run(ctx, "merge", branch, "--no-edit")
+		_, err := g.run(ctx, "merge", branch, "--no-edit")
 		if err != nil {
 			// Check if this is a conflict
 			conflictFiles, conflictErr := g.GetConflictFiles(ctx)
