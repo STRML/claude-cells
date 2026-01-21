@@ -574,10 +574,10 @@ func copyUntrackedFilesToWorktree(srcRepo, dstWorktree string, files []string) e
 func cleanupWorktree(ctx context.Context, gitRepo git.GitClient, branchName string) {
 	worktreePath := getWorktreePath(branchName)
 	if err := gitRepo.RemoveWorktree(ctx, worktreePath); err != nil {
-		LogDebug("RemoveWorktree warning: %v", err)
+		LogWarn("RemoveWorktree failed for %s: %v", worktreePath, err)
 	}
 	if err := os.RemoveAll(worktreePath); err != nil {
-		LogDebug("RemoveAll warning: %v", err)
+		LogWarn("RemoveAll failed for %s: %v", worktreePath, err)
 	}
 }
 
@@ -668,8 +668,11 @@ func startContainerWithFullOptions(ws *workstream.Workstream, useExistingBranch 
 			}
 		}
 
-		// Now safe to clean up any stale worktree at this path (no active worktree for this branch)
-		cleanupWorktree(ctx, gitRepo, ws.BranchName)
+		// Only clean up if there's an orphaned worktree directory on disk
+		// (no active worktree according to git, but directory still exists)
+		if _, err := os.Stat(worktreePath); err == nil {
+			cleanupWorktree(ctx, gitRepo, ws.BranchName)
+		}
 
 		if useExistingBranch {
 			// Create worktree from existing branch (don't create new branch)
