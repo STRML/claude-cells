@@ -11,18 +11,18 @@ import (
 var configMu sync.Mutex
 
 const (
-	configDir  = ".ccells"
+	configDir  = ".claude-cells"
 	configFile = "config.json"
 )
 
 // GlobalConfig represents the global ccells configuration
-// stored in ~/.ccells/config.json
+// stored in ~/.claude-cells/config.json
 type GlobalConfig struct {
 	Version           int  `json:"version"`
 	IntroductionShown bool `json:"introduction_shown"`
 }
 
-// ConfigDir returns the path to the ccells config directory (~/.ccells)
+// ConfigDir returns the path to the ccells config directory (~/.claude-cells)
 func ConfigDir() (string, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {

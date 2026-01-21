@@ -9,5 +9,12 @@
       "extensions": ["golang.go"]
     }
   },
+  "runArgs": [
+    "--security-opt=no-new-privileges:true",
+    "--init",
+    "--pids-limit=1024",
+    "--cap-drop=SYS_ADMIN",
+    "--cap-drop=SYS_MODULE"
+  ],
   "postCreateCommand": "go version"
 }

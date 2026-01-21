@@ -1198,6 +1198,12 @@ Scroll Mode:
 				m.toast = "Note: Could not save introduction state"
 				m.toastExpiry = time.Now().Add(toastDuration)
 			}
+			// Write default security config with documentation
+			if err := docker.WriteDefaultGlobalConfig(); err != nil {
+				// Log error but don't fail
+				m.toast = "Note: Could not write default config"
+				m.toastExpiry = time.Now().Add(toastDuration)
+			}
 
 		case DialogQuitConfirm:
 			// User confirmed quit - pause containers and save state

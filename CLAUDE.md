@@ -66,6 +66,27 @@ Each container gets its own **git worktree** at `/tmp/ccells/worktrees/<branch-n
 - Changes are still part of the main repo's git history (can push/PR)
 - Worktrees are cleaned up when containers are destroyed
 
+### Container Security
+
+Containers run with hardened security defaults. See [docs/CONTAINER-SECURITY.md](docs/CONTAINER-SECURITY.md) for full details.
+
+**Key features:**
+- **Security tiers**: `hardened` > `moderate` (default) > `compat`
+- **Auto-relaxation**: If containers fail to start, automatically tries less restrictive settings
+- **Config files**: `~/.claude-cells/config.yaml` (global), `.claude-cells/config.yaml` (project)
+
+**Default security settings (moderate tier):**
+- `no-new-privileges: true` - Blocks setuid privilege escalation
+- `init: true` - Proper signal handling via init process
+- `pids_limit: 1024` - Prevents fork bombs
+- `cap_drop: [SYS_ADMIN, SYS_MODULE]` - Blocks container escape vectors
+
+To relax settings for a project, create `.claude-cells/config.yaml`:
+```yaml
+security:
+  tier: compat  # Or add specific capabilities with cap_add
+```
+
 ## Development Rules
 
 ### Test-Driven Development (Mandatory)
@@ -160,6 +181,7 @@ if app.dialog == nil {
 - **Context Timeouts**: All Docker operations use timeouts (no unbounded context.Background())
 - **Session Persistence**: Claude sessions are persisted from container runtime location to mount point before pause, surviving container rebuilds
 - **OAuth Credential Refresh**: `CredentialRefresher` re-registers existing containers on startup, ensuring credentials stay fresh even after ccells restarts. Uses `CLAUDE_CONFIG_DIR` for proper Claude Code integration.
+- **Container Security Hardening**: Tiered security defaults (hardened/moderate/compat) with auto-relaxation on startup failure. Drops dangerous capabilities, enables no-new-privileges, uses init process.
 
 ### Remaining Technical Debt
 
@@ -212,8 +234,9 @@ go func() {
 
 - [x] Never interpolate user input into shell commands without escaping (see `escapeShellArg()`)
 - [x] Credentials should be read-only in containers where possible (mounted as ReadOnly)
+- [x] Container security hardening with capability drops and no-new-privileges
+- [x] Auto-relaxation with config persistence for compatibility
 - [ ] Validate all branch names before using in paths/commands
-- [ ] Container mounts should be minimal (principle of least privilege)
 
 ### Before Committing
 

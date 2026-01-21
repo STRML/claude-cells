@@ -36,18 +36,18 @@ const (
 
 // DialogModel represents a modal dialog
 type DialogModel struct {
-	Type         DialogType
-	Title        string
-	Body         string
-	Input        textinput.Model
-	TextArea     textarea.Model // For multi-line input (new workstream)
-	useTextArea  bool           // Whether to use textarea instead of textinput
-	ConfirmWord  string         // Word required to confirm (e.g., "destroy")
-	WorkstreamID string
-	BranchInfo   string   // Branch statistics to pass through dialogs
+	Type          DialogType
+	Title         string
+	Body          string
+	Input         textinput.Model
+	TextArea      textarea.Model // For multi-line input (new workstream)
+	useTextArea   bool           // Whether to use textarea instead of textinput
+	ConfirmWord   string         // Word required to confirm (e.g., "destroy")
+	WorkstreamID  string
+	BranchInfo    string   // Branch statistics to pass through dialogs
 	ConflictFiles []string // Files with merge/rebase conflicts
-	width        int
-	height       int
+	width         int
+	height        int
 	// Menu-style dialogs
 	MenuItems     []string
 	MenuSelection int

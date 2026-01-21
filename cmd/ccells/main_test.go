@@ -278,9 +278,9 @@ func TestCleanupOrphanedContainers_WithStateFile(t *testing.T) {
 	defer os.RemoveAll(tmpDir)
 
 	// Create ccells state directory and file
-	ccellsDir := filepath.Join(tmpDir, ".ccells")
+	ccellsDir := filepath.Join(tmpDir, ".claude-cells")
 	if err := os.MkdirAll(ccellsDir, 0755); err != nil {
-		t.Fatalf("Failed to create .ccells dir: %v", err)
+		t.Fatalf("Failed to create .claude-cells dir: %v", err)
 	}
 
 	// Create a minimal state file

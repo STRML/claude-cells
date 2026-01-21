@@ -2713,10 +2713,10 @@ func TestKeyStringRepresentations(t *testing.T) {
 // TestAppModel_ScrollMode_NavMode_AllScrollKeys tests all scroll-related keys in nav mode
 func TestAppModel_ScrollMode_NavMode_AllScrollKeys(t *testing.T) {
 	tests := []struct {
-		name           string
-		key            tea.KeyPressMsg
-		shouldEnter    bool // Should this key enter scroll mode?
-		description    string
+		name        string
+		key         tea.KeyPressMsg
+		shouldEnter bool // Should this key enter scroll mode?
+		description string
 	}{
 		{"pgup", tea.KeyPressMsg{Code: tea.KeyPgUp}, true, "Page up should enter scroll mode"},
 		{"pgdown", tea.KeyPressMsg{Code: tea.KeyPgDown}, false, "Page down doesn't enter scroll mode (it's for scrolling while in scroll mode)"},

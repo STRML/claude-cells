@@ -42,6 +42,9 @@ type ContainerConfig struct {
 	// Resource limits (optional - defaults applied if zero)
 	CPULimit    float64 // Number of CPUs (e.g., 2.0 for 2 CPUs)
 	MemoryLimit int64   // Memory limit in bytes (e.g., 4*1024*1024*1024 for 4GB)
+
+	// Security settings (optional - loaded from config files if nil)
+	Security *SecurityConfig
 }
 
 // NewContainerConfig creates a container config for a workstream.
@@ -169,6 +172,29 @@ func (c *Client) CreateContainer(ctx context.Context, cfg *ContainerConfig) (str
 		memoryLimit = DefaultMemoryLimit
 	}
 
+	// Load security config if not provided
+	security := cfg.Security
+	if security == nil {
+		defaultSec := LoadSecurityConfig(cfg.RepoPath)
+		security = &defaultSec
+	}
+
+	// Build security options
+	var securityOpt []string
+	if security.GetNoNewPrivileges() {
+		securityOpt = append(securityOpt, "no-new-privileges:true")
+	}
+
+	// Build capability lists
+	capDrop := security.GetEffectiveCapDrop()
+	capAdd := security.CapAdd
+
+	// Apply PidsLimit (0 means unlimited)
+	pidsLimit := security.GetPidsLimit()
+
+	// Create init pointer for HostConfig
+	initEnabled := security.GetInit()
+
 	hostCfg := &container.HostConfig{
 		Mounts: mounts,
 		Resources: container.Resources{
@@ -178,7 +204,15 @@ func (c *Client) CreateContainer(ctx context.Context, cfg *ContainerConfig) (str
 			Memory: memoryLimit,
 			// Memory swap equal to memory (disables swap)
 			MemorySwap: memoryLimit,
+			// PID limit to prevent fork bombs
+			PidsLimit: &pidsLimit,
 		},
+		// Security hardening
+		Init:        &initEnabled,
+		SecurityOpt: securityOpt,
+		CapDrop:     capDrop,
+		CapAdd:      capAdd,
+		Privileged:  security.GetPrivileged(),
 	}
 
 	resp, err := c.cli.ContainerCreate(ctx, containerCfg, hostCfg, nil, nil, cfg.Name)
@@ -191,6 +225,100 @@ func (c *Client) CreateContainer(ctx context.Context, cfg *ContainerConfig) (str
 // StartContainer starts a created container.
 func (c *Client) StartContainer(ctx context.Context, containerID string) error {
 	return c.cli.ContainerStart(ctx, containerID, container.StartOptions{})
+}
+
+// SecurityRelaxation contains info about security tier relaxation that occurred.
+type SecurityRelaxation struct {
+	OriginalTier SecurityTier
+	FinalTier    SecurityTier
+	ConfigSaved  bool
+	ConfigPath   string
+}
+
+// CreateAndStartContainerWithFallback creates and starts a container, automatically
+// relaxing security settings if the container fails to start.
+//
+// When auto_relax is enabled (default) and a container fails to start, this function
+// will retry with progressively less restrictive security tiers until one works.
+// On successful relaxation, it saves the working config to the project directory.
+//
+// Returns the container ID and any relaxation info (nil if no relaxation occurred).
+func (c *Client) CreateAndStartContainerWithFallback(ctx context.Context, cfg *ContainerConfig) (string, *SecurityRelaxation, error) {
+	// Load security config if not provided
+	if cfg.Security == nil {
+		sec := LoadSecurityConfig(cfg.RepoPath)
+		cfg.Security = &sec
+	}
+
+	originalTier := cfg.Security.Tier
+	if originalTier == "" {
+		originalTier = TierModerate
+	}
+	currentTier := originalTier
+
+	var lastErr error
+
+	for {
+		// Update security config for current tier
+		tierCfg := ConfigForTier(currentTier)
+		// Preserve other settings from the loaded config
+		tierCfg.NoNewPrivileges = cfg.Security.NoNewPrivileges
+		tierCfg.Init = cfg.Security.Init
+		tierCfg.PidsLimit = cfg.Security.PidsLimit
+		tierCfg.CapAdd = cfg.Security.CapAdd
+		tierCfg.Privileged = cfg.Security.Privileged
+		tierCfg.AutoRelax = cfg.Security.AutoRelax
+		cfg.Security = &tierCfg
+
+		// Try to create the container
+		containerID, err := c.CreateContainer(ctx, cfg)
+		if err != nil {
+			lastErr = err
+			// Try next tier if auto_relax is enabled
+			if cfg.Security.GetAutoRelax() {
+				nextTier := NextTier(currentTier)
+				if nextTier != "" {
+					currentTier = nextTier
+					continue
+				}
+			}
+			return "", nil, fmt.Errorf("failed to create container: %w", lastErr)
+		}
+
+		// Try to start the container
+		if err := c.StartContainer(ctx, containerID); err != nil {
+			lastErr = err
+			// Clean up the failed container
+			_ = c.RemoveContainer(ctx, containerID)
+
+			// Try next tier if auto_relax is enabled
+			if cfg.Security.GetAutoRelax() {
+				nextTier := NextTier(currentTier)
+				if nextTier != "" {
+					currentTier = nextTier
+					continue
+				}
+			}
+			return "", nil, fmt.Errorf("failed to start container: %w", lastErr)
+		}
+
+		// Success! Check if we relaxed from the original tier
+		var relaxation *SecurityRelaxation
+		if currentTier != originalTier && cfg.RepoPath != "" {
+			relaxation = &SecurityRelaxation{
+				OriginalTier: originalTier,
+				FinalTier:    currentTier,
+			}
+
+			// Save the working config to the project
+			if err := SaveProjectSecurityConfig(cfg.RepoPath, *cfg.Security); err == nil {
+				relaxation.ConfigSaved = true
+				relaxation.ConfigPath = cfg.RepoPath + "/.claude-cells/config.yaml"
+			}
+		}
+
+		return containerID, relaxation, nil
+	}
 }
 
 // StopContainer stops a running container.

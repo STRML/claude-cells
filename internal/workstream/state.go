@@ -12,7 +12,7 @@ import (
 // stateMu protects concurrent SaveState calls from racing on temp file
 var stateMu sync.Mutex
 
-const stateFileName = ".ccells-state.json"
+const stateFileName = ".claude-cells-state.json"
 
 // GetStateDir returns the directory for storing state files for a given repo.
 // State is stored in ~/.claude-cells/state/<repo-id>/ to avoid polluting the repo.

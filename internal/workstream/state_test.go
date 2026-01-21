@@ -10,7 +10,7 @@ import (
 
 func TestStateFilePath(t *testing.T) {
 	dir := "/some/directory"
-	expected := filepath.Join(dir, ".ccells-state.json")
+	expected := filepath.Join(dir, ".claude-cells-state.json")
 	got := StateFilePath(dir)
 	if got != expected {
 		t.Errorf("StateFilePath() = %v, want %v", got, expected)
@@ -343,10 +343,10 @@ func TestStateFilePath_DifferentDirectories(t *testing.T) {
 		dir      string
 		expected string
 	}{
-		{"/home/user/project", "/home/user/project/.ccells-state.json"},
-		{"/tmp", "/tmp/.ccells-state.json"},
-		{".", ".ccells-state.json"}, // filepath.Join normalizes "." + "file" to "file"
-		{"/", "/.ccells-state.json"},
+		{"/home/user/project", "/home/user/project/.claude-cells-state.json"},
+		{"/tmp", "/tmp/.claude-cells-state.json"},
+		{".", ".claude-cells-state.json"}, // filepath.Join normalizes "." + "file" to "file"
+		{"/", "/.claude-cells-state.json"},
 	}
 
 	for _, tt := range tests {
@@ -434,7 +434,7 @@ func TestSaveStateConcurrent(t *testing.T) {
 	entries, _ := os.ReadDir(tmpDir)
 	for _, entry := range entries {
 		name := entry.Name()
-		if name != ".ccells-state.json" {
+		if name != ".claude-cells-state.json" {
 			t.Errorf("Unexpected file after concurrent saves: %s", name)
 		}
 	}
