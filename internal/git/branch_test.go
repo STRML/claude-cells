@@ -1055,12 +1055,10 @@ func TestGit_MergeBranchWithOptions_AutoRebaseAfterSquashMerge(t *testing.T) {
 		t.Fatalf("First MergeBranchWithOptions() error = %v", err)
 	}
 
-	// Verify first merge succeeded
-	cmd := exec.Command("git", "log", "-1", "--format=%s")
-	cmd.Dir = dir
-	out, _ := cmd.Output()
-	if !strings.Contains(string(out), "Squash merge branch 'feature-auto-rebase'") {
-		t.Errorf("First squash merge not found in history, got: %s", string(out))
+	// Verify first merge succeeded - check that the feature file exists on main
+	// (commit message format varies based on whether Claude CLI generates conventional commit titles)
+	if _, err := os.Stat(filepath.Join(dir, "feature.txt")); os.IsNotExist(err) {
+		t.Error("feature.txt not found on main after first merge")
 	}
 
 	// Continue working on the feature branch
@@ -1091,15 +1089,16 @@ func TestGit_MergeBranchWithOptions_AutoRebaseAfterSquashMerge(t *testing.T) {
 		t.Fatalf("Second MergeBranchWithOptions() should auto-rebase and succeed, got error = %v", err)
 	}
 
-	// Verify second merge succeeded
-	cmd = exec.Command("git", "log", "-1", "--format=%B")
+	// Verify second merge succeeded - the commit body should contain the squashed commit logs
+	cmd := exec.Command("git", "log", "-1", "--format=%B")
 	cmd.Dir = dir
-	out, _ = cmd.Output()
+	out, _ := cmd.Output()
 	commitMsg := string(out)
 
 	// The second merge should contain only the new commits (after rebase)
-	if !strings.Contains(commitMsg, "Squash merge branch 'feature-auto-rebase'") {
-		t.Errorf("Second squash merge header not found, got: %s", commitMsg)
+	// Commit message body should reference the branch and include commit summaries
+	if !strings.Contains(commitMsg, "feature-auto-rebase") {
+		t.Errorf("Second squash merge should reference branch name, got: %s", commitMsg)
 	}
 	if !strings.Contains(commitMsg, "Update feature") {
 		t.Errorf("Second squash merge missing 'Update feature', got: %s", commitMsg)
@@ -1170,13 +1169,8 @@ func TestGit_MergeBranchWithOptions_AutoRebaseWhenMainMoved(t *testing.T) {
 		t.Error("file2.txt (from main) not found on main after merge")
 	}
 
-	// Verify commit message
-	cmd := exec.Command("git", "log", "-1", "--format=%s")
-	cmd.Dir = dir
-	out, _ := cmd.Output()
-	if !strings.Contains(string(out), "Squash merge branch 'feature-main-moved'") {
-		t.Errorf("Expected squash merge commit, got: %s", string(out))
-	}
+	// Verify merge succeeded - commit message format varies based on Claude CLI availability
+	// Just verify files and content are correct (done above)
 }
 
 func TestGit_MergeBranchWithOptions_AutoRebaseWithRealConflicts(t *testing.T) {
