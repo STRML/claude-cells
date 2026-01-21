@@ -876,10 +876,11 @@ func (p PaneModel) View() string {
 		greyStyle := lipgloss.NewStyle().Foreground(fadeColor)
 		outputView = greyStyle.Render(outputView)
 	} else if p.focused && !p.inputMode {
-		// Focused but nav mode: lighter grey
-		outputView = stripANSI(outputView)
-		greyStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorLightGrey))
-		outputView = greyStyle.Render(outputView)
+		// Focused but nav mode: muted colors but less aggressive than unfocused
+		// colorLightGrey (#888888) = RGB(136, 136, 136)
+		outputView = muteANSI(outputView, 0.5, 0.85, [3]int{136, 136, 136})
+		mutedNavStyle := lipgloss.NewStyle().Foreground(lipgloss.Color(colorLightGrey))
+		outputView = mutedNavStyle.Render(outputView)
 	} else if !p.focused {
 		// Unfocused panes: muted colors (very desaturated, dimmed)
 		// Mute explicit ANSI colors and replace reset/default sequences with muted grey
