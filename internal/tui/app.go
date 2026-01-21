@@ -72,6 +72,7 @@ type AppModel struct {
 	inputMode      bool                 // True when input is being routed to focused pane
 	mouseEnabled   bool                 // True when mouse capture is enabled (click-to-focus)
 	dragHintShown  bool                 // True if we've shown the drag modifier hint this session
+	ctrlVHintShown bool                 // True if we've shown the Ctrl+V paste hint this session
 	lastEscapeTime time.Time            // For double-escape detection
 	pendingEscape  bool                 // True when first Esc pressed, waiting to see if double-tap
 	toast          string               // Temporary notification message
@@ -587,6 +588,19 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				// Not a tmux sequence - pass to pane
+				m.tmuxPrefix = false
+				var cmd tea.Cmd
+				m.panes[m.focusedPane], cmd = m.panes[m.focusedPane].Update(msg)
+				return m, cmd
+			case "ctrl+v":
+				// Show one-time hint about paste shortcut
+				// Ctrl+V in Unix terminals means "literal next character", not paste
+				if !m.ctrlVHintShown {
+					m.ctrlVHintShown = true
+					m.toast = "Tip: Use Ctrl+Shift+V to paste (Ctrl+V is 'literal next' in terminals)"
+					m.toastExpiry = time.Now().Add(5 * time.Second)
+				}
+				// Still send to pane (preserves standard terminal behavior)
 				m.tmuxPrefix = false
 				var cmd tea.Cmd
 				m.panes[m.focusedPane], cmd = m.panes[m.focusedPane].Update(msg)

@@ -10,9 +10,10 @@ import (
 )
 
 type model struct {
-	lastKey    string
-	enhanced   bool
-	keyHistory []string
+	lastKey      string
+	enhanced     bool
+	keyHistory   []string
+	pasteHistory []string
 }
 
 func (m model) Init() tea.Cmd {
@@ -43,6 +44,26 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.WindowSizeMsg:
 		return m, nil
+
+	case tea.PasteMsg:
+		// Truncate for display
+		content := msg.Content
+		if len(content) > 50 {
+			content = content[:50] + "..."
+		}
+		m.pasteHistory = append(m.pasteHistory, fmt.Sprintf("Paste: %q (%d bytes)", content, len(msg.Content)))
+		if len(m.pasteHistory) > 5 {
+			m.pasteHistory = m.pasteHistory[len(m.pasteHistory)-5:]
+		}
+		return m, nil
+
+	case tea.PasteStartMsg:
+		m.pasteHistory = append(m.pasteHistory, "[Paste START]")
+		return m, nil
+
+	case tea.PasteEndMsg:
+		m.pasteHistory = append(m.pasteHistory, "[Paste END]")
+		return m, nil
 	}
 	return m, nil
 }
@@ -53,24 +74,33 @@ func (m model) View() tea.View {
 		status = "✅ ENABLED"
 	}
 
-	content := fmt.Sprintf(`Keyboard Protocol Test
-======================
+	content := fmt.Sprintf(`Keyboard & Paste Protocol Test
+===============================
 
 Kitty keyboard protocol: %s
 
 Press keys to test. Press 'q' to quit.
 
-If Shift+Enter works, you should see:
-  Key: "shift+enter" (Code=13, Mod=1)
+Test Shift+Enter: Should show Key: "shift+enter" (Code=13, Mod=1)
+Test Paste: Use Ctrl+Shift+V (Linux) or Cmd+V (macOS)
 
-If it shows just "enter" with Mod=0, your terminal
-doesn't support the Kitty keyboard protocol.
+If Ctrl+V shows as a key press, your terminal is NOT
+sending bracketed paste - it's sending Ctrl+V as a key.
+Use Ctrl+Shift+V instead for paste on Linux terminals.
 
 Recent keys:
 `, status)
 
 	for _, k := range m.keyHistory {
 		content += "  " + k + "\n"
+	}
+
+	content += "\nRecent paste events:\n"
+	if len(m.pasteHistory) == 0 {
+		content += "  (none yet - try pasting with Ctrl+Shift+V)\n"
+	}
+	for _, p := range m.pasteHistory {
+		content += "  " + p + "\n"
 	}
 
 	if !m.enhanced {

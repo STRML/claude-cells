@@ -2821,6 +2821,106 @@ func TestAppModel_Paste_NoPTY_Ignored(t *testing.T) {
 	// No crash = success
 }
 
+func TestAppModel_CtrlV_ShowsHintInInputMode(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Enter input mode
+	app.inputMode = true
+
+	// Create a mock PTY session
+	mockStdin := &mockWriteCloser{}
+	mockPTY := &PTYSession{
+		workstreamID: "test",
+		closed:       false,
+		done:         make(chan struct{}),
+		stdin:        mockStdin,
+	}
+	app.panes[0].SetPTY(mockPTY)
+
+	// Verify hint not shown initially
+	if app.ctrlVHintShown {
+		t.Fatal("Ctrl+V hint should not be shown initially")
+	}
+
+	// Press ctrl+v
+	ctrlVMsg := tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl}
+	model, _ = app.Update(ctrlVMsg)
+	app = model.(AppModel)
+
+	// Verify hint was shown
+	if !app.ctrlVHintShown {
+		t.Error("Ctrl+V hint should be shown after pressing ctrl+v")
+	}
+
+	// Verify toast contains paste hint
+	if !strings.Contains(app.toast, "Ctrl+Shift+V") {
+		t.Errorf("Toast should mention Ctrl+Shift+V, got %q", app.toast)
+	}
+
+	// Verify byte 22 (literal next) was still sent to PTY
+	data := mockStdin.Bytes()
+	if len(data) != 1 || data[0] != 22 {
+		t.Errorf("Expected byte 22 to be sent to PTY, got %v", data)
+	}
+}
+
+func TestAppModel_CtrlV_HintOnlyShownOnce(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Enter input mode
+	app.inputMode = true
+
+	// Create a mock PTY session
+	mockStdin := &mockWriteCloser{}
+	mockPTY := &PTYSession{
+		workstreamID: "test",
+		closed:       false,
+		done:         make(chan struct{}),
+		stdin:        mockStdin,
+	}
+	app.panes[0].SetPTY(mockPTY)
+
+	// Press ctrl+v first time
+	ctrlVMsg := tea.KeyPressMsg{Code: 'v', Mod: tea.ModCtrl}
+	model, _ = app.Update(ctrlVMsg)
+	app = model.(AppModel)
+
+	// Verify hint was shown
+	if !app.ctrlVHintShown {
+		t.Error("Ctrl+V hint should be shown after first press")
+	}
+	firstToast := app.toast
+
+	// Clear toast manually
+	app.toast = ""
+
+	// Press ctrl+v second time
+	model, _ = app.Update(ctrlVMsg)
+	app = model.(AppModel)
+
+	// Verify toast was NOT set again (hint only shows once)
+	if app.toast != "" {
+		t.Errorf("Toast should not be shown on second ctrl+v press, got %q", app.toast)
+	}
+
+	// Verify first toast contained the hint
+	if !strings.Contains(firstToast, "Ctrl+Shift+V") {
+		t.Errorf("First toast should mention Ctrl+Shift+V, got %q", firstToast)
+	}
+}
+
 func TestAutoPressEnterCmd(t *testing.T) {
 	// Test that autoPressEnterCmd creates a command that returns autoPressEnterMsg
 	cmd := autoPressEnterCmd("test-ws-123")
