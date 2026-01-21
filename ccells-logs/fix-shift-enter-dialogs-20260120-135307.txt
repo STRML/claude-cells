@@ -1,0 +1,79 @@
+# CCells Log Export
+# Branch: fix-shift-enter-dialogs
+# Title: Fix shift-enter in dialogs
+# Exported: 2026-01-20T13:53:07-05:00
+# Prompt: shift-enter still doesn't work in dialogs or in claude code, despite our big bubble-tea 2.0 upgrade
+
+============================================================
+
+                                                                                                      │
+      package main…)────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+  ⎿  Read 100 lines
+     /go/pkg/mod/github.com/charmbracelet/ultraviolet@v0.0.0-20260119114420-32357e088c3c/buffer_test.go
+● Bash(grep -n "Kitty\|CSIu\|csi u\|\\[.*u" /go/pkg/mod/github.com/charmbracelet/ultraviolet@v0.0.0-20260119114420-32357e088c3c/decoder.go | head -30)
+  ⎿  Added 5 lines
+      1100
+      1131 +  // Shift+Enter should NOT return a confirm command
+      1158  func TestWorkstreamDialog_ViewShowsShiftEnterHint(t *testing.T) {
+      302      m.updateLayout()
+● Read(internal/tui/app.go)
+  ⎿  Added 1 line, removed 1 line
+    - keyboardEnhanced field to track support status
+  - kitty (obviously)
+
+● I already added a log message when keyboard enhancements are detected. After enabling that iTerm2 setting, rebuild and run ccells - you should see "Keyboard enhancements enabled" in the debug logs (press ` to show the log panel, th
+en ~ to cycle to DEBUG level).
+
+  Let me also add some key event debugging to help diagnose this further.
+
+● Read(internal/tui/dialog.go)
+  ⎿  Read 20 lines
+
+● Update(internal/tui/dialog.go)
+  ⎿  Added 6 lines, removed 1 line
+      550  func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
+      551    switch msg := msg.(type) {
+      552    case tea.KeyMsg:
+      553 -    switch msg.String() {                                                                                                                                                                                              
+      553 +    keyStr := msg.String()                                                                                                                                                                                             
+      554 +    // Debug: log key events in dialogs to help diagnose shift+enter issues                                                                                                                                            
+      555 +    if keyStr == "enter" || keyStr == "shift+enter" {                                                                                                                                                                  
+      556 +      LogDebug("Dialog received key: %q", keyStr)                                                                                                                                                                      
+      557 +    }                                                                                                                                                                                                                  
+      558 +    switch keyStr {                                                                                                                                                                                                    
+      559      case "esc", "ctrl+c":
+      560        // Progress dialog can't be dismissed while in progress
+      561        if d.Type == DialogProgress && d.inProgress {
+
+● Read(internal/tui/dialog.go)
+  ⎿  Read 30 lines
+
+● Bash(go test -race ./internal/tui/... 2>&1 | tail -10)
+  ⎿  ok         github.com/STRML/claude-cells/internal/tui      1.847s
+
+● Bash(git add -A && git commit -m "fix: add debug logging for enter/shift+enter key events in dialogs")
+  ⎿  [fix-shift-enter-dialogs 0979f00] fix: add debug logging for enter/shift+enter key events in dialogs
+      1 file changed, 6 insertions(+), 1 deletion(-)
+
+● To diagnose this, after rebuilding:
+
+  1. Enable iTerm2 setting: Go to iTerm2 → Settings → Profiles → Keys and enable "Apps can change how keys are reported"
+  2. Run ccells and press ` to show the log panel, then ~ to cycle to DEBUG level
+  3. Check for: "Keyboard enhancements enabled - Shift+Enter will work" in the logs
+  4. Open a dialog (press n for new workstream) and try Shift+Enter. You should see either:
+    - Dialog received key: "shift+enter" (working correctly)
+    - Dialog received key: "enter" (terminal not sending shift modifier)
+
+  This will tell us whether iTerm2 is properly responding to the Kitty keyboard protocol request.
+
+  Sources:
+  - https://iterm2.com/documentation-preferences-profiles-keys.html
+  - https://iterm2.com/documentation-csiu.html
+  - https://sw.kovidgoyal.net/kitty/keyboard-protocol/
+
+✻ Churned for 1m 45s
+
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯  
+─────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ⏵⏵ bypass permissions on (shift+tab to cycle)
