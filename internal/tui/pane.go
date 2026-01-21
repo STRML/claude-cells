@@ -972,12 +972,14 @@ func (p PaneModel) View() string {
 		style = lipgloss.NewStyle().
 			Border(lipgloss.ThickBorder()).
 			BorderForeground(borderColor).
+			Padding(0, 1). // 1 char padding on left and right to match vterm width
 			Width(p.width - 2).
 			Height(p.height - 2)
 	} else {
 		style = lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder()).
 			BorderForeground(lipgloss.Color(colorDarkGrey)).
+			Padding(0, 1). // 1 char padding on left and right to match vterm width
 			Width(p.width - 2).
 			Height(p.height - 2)
 	}
@@ -1027,6 +1029,7 @@ func (p PaneModel) viewWithInPaneDialog() string {
 	style := lipgloss.NewStyle().
 		Border(lipgloss.ThickBorder()).
 		BorderForeground(lipgloss.Color(colorPurple)).
+		Padding(0, 1). // 1 char padding on left and right for consistency
 		Width(p.width - 2).
 		Height(p.height - 2)
 
