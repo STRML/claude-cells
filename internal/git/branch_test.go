@@ -782,6 +782,53 @@ func TestGit_GetBranchCommitLogs_Empty(t *testing.T) {
 	}
 }
 
+func TestBranchNameToTitle(t *testing.T) {
+	tests := []struct {
+		name     string
+		branch   string
+		expected string
+	}{
+		{"hyphen separated", "add-user-auth", "Add user auth"},
+		{"underscore separated", "fix_login_bug", "Fix login bug"},
+		{"slash separated", "feature/new-feature", "Feature new feature"},
+		{"mixed separators", "fix/user-auth_bug", "Fix user auth bug"},
+		{"single word", "bugfix", "Bugfix"},
+		{"already capitalized", "Add-Feature", "Add Feature"},
+		{"multiple hyphens", "add--multiple---hyphens", "Add multiple hyphens"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := branchNameToTitle(tt.branch)
+			if result != tt.expected {
+				t.Errorf("branchNameToTitle(%q) = %q, want %q", tt.branch, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGenerateConventionalTitle_Fallback(t *testing.T) {
+	// When Claude CLI is not available, generateConventionalTitle should return empty string
+	// This tests the fallback behavior - branchNameToTitle will be used instead
+	result := generateConventionalTitle("test-branch", "some commit logs")
+	// Result will be empty if Claude CLI is not available (expected in test environment)
+	// or a valid conventional commit title if it is available
+	if result != "" {
+		// If we got a result, verify it's a valid conventional commit format
+		validPrefixes := []string{"feat:", "fix:", "docs:", "style:", "refactor:", "perf:", "test:", "build:", "ci:", "chore:"}
+		isValid := false
+		for _, prefix := range validPrefixes {
+			if strings.HasPrefix(result, prefix) {
+				isValid = true
+				break
+			}
+		}
+		if !isValid {
+			t.Errorf("generateConventionalTitle() returned invalid format: %q", result)
+		}
+	}
+}
+
 func TestGit_MergeBranchWithOptions_SquashPreservesCommitLogs(t *testing.T) {
 	dir := setupTestRepo(t)
 	defer os.RemoveAll(dir)
@@ -831,9 +878,15 @@ func TestGit_MergeBranchWithOptions_SquashPreservesCommitLogs(t *testing.T) {
 	}
 	commitMsg := string(out)
 
-	// Verify the squash commit message contains all the original commit messages
-	if !strings.Contains(commitMsg, "Squash merge branch 'feature-squash'") {
-		t.Errorf("Squash commit missing header, got: %s", commitMsg)
+	// Verify the squash commit message has a descriptive title (either conventional commit or fallback)
+	// and contains all the original commit messages
+	firstLine := strings.Split(commitMsg, "\n")[0]
+	hasConventionalTitle := strings.HasPrefix(firstLine, "feat:") ||
+		strings.HasPrefix(firstLine, "fix:") ||
+		strings.HasPrefix(firstLine, "chore:")
+	hasFallbackTitle := strings.HasPrefix(firstLine, "Feature squash")
+	if !hasConventionalTitle && !hasFallbackTitle {
+		t.Errorf("Squash commit should start with conventional commit title or fallback 'Feature squash', got: %s", firstLine)
 	}
 	if !strings.Contains(commitMsg, "Implement feature one") {
 		t.Errorf("Squash commit missing 'Implement feature one', got: %s", commitMsg)
@@ -844,8 +897,8 @@ func TestGit_MergeBranchWithOptions_SquashPreservesCommitLogs(t *testing.T) {
 	if !strings.Contains(commitMsg, "Fix bug in feature") {
 		t.Errorf("Squash commit missing 'Fix bug in feature', got: %s", commitMsg)
 	}
-	if !strings.Contains(commitMsg, "Squashed commits:") {
-		t.Errorf("Squash commit missing 'Squashed commits:' section, got: %s", commitMsg)
+	if !strings.Contains(commitMsg, "Squashed commits from branch 'feature-squash':") {
+		t.Errorf("Squash commit missing 'Squashed commits from branch' section, got: %s", commitMsg)
 	}
 }
 

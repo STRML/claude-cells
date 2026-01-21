@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // Git provides git operations for a repository.
@@ -111,6 +112,78 @@ func (e *DirtyWorktreeError) Error() string {
 	return fmt.Sprintf("cannot %s: worktree has uncommitted changes", e.Operation)
 }
 
+// branchNameToTitle converts a branch name to a readable commit title.
+// Examples: "add-user-auth" -> "Add user auth", "fix_login_bug" -> "Fix login bug"
+func branchNameToTitle(branch string) string {
+	// Replace common separators with spaces
+	title := strings.ReplaceAll(branch, "-", " ")
+	title = strings.ReplaceAll(title, "_", " ")
+	title = strings.ReplaceAll(title, "/", " ")
+
+	// Trim and collapse multiple spaces
+	title = strings.TrimSpace(title)
+	parts := strings.Fields(title)
+	if len(parts) == 0 {
+		return branch
+	}
+
+	// Capitalize first word only
+	parts[0] = strings.ToUpper(parts[0][:1]) + parts[0][1:]
+	return strings.Join(parts, " ")
+}
+
+// generateConventionalTitle uses Claude CLI to generate a conventional commit title.
+// Returns empty string if generation fails (caller should fall back to branchNameToTitle).
+// See: https://www.conventionalcommits.org/en/v1.0.0/
+func generateConventionalTitle(branch, commitLogs string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	prompt := fmt.Sprintf(`Generate a conventional commit title for a squash merge. Follow https://www.conventionalcommits.org/en/v1.0.0/
+
+Format: <type>: <description>
+Types: feat, fix, docs, style, refactor, perf, test, build, ci, chore
+
+Rules:
+- Use lowercase for type and description
+- No period at the end
+- Keep under 72 characters
+- Output ONLY the commit title, nothing else
+
+Branch: %s
+
+Commits being squashed:
+%s`, branch, commitLogs)
+
+	cmd := exec.CommandContext(ctx, "claude", "-p", prompt)
+	output, err := cmd.Output()
+	if err != nil {
+		return ""
+	}
+
+	title := strings.TrimSpace(string(output))
+
+	// Basic validation - should start with a conventional type
+	validPrefixes := []string{"feat:", "fix:", "docs:", "style:", "refactor:", "perf:", "test:", "build:", "ci:", "chore:"}
+	isValid := false
+	for _, prefix := range validPrefixes {
+		if strings.HasPrefix(title, prefix) {
+			isValid = true
+			break
+		}
+	}
+	if !isValid {
+		return ""
+	}
+
+	// Limit length
+	if len(title) > 72 {
+		title = title[:72]
+	}
+
+	return title
+}
+
 // MergeBranch merges a branch into the current branch (typically main).
 // It fetches origin/main and merges the branch into main.
 // Returns MergeConflictError if there are conflicts that need resolution.
@@ -186,10 +259,14 @@ func (g *Git) MergeBranchWithOptions(ctx context.Context, branch string, squash 
 			return err
 		}
 
-		// Build commit message that preserves all squashed commit logs
-		commitMsg := fmt.Sprintf("Squash merge branch '%s'", branch)
+		// Build commit message with conventional commit title via Claude, with fallback
+		title := generateConventionalTitle(branch, commitLogs)
+		if title == "" {
+			title = branchNameToTitle(branch)
+		}
+		commitMsg := title
 		if commitLogs != "" {
-			commitMsg = fmt.Sprintf("%s\n\nSquashed commits:\n\n%s", commitMsg, commitLogs)
+			commitMsg = fmt.Sprintf("%s\n\nSquashed commits from branch '%s':\n\n%s", title, branch, commitLogs)
 		}
 
 		// Squash merge requires a separate commit
