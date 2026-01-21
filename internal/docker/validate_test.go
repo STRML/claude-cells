@@ -4,8 +4,11 @@ import (
 	"context"
 	"io"
 	"os"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/STRML/claude-cells/configs"
 )
 
 func TestValidatePrerequisites(t *testing.T) {
@@ -195,14 +198,10 @@ func TestBuildImage(t *testing.T) {
 	// Skip if Docker is not available
 	skipIfDockerUnavailable(t)
 
-	// Skip if Dockerfile can't be found
-	if _, err := findDockerfile(); err != nil {
-		t.Skipf("Dockerfile not found: %v", err)
-	}
-
 	// We don't actually run the build in tests since it's slow
 	// and the image should already exist. Just verify the function
 	// doesn't panic when called with a cancelled context.
+	// Note: BuildImage now uses embedded Dockerfile, so no need to check for file on disk.
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
@@ -213,37 +212,28 @@ func TestBuildImage(t *testing.T) {
 	}
 }
 
-func TestComputeBaseImageHash(t *testing.T) {
-	// Skip if Dockerfile can't be found
-	if _, err := findDockerfile(); err != nil {
-		t.Skipf("Dockerfile not found: %v", err)
-	}
+func TestBaseDockerfileHash(t *testing.T) {
+	// Import the configs package to get the embedded Dockerfile hash
+	hash := configs.BaseDockerfileHash()
 
-	hash := computeBaseImageHash()
-
-	// Hash should be non-empty when Dockerfile exists
+	// Hash should be non-empty (embedded Dockerfile always exists)
 	if hash == "" {
-		t.Error("computeBaseImageHash() returned empty hash when Dockerfile exists")
+		t.Error("BaseDockerfileHash() returned empty hash")
 	}
 
 	// Hash should be 12 characters (first 12 chars of hex-encoded sha256)
 	if len(hash) != 12 {
-		t.Errorf("computeBaseImageHash() returned hash of length %d, want 12", len(hash))
+		t.Errorf("BaseDockerfileHash() returned hash of length %d, want 12", len(hash))
 	}
 
 	// Hash should be consistent (same input = same output)
-	hash2 := computeBaseImageHash()
+	hash2 := configs.BaseDockerfileHash()
 	if hash != hash2 {
-		t.Errorf("computeBaseImageHash() not deterministic: %s != %s", hash, hash2)
+		t.Errorf("BaseDockerfileHash() not deterministic: %s != %s", hash, hash2)
 	}
 }
 
 func TestGetBaseImageName(t *testing.T) {
-	// Skip if Dockerfile can't be found
-	if _, err := findDockerfile(); err != nil {
-		t.Skipf("Dockerfile not found: %v", err)
-	}
-
 	name := GetBaseImageName()
 
 	// Name should start with "ccells-base:"
@@ -268,51 +258,33 @@ func TestGetBaseImageName(t *testing.T) {
 	if name != name2 {
 		t.Errorf("GetBaseImageName() not deterministic: %s != %s", name, name2)
 	}
+
+	// Name should match configs.BaseDockerfileHash()
+	expectedHash := configs.BaseDockerfileHash()
+	if hashPart != expectedHash {
+		t.Errorf("GetBaseImageName() hash = %q, want %q from configs.BaseDockerfileHash()", hashPart, expectedHash)
+	}
 }
 
-func TestBaseImageHashChangesWithDockerfile(t *testing.T) {
-	// This test verifies that if the Dockerfile content changes,
-	// the hash will change too (content-based rebuild trigger)
+func TestEmbeddedDockerfileContent(t *testing.T) {
+	// Verify the embedded Dockerfile contains expected content
+	content := configs.BaseDockerfile
 
-	// Skip if Dockerfile can't be found
-	dockerfilePath, err := findDockerfile()
-	if err != nil {
-		t.Skipf("Dockerfile not found: %v", err)
+	if len(content) == 0 {
+		t.Fatal("Embedded Dockerfile is empty")
 	}
 
-	// Get current hash
-	hash1 := computeBaseImageHash()
-	if hash1 == "" {
-		t.Fatal("Could not compute initial hash")
+	// Verify it contains expected markers
+	contentStr := string(content)
+	expectedMarkers := []string{
+		"FROM",
+		"WORKDIR /workspace",
+		"claude-code",
 	}
 
-	// Read current content
-	originalContent, err := os.ReadFile(dockerfilePath)
-	if err != nil {
-		t.Fatalf("Failed to read Dockerfile: %v", err)
-	}
-
-	// Temporarily modify the Dockerfile
-	modifiedContent := append(originalContent, []byte("\n# test comment for hash change\n")...)
-	if err := os.WriteFile(dockerfilePath, modifiedContent, 0644); err != nil {
-		t.Fatalf("Failed to write modified Dockerfile: %v", err)
-	}
-
-	// Restore original content when done
-	defer func() {
-		if err := os.WriteFile(dockerfilePath, originalContent, 0644); err != nil {
-			t.Errorf("Failed to restore Dockerfile: %v", err)
+	for _, marker := range expectedMarkers {
+		if !strings.Contains(contentStr, marker) {
+			t.Errorf("Embedded Dockerfile missing expected content: %q", marker)
 		}
-	}()
-
-	// Get new hash
-	hash2 := computeBaseImageHash()
-	if hash2 == "" {
-		t.Fatal("Could not compute hash after modification")
-	}
-
-	// Hashes should be different
-	if hash1 == hash2 {
-		t.Error("computeBaseImageHash() returned same hash after Dockerfile modification")
 	}
 }

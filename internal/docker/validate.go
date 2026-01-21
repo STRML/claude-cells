@@ -3,8 +3,6 @@ package docker
 import (
 	"bufio"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -12,6 +10,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/STRML/claude-cells/configs"
 	"github.com/docker/docker/client"
 )
 
@@ -141,28 +140,32 @@ func (c *Client) ImageExists(ctx context.Context, imageName string) (bool, error
 	return true, nil
 }
 
-// BuildImage builds the required Docker image from the Dockerfile.
+// BuildImage builds the required Docker image from the embedded Dockerfile.
 // It streams build output to the provided writer (can be os.Stdout).
 // Returns an error if the build fails.
 // The image is tagged with a content hash so changes to the Dockerfile trigger rebuilds.
 func BuildImage(ctx context.Context, output io.Writer) error {
-	// Find the project root by looking for configs/base.Dockerfile
-	dockerfilePath, err := findDockerfile()
+	// Write embedded Dockerfile to temp directory for building
+	tmpDir, err := os.MkdirTemp("", "ccells-build-*")
 	if err != nil {
-		return fmt.Errorf("failed to find Dockerfile: %w", err)
+		return fmt.Errorf("failed to create temp dir: %w", err)
 	}
+	defer os.RemoveAll(tmpDir)
 
-	buildContext := filepath.Dir(filepath.Dir(dockerfilePath)) // Go up from configs/ to project root
+	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
+	if err := os.WriteFile(dockerfilePath, configs.BaseDockerfile, 0644); err != nil {
+		return fmt.Errorf("failed to write Dockerfile: %w", err)
+	}
 
 	// Use hash-tagged image name for content-based rebuilds
 	imageName := GetBaseImageName()
 
-	// Tag with both hash-tagged name AND latest for fallback when Dockerfile can't be found
+	// Tag with both hash-tagged name AND latest for fallback
 	cmd := exec.CommandContext(ctx, "docker", "build",
 		"-t", imageName,
 		"-t", DefaultImage+":latest",
 		"-f", dockerfilePath,
-		buildContext,
+		tmpDir,
 	)
 
 	// Combine stdout and stderr for build output
@@ -228,31 +231,9 @@ func findDockerfile() (string, error) {
 	return "", fmt.Errorf("could not find configs/base.Dockerfile")
 }
 
-// computeBaseImageHash computes a hash of the base.Dockerfile content.
-// This is used to detect when the Dockerfile has changed and needs rebuilding.
-// Returns empty string if the Dockerfile cannot be found or read.
-func computeBaseImageHash() string {
-	dockerfilePath, err := findDockerfile()
-	if err != nil {
-		return ""
-	}
-
-	content, err := os.ReadFile(dockerfilePath)
-	if err != nil {
-		return ""
-	}
-
-	hash := sha256.Sum256(content)
-	return hex.EncodeToString(hash[:])[:12]
-}
-
 // GetBaseImageName returns the base image name with a content hash tag.
 // This ensures the image is rebuilt when the Dockerfile changes.
-// Falls back to "ccells-base:latest" if the hash cannot be computed.
+// The hash is computed from the embedded Dockerfile at build time.
 func GetBaseImageName() string {
-	hash := computeBaseImageHash()
-	if hash == "" {
-		return DefaultImage + ":latest"
-	}
-	return DefaultImage + ":" + hash
+	return DefaultImage + ":" + configs.BaseDockerfileHash()
 }
