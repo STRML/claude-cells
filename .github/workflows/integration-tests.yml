@@ -9,8 +9,71 @@ on:
   workflow_dispatch:
 
 jobs:
+  build-image:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and export ccells-base image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: configs/base.Dockerfile
+          tags: ccells-base:latest
+          outputs: type=docker,dest=/tmp/ccells-base.tar
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ccells-base-image
+          path: /tmp/ccells-base.tar
+          retention-days: 1
+
+  test:
+    name: Test ${{ matrix.package }}
+    needs: build-image
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - cmd/ccells
+          - internal/docker
+          - internal/git
+          - internal/tui
+          - internal/workstream
+          - internal/config
+          - internal/sync
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ccells-base-image
+          path: /tmp
+
+      - name: Load Docker image
+        run: docker load -i /tmp/ccells-base.tar
+
+      - name: Run tests
+        run: go test -race -v ./${{ matrix.package }}/...
+        timeout-minutes: 15
+
   integration:
-    name: Integration Tests
+    name: Tagged Integration Tests
+    needs: build-image
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -20,22 +83,14 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Build ccells-base image
-        uses: docker/build-push-action@v6
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
         with:
-          context: .
-          file: configs/base.Dockerfile
-          tags: ccells-base:latest
-          load: true
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          name: ccells-base-image
+          path: /tmp
 
-      - name: Run full test suite
-        run: go test -race -v ./...
-        timeout-minutes: 15
+      - name: Load Docker image
+        run: docker load -i /tmp/ccells-base.tar
 
       - name: Run integration tests
         run: go test -tags=integration -race -v ./...
