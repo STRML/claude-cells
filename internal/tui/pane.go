@@ -946,8 +946,29 @@ func (p PaneModel) View() string {
 		inputView = "\n" + p.input.View()
 	}
 
+	// Scroll hints (only show when focused and there's scrollback content)
+	var scrollHint string
+	if p.focused && len(p.scrollback) > 0 {
+		hintStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#666666")).
+			Italic(true)
+
+		if p.scrollMode {
+			// In scroll mode - show navigation hints
+			scrollHint = hintStyle.Render("SCROLL: ↑↓/pgup/pgdn  |  ctrl+u/d half-page  |  esc exit")
+		} else if !p.viewport.AtBottom() {
+			// Not at bottom - hint that we're scrolled up
+			scrollHint = hintStyle.Render("↑ scrolled up — esc to return")
+		}
+	}
+
 	// Combine
-	content := header + "\n\n" + outputView + inputView
+	var content string
+	if scrollHint != "" {
+		content = header + "\n\n" + outputView + "\n" + scrollHint + inputView
+	} else {
+		content = header + "\n\n" + outputView + inputView
+	}
 
 	// Apply border based on focus and input mode
 	var style lipgloss.Style
@@ -1243,24 +1264,27 @@ func (p *PaneModel) SendToPTY(text string) error {
 // WritePTYOutput writes raw PTY output to the virtual terminal
 func (p *PaneModel) WritePTYOutput(data []byte) {
 	// Capture current first line before write (to detect scrolling)
+	// Use plain text for comparison, but we'll save the colored version
 	firstLineBefore := p.getVtermLine(0)
+	// Render with colors before the write changes the vterm
+	coloredFirstLine := p.renderVTermLine(0)
 
 	p.vterm.Write(data)
 
 	// Check if content scrolled (first line changed)
 	firstLineAfter := p.getVtermLine(0)
 	if firstLineBefore != "" && firstLineBefore != firstLineAfter {
-		// Content scrolled - save old first line to scrollback
+		// Content scrolled - save old first line to scrollback WITH colors
 		// Limit scrollback to 10000 lines to prevent memory issues
 		if len(p.scrollback) >= 10000 {
 			// Remove oldest 1000 lines when limit reached
 			p.scrollback = p.scrollback[1000:]
 		}
-		p.scrollback = append(p.scrollback, firstLineBefore)
+		p.scrollback = append(p.scrollback, coloredFirstLine)
 	}
 }
 
-// getVtermLine returns a single line from the vterm (0-indexed)
+// getVtermLine returns a single line from the vterm (0-indexed) as plain text
 func (p *PaneModel) getVtermLine(row int) string {
 	if p.vterm == nil {
 		return ""
@@ -1280,6 +1304,87 @@ func (p *PaneModel) getVtermLine(row int) string {
 		}
 	}
 	return strings.TrimRight(line.String(), " ")
+}
+
+// renderVTermLine renders a single line from vterm with ANSI color codes preserved
+// This is used for scrollback so that colors are maintained when scrolling up
+func (p *PaneModel) renderVTermLine(row int) string {
+	if p.vterm == nil {
+		return ""
+	}
+	cols, rows := p.vterm.Size()
+	if row < 0 || row >= rows || cols <= 0 {
+		return ""
+	}
+
+	var line strings.Builder
+	var lastFG, lastBG vt10x.Color = vt10x.DefaultFG, vt10x.DefaultBG
+
+	for col := 0; col < cols; col++ {
+		cell := p.vterm.Cell(col, row)
+
+		// Check if colors changed
+		if cell.FG != lastFG || cell.BG != lastBG {
+			// Reset and apply new colors
+			line.WriteString("\x1b[0m") // Reset
+			if cell.FG != vt10x.DefaultFG {
+				if cell.FG.ANSI() {
+					// Standard ANSI colors (0-15)
+					if cell.FG < 8 {
+						line.WriteString(fmt.Sprintf("\x1b[%dm", 30+cell.FG))
+					} else {
+						line.WriteString(fmt.Sprintf("\x1b[%dm", 90+cell.FG-8))
+					}
+				} else if cell.FG > 255 {
+					// Truecolor RGB - vt10x stores as r<<16 | g<<8 | b
+					r := (cell.FG >> 16) & 0xFF
+					g := (cell.FG >> 8) & 0xFF
+					b := cell.FG & 0xFF
+					line.WriteString(fmt.Sprintf("\x1b[38;2;%d;%d;%dm", r, g, b))
+				} else {
+					// 256-color mode
+					line.WriteString(fmt.Sprintf("\x1b[38;5;%dm", cell.FG))
+				}
+			}
+			if cell.BG != vt10x.DefaultBG {
+				if cell.BG.ANSI() {
+					// Standard ANSI colors (0-15)
+					if cell.BG < 8 {
+						line.WriteString(fmt.Sprintf("\x1b[%dm", 40+cell.BG))
+					} else {
+						line.WriteString(fmt.Sprintf("\x1b[%dm", 100+cell.BG-8))
+					}
+				} else if cell.BG > 255 {
+					// Truecolor RGB - vt10x stores as r<<16 | g<<8 | b
+					r := (cell.BG >> 16) & 0xFF
+					g := (cell.BG >> 8) & 0xFF
+					b := cell.BG & 0xFF
+					line.WriteString(fmt.Sprintf("\x1b[48;2;%d;%d;%dm", r, g, b))
+				} else {
+					// 256-color mode
+					line.WriteString(fmt.Sprintf("\x1b[48;5;%dm", cell.BG))
+				}
+			}
+			lastFG, lastBG = cell.FG, cell.BG
+		}
+
+		if cell.Char == 0 {
+			line.WriteRune(' ')
+		} else {
+			line.WriteRune(cell.Char)
+		}
+	}
+	// Reset colors at end of line
+	line.WriteString("\x1b[0m")
+
+	// Trim trailing spaces but keep color codes
+	lineStr := line.String()
+	if strings.HasSuffix(lineStr, "\x1b[0m") {
+		prefix := lineStr[:len(lineStr)-4]
+		prefix = strings.TrimRight(prefix, " ")
+		lineStr = prefix + "\x1b[0m"
+	}
+	return lineStr
 }
 
 // Workstream returns the underlying workstream
@@ -1351,6 +1456,29 @@ func (p *PaneModel) ScrollLineUp() {
 // ScrollLineDown scrolls the viewport down by one line
 func (p *PaneModel) ScrollLineDown() {
 	p.viewport.ScrollDown(1)
+	// Exit scroll mode if at bottom
+	if p.viewport.AtBottom() {
+		p.scrollMode = false
+	}
+}
+
+// ScrollHalfPageUp scrolls the viewport up by half a page (vim-style ctrl+u)
+func (p *PaneModel) ScrollHalfPageUp() {
+	p.scrollMode = true
+	halfPage := p.viewport.Height() / 2
+	if halfPage < 1 {
+		halfPage = 1
+	}
+	p.viewport.ScrollUp(halfPage)
+}
+
+// ScrollHalfPageDown scrolls the viewport down by half a page (vim-style ctrl+d)
+func (p *PaneModel) ScrollHalfPageDown() {
+	halfPage := p.viewport.Height() / 2
+	if halfPage < 1 {
+		halfPage = 1
+	}
+	p.viewport.ScrollDown(halfPage)
 	// Exit scroll mode if at bottom
 	if p.viewport.AtBottom() {
 		p.scrollMode = false

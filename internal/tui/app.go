@@ -555,7 +555,44 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					return m, nil
 				}
+				// In scroll mode, pgup/pgdown work directly without prefix
+				if len(m.panes) > 0 && m.focusedPane < len(m.panes) && m.panes[m.focusedPane].IsScrollMode() {
+					if msg.String() == "pgup" {
+						m.panes[m.focusedPane].ScrollPageUp()
+					} else {
+						m.panes[m.focusedPane].ScrollPageDown()
+					}
+					return m, nil
+				}
 				// Not a tmux sequence - pass to pane
+				m.tmuxPrefix = false
+				var cmd tea.Cmd
+				m.panes[m.focusedPane], cmd = m.panes[m.focusedPane].Update(msg)
+				return m, cmd
+			case "ctrl+u", "ctrl+d":
+				// Half-page scrolling (vim-style)
+				// Works in scroll mode directly, or with tmux prefix from input mode
+				if m.tmuxPrefix && time.Since(m.tmuxPrefixTime) < tmuxPrefixTimeout {
+					m.tmuxPrefix = false
+					if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
+						if msg.String() == "ctrl+u" {
+							m.panes[m.focusedPane].ScrollHalfPageUp()
+						} else {
+							m.panes[m.focusedPane].ScrollHalfPageDown()
+						}
+					}
+					return m, nil
+				}
+				// In scroll mode, ctrl+u/d work directly
+				if len(m.panes) > 0 && m.focusedPane < len(m.panes) && m.panes[m.focusedPane].IsScrollMode() {
+					if msg.String() == "ctrl+u" {
+						m.panes[m.focusedPane].ScrollHalfPageUp()
+					} else {
+						m.panes[m.focusedPane].ScrollHalfPageDown()
+					}
+					return m, nil
+				}
+				// Not in scroll mode and no prefix - pass to pane
 				m.tmuxPrefix = false
 				var cmd tea.Cmd
 				m.panes[m.focusedPane], cmd = m.panes[m.focusedPane].Update(msg)
@@ -710,6 +747,20 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Scroll focused pane down
 			if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
 				m.panes[m.focusedPane].ScrollPageDown()
+			}
+			return m, nil
+
+		case "ctrl+u":
+			// Half-page scroll up (vim-style)
+			if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
+				m.panes[m.focusedPane].ScrollHalfPageUp()
+			}
+			return m, nil
+
+		case "ctrl+d":
+			// Half-page scroll down (vim-style)
+			if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
+				m.panes[m.focusedPane].ScrollHalfPageDown()
 			}
 			return m, nil
 

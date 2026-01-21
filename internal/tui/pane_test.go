@@ -2,6 +2,7 @@ package tui
 
 import (
 	"bytes"
+	"fmt"
 	"io"
 	"strings"
 	"sync"
@@ -780,6 +781,139 @@ func (m *mockPTYStdin) Bytes() []byte {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.buf.Bytes()
+}
+
+func TestPaneModel_ScrollHalfPageUp(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24)
+
+	// Add some content so we have something to scroll
+	for i := 0; i < 100; i++ {
+		pane.AppendOutput("Line content\n")
+	}
+
+	// ScrollHalfPageUp should enter scroll mode
+	pane.ScrollHalfPageUp()
+	if !pane.IsScrollMode() {
+		t.Error("ScrollHalfPageUp() should enter scroll mode")
+	}
+}
+
+func TestPaneModel_ScrollHalfPageDown(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24)
+
+	// Add content and enter scroll mode
+	for i := 0; i < 100; i++ {
+		pane.AppendOutput("Line content\n")
+	}
+	pane.ScrollPageUp() // Enter scroll mode and scroll up
+
+	if !pane.IsScrollMode() {
+		t.Error("Should be in scroll mode after ScrollPageUp()")
+	}
+
+	// ScrollHalfPageDown should stay in scroll mode when not at bottom
+	pane.ScrollHalfPageDown()
+	// We're still not at bottom after one half-page, so should still be in scroll mode
+	if !pane.IsScrollMode() {
+		t.Error("ScrollHalfPageDown() should stay in scroll mode when not at bottom")
+	}
+
+	// Scroll all the way to the bottom
+	for i := 0; i < 50; i++ {
+		pane.ScrollHalfPageDown()
+	}
+	// Should exit scroll mode when at bottom
+	if pane.IsScrollMode() {
+		t.Error("ScrollHalfPageDown() should exit scroll mode when at bottom")
+	}
+}
+
+func TestPaneModel_renderVTermLine_PreservesColors(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24)
+
+	// Write colored content to vterm
+	pane.WritePTYOutput([]byte("\x1b[31mRed text\x1b[0m\r\n"))
+
+	// renderVTermLine should preserve colors
+	line := pane.renderVTermLine(0)
+
+	// Should contain ANSI color codes
+	if !strings.Contains(line, "\x1b[") {
+		t.Errorf("renderVTermLine() should preserve ANSI colors, got: %q", line)
+	}
+
+	// Should contain the text
+	if !strings.Contains(stripANSI(line), "Red text") {
+		t.Errorf("renderVTermLine() should contain text 'Red text', got: %q", stripANSI(line))
+	}
+}
+
+func TestPaneModel_renderVTermLine_EmptyRow(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24)
+
+	// renderVTermLine on empty vterm should return empty or reset-only
+	line := pane.renderVTermLine(0)
+	stripped := stripANSI(line)
+	if stripped != "" && strings.TrimSpace(stripped) != "" {
+		t.Errorf("renderVTermLine() on empty row should return empty/whitespace, got: %q", stripped)
+	}
+}
+
+func TestPaneModel_renderVTermLine_OutOfBounds(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24)
+
+	// Out of bounds should return empty
+	line := pane.renderVTermLine(-1)
+	if line != "" {
+		t.Errorf("renderVTermLine(-1) should return empty, got: %q", line)
+	}
+
+	line = pane.renderVTermLine(100)
+	if line != "" {
+		t.Errorf("renderVTermLine(100) should return empty, got: %q", line)
+	}
+}
+
+func TestPaneModel_WritePTYOutput_ScrollbackPreservesColors(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	// SetSize with height 16 means innerHeight = max(16-6, 10) = 10
+	// So we need more than 10 lines to scroll
+	pane.SetSize(80, 16)
+
+	// Write many colored lines to trigger scrollback - write more than vterm height
+	// Each line needs unique content so the first line changes on scroll
+	for i := 0; i < 30; i++ {
+		pane.WritePTYOutput([]byte(fmt.Sprintf("\x1b[32mGreen line %d\x1b[0m\r\n", i)))
+	}
+
+	// Check that scrollback contains entries
+	if len(pane.scrollback) == 0 {
+		w, h := pane.vterm.Size()
+		t.Fatalf("Expected scrollback to have entries after scrolling, vterm size is %dx%d", w, h)
+	}
+
+	// At least some scrollback entries should have color codes
+	hasColors := false
+	for _, line := range pane.scrollback {
+		if strings.Contains(line, "\x1b[") {
+			hasColors = true
+			break
+		}
+	}
+	if !hasColors {
+		t.Errorf("Scrollback should preserve ANSI color codes, got: %v", pane.scrollback[:min(3, len(pane.scrollback))])
+	}
 }
 
 // TestPaneModel_EnterKey_SendsCarriageReturn verifies that pressing Enter sends \r (carriage return)
