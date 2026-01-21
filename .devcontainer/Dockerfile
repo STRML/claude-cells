@@ -3,7 +3,8 @@ FROM golang:1.25.5
 # Install Node.js for tooling (e.g., ccstatusline)
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
     apt-get install -y nodejs && \
-    rm -rf /var/lib/apt/lists/*
+    rm -rf /var/lib/apt/lists/* && \
+    npm install -g ccstatusline
 
 # Set up module cache directory
 WORKDIR /go/src/cache
