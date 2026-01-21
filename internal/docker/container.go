@@ -77,6 +77,10 @@ func (c *Client) CreateContainer(ctx context.Context, cfg *ContainerConfig) (str
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 
+	// Set HOME explicitly - base images like ubuntu:22.04 don't set HOME for non-login shells,
+	// but our setup script and Claude Code expect $HOME to resolve correctly
+	env = append(env, "HOME=/root")
+
 	// Add claude to PATH (npm global installs to ~/.local/bin)
 	env = append(env, "PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
 

@@ -247,7 +247,7 @@ func NewPTYSession(ctx context.Context, dockerClient *client.Client, containerID
 
 	// Create exec with TTY and terminal size
 	// Don't specify User - let Docker use the container's default user
-	// (base.Dockerfile sets USER claude, devcontainers typically use vscode/node)
+	// (base.Dockerfile runs as root, devcontainers may use vscode/node/root)
 	execCfg := container.ExecOptions{
 		Cmd:          cmd,
 		AttachStdin:  true,
