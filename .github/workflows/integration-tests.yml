@@ -9,9 +9,47 @@ on:
   workflow_dispatch:
 
 jobs:
-  integration:
-    name: Integration Tests
+  build-image:
+    name: Build Docker Image
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and export ccells-base image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: configs/base.Dockerfile
+          tags: ccells-base:latest
+          outputs: type=docker,dest=/tmp/ccells-base.tar
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ccells-base-image
+          path: /tmp/ccells-base.tar
+          retention-days: 1
+
+  test:
+    name: Test ${{ matrix.package }}
+    needs: build-image
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        package:
+          - cmd/ccells
+          - internal/docker
+          - internal/git
+          - internal/tui
+          - internal/workstream
+          - internal/config
+          - internal/sync
     steps:
       - uses: actions/checkout@v4
 
@@ -20,17 +58,16 @@ jobs:
         with:
           go-version-file: go.mod
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ccells-base-image
+          path: /tmp
 
-      - name: Build claude-code-base image
-        run: |
-          if [ -f configs/base.Dockerfile ]; then
-            docker build -t claude-code-base:latest -f configs/base.Dockerfile .
-          else
-            echo "No base.Dockerfile found, using alpine for integration tests"
-          fi
+      - name: Load Docker image
+        run: docker load -i /tmp/ccells-base.tar
 
-      - name: Run integration tests
-        run: go test -tags=integration -race -v ./...
-        timeout-minutes: 10
+      - name: Run tests
+        run: go test -race -v ./${{ matrix.package }}/...
+        timeout-minutes: 15
+

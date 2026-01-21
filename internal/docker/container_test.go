@@ -335,7 +335,7 @@ func TestContainer_CleanupOrphanedContainers(t *testing.T) {
 	}
 
 	// Call cleanup with only knownID as known
-	removed, err := client.CleanupOrphanedContainers(ctx, []string{knownID})
+	removed, err := client.CleanupOrphanedContainers(ctx, "ccells", []string{knownID}, nil)
 	if err != nil {
 		t.Fatalf("CleanupOrphanedContainers() error = %v", err)
 	}
