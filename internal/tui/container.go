@@ -798,12 +798,9 @@ func StartPTYCmd(ws *workstream.Workstream, initialPrompt string, width, height 
 			opts.EnvVars = append(opts.EnvVars, "ANTHROPIC_API_KEY="+apiKey)
 		}
 
-		// Get OAuth credentials from keychain and pass as env var
-		creds, err := docker.GetClaudeCredentials()
-		if err == nil && creds != nil && creds.Raw != "" {
-			// Pass the raw credentials JSON - Claude Code will parse it
-			opts.EnvVars = append(opts.EnvVars, "CLAUDE_CODE_CREDENTIALS="+creds.Raw)
-		}
+		// Note: OAuth credentials are handled via CLAUDE_CONFIG_DIR env var (set at container
+		// creation) pointing to mounted config directory. This allows Claude Code to manage
+		// credentials including token refresh. See claude-code#1736.
 
 		// Disable Claude Code auto-updater, error reporting, and telemetry
 		opts.EnvVars = append(opts.EnvVars,

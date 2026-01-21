@@ -128,6 +128,12 @@ func (r *CredentialRefresher) Start() {
 	// This ensures containers created before a restart still receive credential updates
 	r.registerExistingContainers()
 
+	// Immediately push fresh credentials to all registered containers
+	// This revives paused containers that may have stale tokens from before ccells was stopped
+	if updated := r.ForceRefresh(); updated > 0 {
+		log.Printf("[CredentialRefresher] Pushed fresh credentials to %d container(s) on startup", updated)
+	}
+
 	go r.refreshLoop()
 	log.Printf("[CredentialRefresher] Started with %v interval", r.interval)
 }
@@ -245,7 +251,7 @@ func (r *CredentialRefresher) checkAndRefresh() {
 }
 
 func (r *CredentialRefresher) updateContainerCredentials(configDir, rawCreds string) error {
-	// Update .credentials.json inside the .claude directory
+	// Update .credentials.json inside the .claude directory (legacy location)
 	claudeDir := filepath.Join(configDir, ClaudeDir)
 	credsPath := filepath.Join(claudeDir, ".credentials.json")
 
@@ -256,6 +262,12 @@ func (r *CredentialRefresher) updateContainerCredentials(configDir, rawCreds str
 
 	// Write credentials with restrictive permissions
 	if err := os.WriteFile(credsPath, []byte(rawCreds), 0600); err != nil {
+		return err
+	}
+
+	// Also update root-level .credentials.json for CLAUDE_CONFIG_DIR (claude-code#1736)
+	rootCredsPath := filepath.Join(configDir, ".credentials.json")
+	if err := os.WriteFile(rootCredsPath, []byte(rawCreds), 0600); err != nil {
 		return err
 	}
 

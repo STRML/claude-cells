@@ -201,14 +201,20 @@ func CreateContainerConfig(containerName string) (*ConfigPaths, error) {
 		if err := os.MkdirAll(dstClaudeDir, 0755); err != nil {
 			return nil, fmt.Errorf("failed to create .claude directory: %w", err)
 		}
-		// Write credentials inside .claude directory
+		// Write credentials inside .claude directory (legacy location)
 		credsInClaudeDir := filepath.Join(dstClaudeDir, ".credentials.json")
 		if err := os.WriteFile(credsInClaudeDir, []byte(creds.Raw), 0600); err != nil {
 			return nil, fmt.Errorf("failed to write .credentials.json: %w", err)
 		}
+		// Also write credentials at config root for CLAUDE_CONFIG_DIR (claude-code#1736)
+		// Claude Code with CLAUDE_CONFIG_DIR looks for .credentials.json in that directory
+		credsAtRoot := filepath.Join(containerConfigDir, ".credentials.json")
+		if err := os.WriteFile(credsAtRoot, []byte(creds.Raw), 0600); err != nil {
+			return nil, fmt.Errorf("failed to write root .credentials.json: %w", err)
+		}
 	}
 
-	// Also write separate credentials file
+	// Also write separate credentials file (legacy)
 	dstCredentials := filepath.Join(containerConfigDir, CredentialsFile)
 	if creds != nil && creds.Raw != "" {
 		if err := os.WriteFile(dstCredentials, []byte(creds.Raw), 0600); err != nil {

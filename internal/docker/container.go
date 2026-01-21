@@ -74,6 +74,9 @@ func (c *Client) CreateContainer(ctx context.Context, cfg *ContainerConfig) (str
 		env = append(env, fmt.Sprintf("%s=%s", k, v))
 	}
 
+	// Add claude to PATH (npm global installs to ~/.local/bin)
+	env = append(env, "PATH=/root/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+
 	// Add git identity environment variables if provided
 	// These ensure commits are attributed to the user even without .gitconfig
 	if cfg.GitIdentity != nil {
@@ -91,6 +94,15 @@ func (c *Client) CreateContainer(ctx context.Context, cfg *ContainerConfig) (str
 	// This ensures commits have the same timezone as the host
 	if cfg.Timezone != "" {
 		env = append(env, fmt.Sprintf("TZ=%s", cfg.Timezone))
+	}
+
+	// Set CLAUDE_CONFIG_DIR to tell Claude Code where to find/store all config
+	// This is the recommended approach for Docker containers (see claude-code#1736)
+	// Claude Code will read/write .claude.json, .credentials.json, and other config here
+	if cfg.ClaudeCfg != "" {
+		// Point to the parent of .claude directory (e.g., /home/claude)
+		// Claude Code expects CLAUDE_CONFIG_DIR to contain .claude/ subdirectory
+		env = append(env, "CLAUDE_CONFIG_DIR=/home/claude")
 	}
 
 	containerCfg := &container.Config{
@@ -126,6 +138,15 @@ func (c *Client) CreateContainer(ctx context.Context, cfg *ContainerConfig) (str
 			Source: cfg.ClaudeCfg,
 			Target: "/home/claude/.claude",
 			// Not read-only: Claude Code needs to write debug logs to ~/.claude/debug/
+		})
+		// Also mount root-level .credentials.json for CLAUDE_CONFIG_DIR (claude-code#1736)
+		// Claude Code with CLAUDE_CONFIG_DIR looks for credentials at $CLAUDE_CONFIG_DIR/.credentials.json
+		rootCredsPath := filepath.Join(filepath.Dir(cfg.ClaudeCfg), ".credentials.json")
+		mounts = append(mounts, mount.Mount{
+			Type:   mount.TypeBind,
+			Source: rootCredsPath,
+			Target: "/home/claude/.credentials.json",
+			// Not read-only: Claude Code needs to refresh tokens
 		})
 	}
 	if cfg.ClaudeJSON != "" {

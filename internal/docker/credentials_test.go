@@ -164,3 +164,76 @@ func TestCredentialRefresherNoDuplicateRegistration(t *testing.T) {
 		t.Errorf("Container name should be 'test-container', got '%s'", info.name)
 	}
 }
+
+func TestCredentialRefresherWritesToBothLocations(t *testing.T) {
+	// Create a temporary config directory
+	tempDir := t.TempDir()
+	claudeDir := filepath.Join(tempDir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		t.Fatalf("Failed to create .claude dir: %v", err)
+	}
+
+	refresher := NewCredentialRefresher(1 * time.Hour)
+
+	// Test updateContainerCredentials writes to both locations
+	testCreds := `{"claudeAiOauth":{"accessToken":"test-token"}}`
+	err := refresher.updateContainerCredentials(tempDir, testCreds)
+	if err != nil {
+		t.Fatalf("updateContainerCredentials failed: %v", err)
+	}
+
+	// Check root-level .credentials.json (for CLAUDE_CONFIG_DIR)
+	rootCredsPath := filepath.Join(tempDir, ".credentials.json")
+	rootCreds, err := os.ReadFile(rootCredsPath)
+	if err != nil {
+		t.Errorf("Failed to read root .credentials.json: %v", err)
+	} else if string(rootCreds) != testCreds {
+		t.Errorf("Root credentials mismatch: got %s, want %s", string(rootCreds), testCreds)
+	}
+
+	// Check .claude/.credentials.json (legacy location)
+	legacyCredsPath := filepath.Join(claudeDir, ".credentials.json")
+	legacyCreds, err := os.ReadFile(legacyCredsPath)
+	if err != nil {
+		t.Errorf("Failed to read legacy .credentials.json: %v", err)
+	} else if string(legacyCreds) != testCreds {
+		t.Errorf("Legacy credentials mismatch: got %s, want %s", string(legacyCreds), testCreds)
+	}
+}
+
+func TestCredentialRefresherForceRefreshOnStartup(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("Keychain credentials only available on macOS")
+	}
+
+	// Create a temporary config directory with .claude subdir
+	tempDir := t.TempDir()
+	claudeDir := filepath.Join(tempDir, ".claude")
+	if err := os.MkdirAll(claudeDir, 0755); err != nil {
+		t.Fatalf("Failed to create .claude dir: %v", err)
+	}
+
+	refresher := NewCredentialRefresher(1 * time.Hour)
+
+	// Register a container (ID must be >= 12 chars for log output)
+	refresher.RegisterContainer("test-container-id-12345", "test-container", tempDir)
+
+	// ForceRefresh should update the container's credentials
+	updated := refresher.ForceRefresh()
+
+	// If we have keychain credentials, should update 1 container
+	creds, _ := GetClaudeCredentials()
+	if creds != nil && creds.Raw != "" {
+		if updated != 1 {
+			t.Errorf("ForceRefresh should update 1 container, got %d", updated)
+		}
+
+		// Verify credentials were written
+		rootCredsPath := filepath.Join(tempDir, ".credentials.json")
+		if _, err := os.Stat(rootCredsPath); os.IsNotExist(err) {
+			t.Error("Root .credentials.json should exist after ForceRefresh")
+		}
+	} else {
+		t.Log("No keychain credentials available, skipping verification")
+	}
+}

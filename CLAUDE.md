@@ -40,6 +40,22 @@ internal/
 - `~/.claude-cells/state/<repo-id>/state.json` - Per-repo workstream state (branches, container IDs, session IDs)
 - `~/.claude-cells/containers/<container-name>/` - Container-specific config files (credentials, .claude.json copies)
 
+### OAuth Credential Management
+
+Each container gets isolated credentials copied from the host's macOS keychain. The flow:
+
+1. **On container creation**: Fresh credentials copied from keychain to `~/.claude-cells/containers/<name>/.credentials.json`
+2. **Container environment**: `CLAUDE_CONFIG_DIR=/home/claude` tells Claude Code where to find config
+3. **Mounted files**: `.credentials.json` mounted at `/home/claude/.credentials.json` (the path Claude Code expects with `CLAUDE_CONFIG_DIR`)
+4. **Periodic refresh**: `CredentialRefresher` polls keychain every 15 min, pushes fresh tokens to all container configs
+5. **On ccells restart**: Existing container configs are re-registered with the refresher
+
+**Why keychain is source of truth**: Containers may be paused for extended periods while ccells is off. Their tokens expire. When ccells restarts, it must push fresh credentials from keychain to revive paused containers. Sub-claudes can also refresh their own tokens (writing to the mounted file), but the keychain refresh ensures containers work after long pauses.
+
+**Isolation**: Each container has its own config directory - they don't share or modify the host's `~/.claude` config.
+
+See: [claude-code#1736](https://github.com/anthropics/claude-code/issues/1736) for Docker credential patterns.
+
 ### Git Worktree Isolation
 
 Each container gets its own **git worktree** at `/tmp/ccells/worktrees/<branch-name>`. This keeps the host repository's working directory untouched while still sharing git objects. Benefits:
@@ -143,6 +159,7 @@ if app.dialog == nil {
 - **Container Cleanup**: Orphaned containers from crashed sessions are cleaned up on startup
 - **Context Timeouts**: All Docker operations use timeouts (no unbounded context.Background())
 - **Session Persistence**: Claude sessions are persisted from container runtime location to mount point before pause, surviving container rebuilds
+- **OAuth Credential Refresh**: `CredentialRefresher` re-registers existing containers on startup, ensuring credentials stay fresh even after ccells restarts. Uses `CLAUDE_CONFIG_DIR` for proper Claude Code integration.
 
 ### Remaining Technical Debt
 
