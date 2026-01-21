@@ -834,43 +834,38 @@ func TestPTYOptionsWithSessionID(t *testing.T) {
 	}
 }
 
-// TestContainerSetupScript_CopiesCustomConfig verifies that the container setup script
-// includes logic to copy custom commands and agents directories for status line customizations.
-func TestContainerSetupScript_CopiesCustomConfig(t *testing.T) {
+// TestContainerSetupScript_SingleConfigDir verifies that the container setup script
+// uses a single config directory (CONFIG_DIR) based on CLAUDE_CONFIG_DIR.
+func TestContainerSetupScript_SingleConfigDir(t *testing.T) {
 	tests := []struct {
 		name     string
 		contains string
 		desc     string
 	}{
 		{
-			name:     "copies settings.json",
-			contains: "settings.json",
-			desc:     "settings.json should be copied for status line and other settings",
+			name:     "determines config base from CLAUDE_CONFIG_DIR",
+			contains: `CONFIG_BASE="${CLAUDE_CONFIG_DIR:-$HOME}"`,
+			desc:     "should use CLAUDE_CONFIG_DIR if set, otherwise HOME",
 		},
 		{
-			name:     "copies commands directory",
-			contains: `"/home/claude/.claude/commands"`,
-			desc:     "commands/ directory should be copied for custom slash commands",
-		},
-		{
-			name:     "copies agents directory",
-			contains: `"/home/claude/.claude/agents"`,
-			desc:     "agents/ directory should be copied for custom agents",
-		},
-		{
-			name:     "copies plugins directory",
-			contains: `"/home/claude/.claude/plugins"`,
-			desc:     "plugins/ directory should be copied for plugin config",
-		},
-		{
-			name:     "copies CLAUDE.md",
-			contains: "CLAUDE.md",
-			desc:     "CLAUDE.md should be copied for global instructions",
+			name:     "sets CONFIG_DIR",
+			contains: `CONFIG_DIR="$CONFIG_BASE/.claude"`,
+			desc:     "should set CONFIG_DIR to .claude under the base",
 		},
 		{
 			name:     "creates ccells-commit command",
 			contains: "ccells-commit.md",
 			desc:     "ccells-commit.md should be created for the /ccells-commit skill",
+		},
+		{
+			name:     "creates commands in CONFIG_DIR",
+			contains: `$CONFIG_DIR/commands`,
+			desc:     "commands should be created in CONFIG_DIR",
+		},
+		{
+			name:     "handles session data in CONFIG_DIR",
+			contains: `$CONFIG_DIR/projects`,
+			desc:     "session data should use CONFIG_DIR",
 		},
 	}
 
@@ -880,14 +875,6 @@ func TestContainerSetupScript_CopiesCustomConfig(t *testing.T) {
 				t.Errorf("containerSetupScript should contain %q: %s", tt.contains, tt.desc)
 			}
 		})
-	}
-}
-
-// TestContainerSetupScript_CustomStatusLineComment verifies the script has a comment
-// explaining that commands are used for custom status line.
-func TestContainerSetupScript_CustomStatusLineComment(t *testing.T) {
-	if !strings.Contains(containerSetupScript, "custom status line") {
-		t.Error("containerSetupScript should document that commands/ is used for custom status line")
 	}
 }
 
@@ -911,24 +898,6 @@ func TestContainerSetupScript_CcellsCommitCommand(t *testing.T) {
 	}
 }
 
-// TestContainerSetupScript_CcellsCommitCLAUDE_CONFIG_DIR verifies that ccells-commit is also
-// created at the CLAUDE_CONFIG_DIR location when set, ensuring Claude Code can find it.
-func TestContainerSetupScript_CcellsCommitCLAUDE_CONFIG_DIR(t *testing.T) {
-	// The script should write to CLAUDE_CONFIG_DIR location when it differs from HOME
-	checks := []struct {
-		contains string
-		desc     string
-	}{
-		{"CLAUDE_CONFIG_DIR", "should check CLAUDE_CONFIG_DIR environment variable"},
-		{"$CLAUDE_CONFIG_DIR/.claude/commands", "should create commands at CLAUDE_CONFIG_DIR"},
-	}
-
-	for _, check := range checks {
-		if !strings.Contains(containerSetupScript, check.contains) {
-			t.Errorf("containerSetupScript should contain %q: %s", check.contains, check.desc)
-		}
-	}
-}
 
 // TestPTYSession_WriteString_EnterKey verifies that Enter key is sent as carriage return (\r)
 // rather than line feed (\n). This is important for PTY interaction where \r simulates

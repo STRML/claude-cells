@@ -66,8 +66,15 @@ log() {
 log "Starting container setup..."
 log "User: $(whoami), Home: $HOME"
 
+# Determine the single config directory to use
+# CLAUDE_CONFIG_DIR is set for containers - use it as the base for all Claude config
+# This avoids confusion between multiple config locations
+CONFIG_BASE="${CLAUDE_CONFIG_DIR:-$HOME}"
+CONFIG_DIR="$CONFIG_BASE/.claude"
+log "Using config directory: $CONFIG_DIR"
+
 # Ensure PATH includes user's local bin directories
-export PATH="$HOME/.local/bin:$HOME/.claude/local/bin:/usr/local/go/bin:$PATH"
+export PATH="$HOME/.local/bin:$CONFIG_DIR/local/bin:/usr/local/go/bin:$PATH"
 
 # Kill any existing claude CLI processes (from previous sessions that weren't cleaned up)
 # This happens when ccells quits - the container stays running but the PTY is orphaned
@@ -78,56 +85,16 @@ if pgrep -x "claude" >/dev/null 2>&1; then
   sleep 1
 fi
 
-# Setup credentials - check both $HOME and /home/claude (for devcontainers running as root)
-CREDS_SRC=""
-if test -f "$HOME/.claude-credentials"; then
-  CREDS_SRC="$HOME/.claude-credentials"
-elif test -f "/home/claude/.claude-credentials"; then
-  CREDS_SRC="/home/claude/.claude-credentials"
+# Setup credentials - the mounted config should already have them, but check for legacy locations
+if test -f "$CONFIG_BASE/.claude-credentials"; then
+  log "Copying credentials to config directory..."
+  mkdir -p "$CONFIG_DIR" 2>/dev/null
+  cp "$CONFIG_BASE/.claude-credentials" "$CONFIG_DIR/.credentials.json" 2>/dev/null
 fi
 
-if test -n "$CREDS_SRC"; then
-  log "Copying credentials from $CREDS_SRC..."
-  mkdir -p "$HOME/.claude" 2>/dev/null
-  cp "$CREDS_SRC" "$HOME/.claude/.credentials.json" 2>/dev/null
-fi
-
-# Copy essential .claude files (NOT the whole directory - it's huge!)
-if test -d "/home/claude/.claude" && test "$HOME" != "/home/claude"; then
-  log "Copying .claude config from /home/claude..."
-  # Only copy essential config files, not cache/telemetry/shell-snapshots
-  for f in settings.json CLAUDE.md statsig; do
-    test -e "/home/claude/.claude/$f" && cp -r "/home/claude/.claude/$f" "$HOME/.claude/" 2>/dev/null
-  done
-  # Copy plugins config if it exists
-  if test -d "/home/claude/.claude/plugins"; then
-    mkdir -p "$HOME/.claude/plugins"
-    test -f "/home/claude/.claude/plugins/installed_plugins.json" && \
-      cp "/home/claude/.claude/plugins/installed_plugins.json" "$HOME/.claude/plugins/" 2>/dev/null
-  fi
-
-  # Copy custom commands if they exist (for custom status line, etc.)
-  if test -d "/home/claude/.claude/commands"; then
-    cp -r "/home/claude/.claude/commands" "$HOME/.claude/" 2>/dev/null
-  fi
-
-  # Create ccells-specific commands
-  # Write to CLAUDE_CONFIG_DIR location (where Claude Code looks) if set and different from HOME
-  if test -n "$CLAUDE_CONFIG_DIR" && test "$CLAUDE_CONFIG_DIR" != "$HOME"; then
-    mkdir -p "$CLAUDE_CONFIG_DIR/.claude/commands" 2>/dev/null
-    cat > "$CLAUDE_CONFIG_DIR/.claude/commands/ccells-commit.md" << 'CCELLS_CMD'
-You are running inside Claude Cells (ccells), a terminal UI that manages multiple Claude Code instances in isolated Docker containers.
-
-Please commit all changes in this repository with an appropriate commit message that summarizes what was done.
-
-After the commit is complete, inform the user:
-- Briefly summarize what was committed
-- Tell them they can press **Esc Esc m** to open the merge dialog and merge this branch into main
-CCELLS_CMD
-  fi
-  # Also write to $HOME/.claude for backwards compatibility
-  mkdir -p "$HOME/.claude/commands" 2>/dev/null
-  cat > "$HOME/.claude/commands/ccells-commit.md" << 'CCELLS_CMD'
+# Create ccells-specific commands in the config directory
+mkdir -p "$CONFIG_DIR/commands" 2>/dev/null
+cat > "$CONFIG_DIR/commands/ccells-commit.md" << 'CCELLS_CMD'
 You are running inside Claude Cells (ccells), a terminal UI that manages multiple Claude Code instances in isolated Docker containers.
 
 Please commit all changes in this repository with an appropriate commit message that summarizes what was done.
@@ -137,39 +104,27 @@ After the commit is complete, inform the user:
 - Tell them they can press **Esc Esc m** to open the merge dialog and merge this branch into main
 CCELLS_CMD
 
-  # Copy custom agents if they exist
-  if test -d "/home/claude/.claude/agents"; then
-    cp -r "/home/claude/.claude/agents" "$HOME/.claude/" 2>/dev/null
+# Copy session data for --continue (needed when resuming sessions)
+# Session data on host is stored under encoded HOST path (e.g., -Users-samuelreed-git-oss-docker-tui)
+# But container runs in /workspace, so Claude looks for -workspace
+if test -n "$HOST_PROJECT_PATH"; then
+  HOST_ENCODED=$(echo "$HOST_PROJECT_PATH" | sed 's|/|-|g')
+  HOST_SESSION_DIR="$CONFIG_DIR/projects/$HOST_ENCODED"
+  if test -d "$HOST_SESSION_DIR"; then
+    log "Copying session data from $HOST_ENCODED to -workspace..."
+    mkdir -p "$CONFIG_DIR/projects/-workspace"
+    cp -r "$HOST_SESSION_DIR"/* "$CONFIG_DIR/projects/-workspace/" 2>/dev/null
+  else
+    log "No session data found at $HOST_SESSION_DIR"
   fi
-  # Copy session data for --continue
-  # Session data on host is stored under encoded HOST path (e.g., -Users-samuelreed-git-oss-docker-tui)
-  # But container runs in /workspace, so Claude looks for -workspace
-  # We need to copy from host-encoded path to -workspace
-  if test -n "$HOST_PROJECT_PATH"; then
-    # Encode host path: replace / with -
-    HOST_ENCODED=$(echo "$HOST_PROJECT_PATH" | sed 's|/|-|g')
-    HOST_SESSION_DIR="/home/claude/.claude/projects/$HOST_ENCODED"
-    if test -d "$HOST_SESSION_DIR"; then
-      log "Copying session data from $HOST_ENCODED to -workspace..."
-      mkdir -p "$HOME/.claude/projects/-workspace"
-      cp -r "$HOST_SESSION_DIR"/* "$HOME/.claude/projects/-workspace/" 2>/dev/null
-    else
-      log "No session data found at $HOST_SESSION_DIR"
-    fi
-  fi
-fi
-
-# Copy .claude.json (onboarding state, settings) if mounted at /home/claude
-if test -f "/home/claude/.claude.json" && test "$HOME" != "/home/claude"; then
-  log "Copying .claude.json from /home/claude..."
-  cp /home/claude/.claude.json "$HOME/.claude.json" 2>/dev/null || true
 fi
 
 # Copy .gitconfig for git user identity (name/email) - this is critical!
 # Without this, commits show as "Claude" instead of the actual user
-if test -f "/home/claude/.gitconfig" && test "$HOME" != "/home/claude"; then
-  log "Copying .gitconfig from /home/claude..."
-  cp /home/claude/.gitconfig "$HOME/.gitconfig" 2>/dev/null || true
+# Git looks in $HOME/.gitconfig, so we need to copy there if different from CONFIG_BASE
+if test -f "$CONFIG_BASE/.gitconfig" && test "$HOME" != "$CONFIG_BASE"; then
+  log "Copying .gitconfig for git identity..."
+  cp "$CONFIG_BASE/.gitconfig" "$HOME/.gitconfig" 2>/dev/null || true
 fi
 
 mkdir -p "$HOME/.local/bin" 2>/dev/null
