@@ -124,8 +124,63 @@ func (r *CredentialRefresher) Start() {
 		r.mu.Unlock()
 	}
 
+	// Re-register any existing container configs from previous sessions
+	// This ensures containers created before a restart still receive credential updates
+	r.registerExistingContainers()
+
 	go r.refreshLoop()
 	log.Printf("[CredentialRefresher] Started with %v interval", r.interval)
+}
+
+// registerExistingContainers scans the container config directory and registers
+// all existing containers. This handles the case where ccells restarts while
+// containers are still running - they need to be re-registered to receive
+// credential updates.
+func (r *CredentialRefresher) registerExistingContainers() {
+	cellsDir, err := GetCellsDir()
+	if err != nil {
+		return
+	}
+
+	containersDir := filepath.Join(cellsDir, "containers")
+	entries, err := os.ReadDir(containersDir)
+	if err != nil {
+		return // No containers directory or can't read - not an error
+	}
+
+	registered := 0
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+
+		containerName := entry.Name()
+		configDir := filepath.Join(containersDir, containerName)
+
+		// Check that the .claude directory exists (valid container config)
+		claudeDir := filepath.Join(configDir, ClaudeDir)
+		if _, err := os.Stat(claudeDir); os.IsNotExist(err) {
+			continue
+		}
+
+		// Use container name as the ID for re-registered containers
+		// (we don't have the actual container ID, but it's only used as a map key)
+		r.mu.Lock()
+		// Only register if not already registered (avoid duplicates if container
+		// was created this session)
+		if _, exists := r.containers[containerName]; !exists {
+			r.containers[containerName] = &containerInfo{
+				name:      containerName,
+				configDir: configDir,
+			}
+			registered++
+		}
+		r.mu.Unlock()
+	}
+
+	if registered > 0 {
+		log.Printf("[CredentialRefresher] Re-registered %d existing container(s)", registered)
+	}
 }
 
 // Stop stops the background credential refresh loop
