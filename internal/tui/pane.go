@@ -1155,8 +1155,8 @@ func (p *PaneModel) SetSize(width, height int) {
 	// Track if size is actually changing (to trigger resize settling)
 	sizeChanged := p.width != width || p.height != height
 
-	// Track previous vterm width to detect when terminal grows wider
-	oldVtermWidth, _ := p.vterm.Size()
+	// Track previous vterm dimensions
+	oldVtermWidth, oldVtermHeight := p.vterm.Size()
 
 	p.width = width
 	p.height = height
@@ -1173,11 +1173,13 @@ func (p *PaneModel) SetSize(width, height int) {
 		innerHeight = 10
 	}
 
-	// Resize virtual terminal
-	p.vterm.Resize(innerWidth, innerHeight)
+	// Check if vterm size is actually changing
+	vtermSizeChanged := innerWidth != oldVtermWidth || innerHeight != oldVtermHeight
 
-	// Resize PTY if active
-	if p.pty != nil && !p.pty.IsClosed() {
+	// Resize PTY FIRST if active - this sends SIGWINCH to the process so it knows
+	// about the new size before we resize the vterm. This prevents the race condition
+	// where output generated for the old size is written to the new-sized vterm.
+	if p.pty != nil && !p.pty.IsClosed() && vtermSizeChanged {
 		_ = p.pty.Resize(innerWidth, innerHeight)
 		// Mark resize time so View() can wait for terminal to settle
 		// before auto-scrolling (prevents rapid scroll oscillation)
@@ -1185,12 +1187,20 @@ func (p *PaneModel) SetSize(width, height int) {
 			p.resizeTime = time.Now()
 		}
 
-		// When terminal grows wider, send Ctrl+L to trigger a full redraw.
-		// This fixes the issue where content truncated during a smaller resize
-		// stays truncated when resizing back to a larger width.
-		if innerWidth > oldVtermWidth {
-			_ = p.pty.Write([]byte{12}) // Ctrl+L (form feed) - triggers screen redraw
-		}
+		// Always send Ctrl+L on resize to trigger a full redraw.
+		// This ensures the process redraws for the new size, preventing corruption
+		// from output generated for the old size.
+		_ = p.pty.Write([]byte{12}) // Ctrl+L (form feed) - triggers screen redraw
+	}
+
+	// Now resize the vterm. Creating a fresh vterm instead of resizing in-place
+	// avoids corruption from content that was generated for the old size.
+	// The Ctrl+L we sent above will cause the process to redraw everything.
+	if vtermSizeChanged {
+		// Create a fresh vterm at the new size
+		p.vterm = vt10x.New(vt10x.WithSize(innerWidth, innerHeight))
+		// Clear the cached render since content is now invalid
+		p.lastVtermRender = ""
 	}
 }
 

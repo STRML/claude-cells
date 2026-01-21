@@ -81,10 +81,10 @@ func TestPaneModel_VTermSize_FullHalfFullResize(t *testing.T) {
 	}
 }
 
-// TestPaneModel_SetSize_SendsCtrlLOnGrow verifies that when the terminal grows wider,
-// a Ctrl+L is sent to trigger a screen redraw. This fixes the issue where content
-// truncated during a smaller resize stays truncated when resizing back to a larger width.
-func TestPaneModel_SetSize_SendsCtrlLOnGrow(t *testing.T) {
+// TestPaneModel_SetSize_SendsCtrlLOnResize verifies that Ctrl+L is sent on any
+// vterm size change to trigger a screen redraw. This ensures the process redraws
+// for the new size, preventing corruption from output generated for the old size.
+func TestPaneModel_SetSize_SendsCtrlLOnResize(t *testing.T) {
 	ws := workstream.New("test")
 	pane := NewPaneModel(ws)
 
@@ -102,10 +102,10 @@ func TestPaneModel_SetSize_SendsCtrlLOnGrow(t *testing.T) {
 	pane.SetSize(100, 50)
 	mockStdin.buf.Reset() // Clear any initial writes
 
-	// Resize smaller - should NOT send Ctrl+L
+	// Resize smaller - SHOULD send Ctrl+L (any size change triggers redraw)
 	pane.SetSize(80, 50)
-	if containsCtrlL(mockStdin.buf.Bytes()) {
-		t.Error("Ctrl+L should NOT be sent when resizing smaller")
+	if !containsCtrlL(mockStdin.buf.Bytes()) {
+		t.Error("Ctrl+L should be sent when resizing smaller")
 	}
 	mockStdin.buf.Reset()
 
@@ -116,10 +116,20 @@ func TestPaneModel_SetSize_SendsCtrlLOnGrow(t *testing.T) {
 	}
 	mockStdin.buf.Reset()
 
-	// Resize to same width - should NOT send Ctrl+L
-	pane.SetSize(120, 60) // Only height changes
+	// Resize to same vterm dimensions (note: inner width = pane width - 4)
+	// pane width 120 -> inner width 116
+	// pane width 120 -> inner width 116 (same inner width, different height)
+	// But inner height also changes: 50-6=44 -> 60-6=54
+	pane.SetSize(120, 60) // Height changes, so vterm size changes
+	if !containsCtrlL(mockStdin.buf.Bytes()) {
+		t.Error("Ctrl+L should be sent when height changes")
+	}
+	mockStdin.buf.Reset()
+
+	// Same exact size - should NOT send Ctrl+L
+	pane.SetSize(120, 60)
 	if containsCtrlL(mockStdin.buf.Bytes()) {
-		t.Error("Ctrl+L should NOT be sent when only height changes")
+		t.Error("Ctrl+L should NOT be sent when size doesn't change")
 	}
 }
 
@@ -130,4 +140,79 @@ func containsCtrlL(data []byte) bool {
 		}
 	}
 	return false
+}
+
+// TestPaneModel_ResizeCreatesNewVterm verifies that resizing creates a fresh vterm
+// instead of trying to resize in-place. This prevents corruption from output that
+// was generated for the old terminal size being written to the new-sized vterm.
+func TestPaneModel_ResizeCreatesNewVterm(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+
+	// Initial size with some content
+	pane.SetSize(100, 50)
+	pane.WritePTYOutput([]byte("Initial content line 1\r\n"))
+	pane.WritePTYOutput([]byte("Initial content line 2\r\n"))
+
+	// Verify content is present
+	render1 := pane.renderVTerm()
+	if !strings.Contains(render1, "Initial content") {
+		t.Error("Content should be present before resize")
+	}
+
+	// Get a reference to the old vterm
+	oldVterm := pane.vterm
+
+	// Resize - this should create a new vterm
+	pane.SetSize(80, 40)
+
+	// Verify a new vterm was created
+	if pane.vterm == oldVterm {
+		t.Error("Resize should create a new vterm instance")
+	}
+
+	// The new vterm should be empty (fresh)
+	render2 := pane.renderVTerm()
+	if strings.Contains(render2, "Initial content") {
+		t.Error("New vterm should not contain old content")
+	}
+
+	// Writing new content should work at the new size
+	newWidth := 80 - 4 // inner width
+	newLine := strings.Repeat("N", newWidth)
+	pane.WritePTYOutput([]byte(newLine + "\r\n"))
+
+	render3 := pane.renderVTerm()
+	stripped := stripANSI(render3)
+	if !strings.Contains(stripped, strings.Repeat("N", newWidth)) {
+		t.Error("New content should be present at new width")
+	}
+}
+
+// TestPaneModel_ResizeNoChange verifies that setting the same size doesn't
+// create a new vterm unnecessarily.
+func TestPaneModel_ResizeNoChange(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+
+	// Initial size with content
+	pane.SetSize(100, 50)
+	pane.WritePTYOutput([]byte("Important content\r\n"))
+
+	// Get vterm reference
+	oldVterm := pane.vterm
+
+	// Set same size again
+	pane.SetSize(100, 50)
+
+	// Should keep the same vterm
+	if pane.vterm != oldVterm {
+		t.Error("Same size should not create new vterm")
+	}
+
+	// Content should still be there
+	render := pane.renderVTerm()
+	if !strings.Contains(render, "Important content") {
+		t.Error("Content should be preserved when size doesn't change")
+	}
 }
