@@ -258,8 +258,8 @@ func NewMergeDialog(branchName, workstreamID, branchInfo string) DialogModel {
 		Body:         body.String(),
 		WorkstreamID: workstreamID,
 		MenuItems: []string{
-			"Merge into main (merge commit)",
 			"Merge into main (squash)",
+			"Merge into main (merge commit)",
 			"Create Pull Request",
 			"Push branch only",
 			"Cancel",
@@ -706,9 +706,9 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				var action MergeAction
 				switch d.MenuSelection {
 				case 0:
-					action = MergeActionMergeMain
-				case 1:
 					action = MergeActionSquashMain
+				case 1:
+					action = MergeActionMergeMain
 				case 2:
 					action = MergeActionCreatePR
 				case 3:
