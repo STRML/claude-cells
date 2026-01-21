@@ -144,10 +144,10 @@ Click on any pane to focus it and enter input mode. Mouse mode is **enabled by d
 | Action | Description |
 |--------|-------------|
 | **Click** | Focus pane and enter input mode |
-| **Shift+Drag** | Select text (native terminal selection) |
+| **Option+Drag** (macOS) / **Shift+Drag** (Linux) | Select text (native terminal selection) |
 | **Ctrl+B m** | Toggle mouse mode on/off |
 
-When mouse mode is **OFF**, you can drag to select text without holding Shift, but click-to-focus is disabled.
+When mouse mode is **OFF**, you can drag to select text without holding a modifier key, but click-to-focus is disabled.
 
 ## How It Works
 

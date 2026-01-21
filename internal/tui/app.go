@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 
@@ -46,6 +47,15 @@ func SetVersionInfo(version, commit string) {
 	commitHash = commit
 }
 
+// dragModifier returns the key name for bypassing terminal mouse capture.
+// On macOS, Option (Alt) is typically used; on other platforms, Shift is used.
+func dragModifier() string {
+	if runtime.GOOS == "darwin" {
+		return "Option"
+	}
+	return "Shift"
+}
+
 // AppModel is the main application model
 type AppModel struct {
 	ctx            context.Context // App-level context for cancellation
@@ -61,7 +71,7 @@ type AppModel struct {
 	quitting       bool
 	inputMode      bool                 // True when input is being routed to focused pane
 	mouseEnabled   bool                 // True when mouse capture is enabled (click-to-focus)
-	dragHintShown  bool                 // True if we've shown the Shift+drag hint this session
+	dragHintShown  bool                 // True if we've shown the drag modifier hint this session
 	lastEscapeTime time.Time            // For double-escape detection
 	pendingEscape  bool                 // True when first Esc pressed, waiting to see if double-tap
 	toast          string               // Temporary notification message
@@ -377,10 +387,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.MouseMotionMsg:
-		// Detect dragging and show hint about Shift+drag for text selection
+		// Detect dragging and show hint about modifier+drag for text selection
 		if m.mouseEnabled && !m.dragHintShown && msg.Button == tea.MouseLeft {
 			m.dragHintShown = true
-			m.toast = "Tip: Hold Shift while dragging to select text, or Ctrl+B m to toggle mouse mode"
+			m.toast = fmt.Sprintf("Tip: Hold %s while dragging to select text, or Ctrl+B m to toggle mouse mode", dragModifier())
 			m.toastExpiry = time.Now().Add(5 * time.Second) // Longer duration for this tip
 		}
 		return m, nil
@@ -569,7 +579,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.tmuxPrefix = false
 					m.mouseEnabled = !m.mouseEnabled
 					if m.mouseEnabled {
-						m.toast = "Mouse mode ON (click to focus, Shift+drag to select)"
+						m.toast = fmt.Sprintf("Mouse mode ON (click to focus, %s+drag to select)", dragModifier())
 					} else {
 						m.toast = "Mouse mode OFF (drag to select text)"
 					}
@@ -772,7 +782,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.tmuxPrefix = false
 				m.mouseEnabled = !m.mouseEnabled
 				if m.mouseEnabled {
-					m.toast = "Mouse mode ON (click to focus, Shift+drag to select)"
+					m.toast = fmt.Sprintf("Mouse mode ON (click to focus, %s+drag to select)", dragModifier())
 				} else {
 					m.toast = "Mouse mode OFF (drag to select text)"
 				}
@@ -2069,7 +2079,7 @@ func (m AppModel) View() tea.View {
 	v := tea.NewView(view)
 	v.AltScreen = true
 	// Enable mouse mode for click-to-focus panes (toggleable with Ctrl+B m)
-	// Note: Hold Shift while dragging to use native terminal text selection
+	// Note: Hold modifier key (Option on macOS, Shift elsewhere) while dragging for native text selection
 	if m.mouseEnabled {
 		v.MouseMode = tea.MouseModeCellMotion
 	}
