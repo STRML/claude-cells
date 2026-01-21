@@ -3,7 +3,7 @@
 **Claude Code, behind bars.** Each instance runs in its own isolated cell—no conflicts, no permission prompts, no babysitting.
 
 <p align="center">
-  <img src="cc-4-pane.png" alt="Claude Cells running 4 parallel workstreams" width="100%">
+  <img src="Master-half.gif" alt="Claude Cells running parallel workstreams" width="100%">
 </p>
 
 > Other multi-agent tools wrap AI behind heavy custom UIs. We don't wrap Claude Code—**we put it in a cell**.
