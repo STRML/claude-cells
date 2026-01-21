@@ -151,102 +151,26 @@ When mouse mode is **OFF**, you can drag to select text without holding a modifi
 
 ## How It Works
 
-### Workstream Lifecycle
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  1. Create Workstream                                           │
-│     • Generate branch name from prompt (max 5 words)            │
-│     • Create git worktree at /tmp/ccells/worktrees/<branch>     │
-│     • Mount worktree into Docker container                      │
-│     • Start Claude Code with your prompt                        │
-├─────────────────────────────────────────────────────────────────┤
-│  2. Isolation                                                   │
-│     • Each container has its own git worktree                   │
-│     • Host repo stays on its current branch (never changes!)    │
-│     • Claude credentials and skills copied into container       │
-│     • Changes isolated from other workstreams                   │
-├─────────────────────────────────────────────────────────────────┤
-│  3. Pairing Mode (optional)                                     │
-│     • Mutagen syncs files bidirectionally                       │
-│     • Edit locally while Claude works in container              │
-│     • See changes in real-time                                  │
-├─────────────────────────────────────────────────────────────────┤
-│  4. Push & PR                                                   │
-│     • Push branch to origin from the TUI                        │
-│     • Create pull request with one keypress                     │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Git Worktree Isolation
-
-Claude Cells uses **git worktrees** to achieve true isolation without modifying your host repository:
-
-- Each container mounts a **separate worktree** (at `/tmp/ccells/worktrees/<branch>`)
-- Your host repo stays on its current branch - never touched!
-- No `.git/index.lock` conflicts when running multiple containers
-- All worktrees share the same git objects (no disk bloat)
-- Changes are part of the main repo's history (can push, create PRs)
+Each workstream gets its own git worktree and Docker container. Your host repo stays untouched - no branch switching, no lock conflicts. When you press `n`, Claude Cells generates a branch name from your prompt, creates the worktree, and launches Claude Code.
 
 ### Pairing Mode
 
-Pairing mode enables **bidirectional file synchronization** between your local filesystem and a container, allowing you to edit files locally while Claude works in the container.
-
-#### How It Works
-
-1. **Press `p`** on any running workstream to enable pairing
-2. Your local repo **switches to that workstream's branch**
-3. **Mutagen** starts syncing files bidirectionally between your local repo and the container
-4. Edit files in your local IDE - changes appear in the container instantly
-5. Claude's changes in the container sync back to your local filesystem
-6. **Press `p` again** to disable pairing and restore your previous branch
-
-#### Prerequisites
-
-Pairing mode requires [Mutagen](https://mutagen.io/) to be installed:
+Press `p` to enable bidirectional file sync between your local filesystem and a container via [Mutagen](https://mutagen.io/). Edit locally while Claude works in the container.
 
 ```bash
-# macOS
-brew install mutagen-io/mutagen/mutagen
-
-# Linux (via script)
-curl -fsSL https://mutagen.io/install.sh | bash
-
-# Other platforms: https://mutagen.io/documentation/introduction/installation
+# Install Mutagen
+brew install mutagen-io/mutagen/mutagen  # macOS
 ```
-
-If Mutagen is not installed, you'll see a clear error message when trying to enable pairing.
-
-#### Health Monitoring
-
-Pairing mode includes automatic health monitoring:
-
-- **Every 30 seconds**, the sync session health is checked
-- If the sync session is lost (e.g., Mutagen crashed), you'll see a toast notification
-- If there are **sync conflicts**, you'll be notified with the count of conflicting files
-
-#### Important Notes
-
-- **Only one workstream** can be in pairing mode at a time
-- Switching pairing to a different workstream automatically disables the previous one
-- **Local uncommitted changes are stashed** when enabling pairing (you'll be reminded to `git stash pop` when disabling)
-- The `.git` directory is excluded from sync to prevent corruption
 
 ### Session Persistence
 
-When you quit ccells (`q` or `Ctrl+c`):
-1. All containers are **paused** (not stopped)
-2. State is saved to `~/.claude-cells/state/<repo-id>/` (auto-saved continuously during operation)
-3. Claude sessions are persisted to survive container rebuilds
-4. PTY sessions are closed gracefully
+Quit with `q` or `Ctrl+c` - containers pause and state auto-saves. Restart ccells to resume exactly where you left off.
 
-When you restart ccells:
-1. Containers are **resumed**
-2. PTY sessions are reconnected
-3. Claude Code sessions are resumed with `--resume`
-4. You're back exactly where you left off
+### Container Security
 
-**Auto-save**: State is automatically saved whenever workstreams are added/removed, focus changes, or layout changes. Even if you force-quit, the state file will be up-to-date.
+Containers run with hardened security defaults (capability drops, no-new-privileges, process limits). If a container fails to start, settings auto-relax to find a working configuration.
+
+See **[docs/CONTAINER-SECURITY.md](docs/CONTAINER-SECURITY.md)** for configuration options and security tiers.
 
 ## Architecture
 
@@ -293,50 +217,12 @@ Claude Cells stores data in:
 
 ## Troubleshooting
 
-### Container fails to start
-
-The base image is built automatically on first run. If you need to manually rebuild it:
-```bash
-docker build -t ccells-base -f configs/base.Dockerfile .
-```
-
-### Claude Code not responding
-
-Press `l` to view container logs. The startup process includes:
-1. Container creation
-2. Worktree creation
-3. Claude Code initialization
-
-If startup times out (default: 60s), check your Docker resources.
-
-### Pairing mode not working
-
-**"mutagen not installed" error:**
-
-Ensure Mutagen is installed and in your PATH:
-```bash
-# macOS
-brew install mutagen-io/mutagen/mutagen
-
-# Verify installation
-mutagen version
-
-# Other platforms: https://mutagen.io/documentation/introduction/installation
-```
-
-**Sync session lost:**
-
-If you see "sync session lost" notifications:
-1. Check if Mutagen daemon is running: `mutagen daemon status`
-2. Start daemon if needed: `mutagen daemon start`
-3. Disable and re-enable pairing mode
-
-**Sync conflicts:**
-
-If you see conflict notifications:
-1. Check conflict details: `mutagen sync list`
-2. Resolve conflicts manually in your local editor
-3. The sync will automatically resume once conflicts are resolved
+| Issue | Solution |
+|-------|----------|
+| Container fails to start | Rebuild image: `docker build -t ccells-base -f configs/base.Dockerfile .` |
+| Claude Code not responding | Press `l` for logs; check Docker resources if startup times out |
+| Pairing mode not working | Ensure Mutagen is installed: `mutagen version` |
+| Sync conflicts | Check `mutagen sync list`, resolve in local editor |
 
 ## Limitations
 
