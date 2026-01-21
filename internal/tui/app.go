@@ -210,6 +210,20 @@ func autoContinueCmd(workstreamID string) tea.Cmd {
 	})
 }
 
+// autoPressEnterMsg is sent when we need to auto-press enter for a workstream
+// that started with "continue" as its prompt
+type autoPressEnterMsg struct {
+	WorkstreamID string
+}
+
+// autoPressEnterCmd returns a command that sends an auto-press-enter message after a short delay
+// The delay gives Claude time to fully initialize before we send the enter key
+func autoPressEnterCmd(workstreamID string) tea.Cmd {
+	return tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
+		return autoPressEnterMsg{WorkstreamID: workstreamID}
+	})
+}
+
 // spinnerTickCmd returns a command that sends a spinner tick after a delay
 func spinnerTickCmd() tea.Cmd {
 	return tea.Tick(250*time.Millisecond, func(t time.Time) tea.Msg {
@@ -1438,6 +1452,9 @@ Scroll Mode:
 						if ws.WasInterrupted {
 							ws.WasInterrupted = false // Clear flag so we don't continue again
 							cmds = append(cmds, autoContinueCmd(ws.ID))
+						} else if strings.HasPrefix(strings.ToLower(strings.TrimSpace(ws.Prompt)), "continue") {
+							// Auto-press enter for prompts that start with "continue"
+							cmds = append(cmds, autoPressEnterCmd(ws.ID))
 						}
 						if len(cmds) > 0 {
 							return m, tea.Batch(cmds...)
@@ -1484,6 +1501,19 @@ Scroll Mode:
 				if m.panes[i].HasPTY() {
 					// Send "continue" followed by enter to resume the interrupted task
 					_ = m.panes[i].SendToPTY("continue\n")
+				}
+				break
+			}
+		}
+		return m, nil
+
+	case autoPressEnterMsg:
+		// Auto-press enter for workstreams that started with "continue" as prompt
+		for i := range m.panes {
+			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				if m.panes[i].HasPTY() {
+					// Just send enter to confirm the continue prompt
+					_ = m.panes[i].SendToPTY("\n")
 				}
 				break
 			}

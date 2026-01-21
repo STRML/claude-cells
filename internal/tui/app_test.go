@@ -2820,3 +2820,87 @@ func TestAppModel_Paste_NoPTY_Ignored(t *testing.T) {
 
 	// No crash = success
 }
+
+func TestAutoPressEnterCmd(t *testing.T) {
+	// Test that autoPressEnterCmd creates a command that returns autoPressEnterMsg
+	cmd := autoPressEnterCmd("test-ws-123")
+	if cmd == nil {
+		t.Fatal("autoPressEnterCmd should return a non-nil command")
+	}
+
+	// The command is a tea.Tick, so we can't easily test the message it produces
+	// without waiting for the tick. This test just verifies the function doesn't panic.
+}
+
+func TestAutoPressEnterMsg(t *testing.T) {
+	// Test the autoPressEnterMsg struct
+	msg := autoPressEnterMsg{WorkstreamID: "test-ws-456"}
+	if msg.WorkstreamID != "test-ws-456" {
+		t.Errorf("WorkstreamID = %q, want %q", msg.WorkstreamID, "test-ws-456")
+	}
+}
+
+func TestAppModel_Update_AutoPressEnterMsg(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	wsID := app.panes[0].Workstream().ID
+
+	// Send autoPressEnterMsg - should not panic (no PTY attached)
+	model, _ = app.Update(autoPressEnterMsg{WorkstreamID: wsID})
+	_ = model.(AppModel)
+
+	// No crash = success
+}
+
+func TestAppModel_Update_AutoPressEnterMsg_WrongWorkstream(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Send autoPressEnterMsg with wrong workstream ID - should be ignored
+	model, _ = app.Update(autoPressEnterMsg{WorkstreamID: "nonexistent-ws"})
+	_ = model.(AppModel)
+
+	// No crash = success
+}
+
+func TestPromptStartsWithContinue(t *testing.T) {
+	// Test various prompts that should/shouldn't trigger auto-press-enter
+	tests := []struct {
+		name        string
+		prompt      string
+		shouldMatch bool
+	}{
+		{"exact continue", "continue", true},
+		{"continue with space", "continue ", true},
+		{"continue with text", "continue working on the feature", true},
+		{"Continue uppercase", "Continue", true},
+		{"CONTINUE all caps", "CONTINUE", true},
+		{"continue with leading space", "  continue", true},
+		{"continued is different", "continued", true}, // starts with "continue"
+		{"other text", "something else", false},
+		{"empty prompt", "", false},
+		{"contains continue", "please continue", false}, // doesn't start with
+		{"cont prefix", "cont", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// This mirrors the logic in app.go
+			matches := strings.HasPrefix(strings.ToLower(strings.TrimSpace(tt.prompt)), "continue")
+			if matches != tt.shouldMatch {
+				t.Errorf("prompt %q: got %v, want %v", tt.prompt, matches, tt.shouldMatch)
+			}
+		})
+	}
+}
