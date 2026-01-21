@@ -120,6 +120,68 @@ func TestGit_HasUncommittedChanges(t *testing.T) {
 	}
 }
 
+func TestGit_GetUntrackedFiles(t *testing.T) {
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// Initially no untracked files
+	files, err := g.GetUntrackedFiles(ctx)
+	if err != nil {
+		t.Fatalf("GetUntrackedFiles() error = %v", err)
+	}
+	if len(files) != 0 {
+		t.Errorf("GetUntrackedFiles() = %v, want empty for clean repo", files)
+	}
+
+	// Create untracked files
+	_ = os.WriteFile(filepath.Join(dir, "untracked1.txt"), []byte("test1"), 0644)
+	_ = os.WriteFile(filepath.Join(dir, "untracked2.txt"), []byte("test2"), 0644)
+
+	files, err = g.GetUntrackedFiles(ctx)
+	if err != nil {
+		t.Fatalf("GetUntrackedFiles() error = %v", err)
+	}
+	if len(files) != 2 {
+		t.Errorf("GetUntrackedFiles() returned %d files, want 2", len(files))
+	}
+
+	// Verify the files are listed
+	fileMap := make(map[string]bool)
+	for _, f := range files {
+		fileMap[f] = true
+	}
+	if !fileMap["untracked1.txt"] || !fileMap["untracked2.txt"] {
+		t.Errorf("GetUntrackedFiles() = %v, missing expected files", files)
+	}
+
+	// Create a nested untracked file
+	_ = os.MkdirAll(filepath.Join(dir, "subdir"), 0755)
+	_ = os.WriteFile(filepath.Join(dir, "subdir", "nested.txt"), []byte("nested"), 0644)
+
+	files, err = g.GetUntrackedFiles(ctx)
+	if err != nil {
+		t.Fatalf("GetUntrackedFiles() error = %v", err)
+	}
+	if len(files) != 3 {
+		t.Errorf("GetUntrackedFiles() returned %d files after nested add, want 3", len(files))
+	}
+
+	// Verify nested file is included
+	foundNested := false
+	for _, f := range files {
+		if strings.Contains(f, "subdir") && strings.Contains(f, "nested.txt") {
+			foundNested = true
+			break
+		}
+	}
+	if !foundNested {
+		t.Errorf("GetUntrackedFiles() = %v, missing nested file", files)
+	}
+}
+
 func TestGit_Stash(t *testing.T) {
 	dir := setupTestRepo(t)
 	defer os.RemoveAll(dir)

@@ -31,6 +31,7 @@ const (
 	DialogMergeConflict        // Merge failed due to conflicts - offer rebase
 	DialogFirstRunIntroduction // First-run introduction modal
 	DialogQuitConfirm          // Confirm quit with y/n
+	DialogCopyUntrackedFiles   // Prompt to copy untracked files to worktree
 )
 
 // DialogModel represents a modal dialog
@@ -207,6 +208,15 @@ const (
 	BranchConflictCancel      BranchConflictAction = "cancel"
 )
 
+// CopyUntrackedFilesAction represents a copy untracked files action
+type CopyUntrackedFilesAction string
+
+const (
+	CopyUntrackedFilesYes    CopyUntrackedFilesAction = "yes"
+	CopyUntrackedFilesNo     CopyUntrackedFilesAction = "no"
+	CopyUntrackedFilesCancel CopyUntrackedFilesAction = "cancel"
+)
+
 // NewBranchConflictDialog creates a dialog for handling branch conflicts
 func NewBranchConflictDialog(branchName, workstreamID, branchInfo string) DialogModel {
 	body := fmt.Sprintf("Branch '%s' already exists.", branchName)
@@ -363,6 +373,36 @@ func NewQuitConfirmDialog() DialogModel {
 			"No",
 		},
 		MenuSelection: 1, // Default to "No" for safety
+	}
+}
+
+// NewCopyUntrackedFilesDialog creates a dialog asking whether to copy untracked files to the worktree
+func NewCopyUntrackedFilesDialog(workstreamID string, untrackedFiles []string) DialogModel {
+	// Show up to 5 files, then "... and N more"
+	var fileList string
+	if len(untrackedFiles) <= 5 {
+		for _, f := range untrackedFiles {
+			fileList += fmt.Sprintf("  • %s\n", f)
+		}
+	} else {
+		for _, f := range untrackedFiles[:5] {
+			fileList += fmt.Sprintf("  • %s\n", f)
+		}
+		fileList += fmt.Sprintf("  ... and %d more\n", len(untrackedFiles)-5)
+	}
+
+	body := fmt.Sprintf("Found %d untracked file(s) in the repository:\n\n%s\nCopy these files to the new worktree?", len(untrackedFiles), fileList)
+
+	return DialogModel{
+		Type:         DialogCopyUntrackedFiles,
+		Title:        "Copy Untracked Files?",
+		Body:         body,
+		WorkstreamID: workstreamID,
+		MenuItems: []string{
+			"Yes, copy untracked files",
+			"No, start with clean worktree",
+		},
+		MenuSelection: 0,
 	}
 }
 
@@ -750,6 +790,21 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				}
 			}
 
+			if d.Type == DialogCopyUntrackedFiles {
+				var action CopyUntrackedFilesAction
+				switch d.MenuSelection {
+				case 0:
+					action = CopyUntrackedFilesYes
+				case 1:
+					action = CopyUntrackedFilesNo
+				default:
+					action = CopyUntrackedFilesCancel
+				}
+				return d, func() tea.Msg {
+					return CopyUntrackedFilesConfirmMsg{Action: action, WorkstreamID: d.WorkstreamID}
+				}
+			}
+
 			if d.Type == DialogQuitConfirm {
 				// Selection 0 = "Yes", 1 = "No"
 				if d.MenuSelection == 1 {
@@ -808,7 +863,7 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				return d, nil
 			}
 			// Only handle for menu dialogs, otherwise pass to input
-			if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogQuitConfirm {
+			if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogQuitConfirm || d.Type == DialogCopyUntrackedFiles {
 				if d.MenuSelection > 0 {
 					d.MenuSelection--
 				}
@@ -823,7 +878,7 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				return d, nil
 			}
 			// Only handle for menu dialogs, otherwise pass to input
-			if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogQuitConfirm {
+			if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogQuitConfirm || d.Type == DialogCopyUntrackedFiles {
 				if d.MenuSelection < len(d.MenuItems)-1 {
 					d.MenuSelection++
 				}
@@ -871,7 +926,7 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 	}
 
 	// For menu-style, log, progress, resource, and introduction dialogs, don't pass keys to input
-	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogQuitConfirm || d.Type == DialogLog || d.Type == DialogProgress || d.Type == DialogResourceUsage || d.Type == DialogFirstRunIntroduction {
+	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogQuitConfirm || d.Type == DialogCopyUntrackedFiles || d.Type == DialogLog || d.Type == DialogProgress || d.Type == DialogResourceUsage || d.Type == DialogFirstRunIntroduction {
 		return d, nil
 	}
 
@@ -1006,7 +1061,7 @@ func (d DialogModel) View() string {
 	content.WriteString("\n\n")
 
 	// Menu-style dialogs render a selection list
-	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogQuitConfirm {
+	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogQuitConfirm || d.Type == DialogCopyUntrackedFiles {
 		for i, item := range d.MenuItems {
 			if i == d.MenuSelection {
 				content.WriteString("→ ")
@@ -1101,7 +1156,7 @@ func (d DialogModel) ViewInPane() string {
 		} else {
 			content.WriteString(KeyHint("Enter", " close") + "  " + KeyHintStyle.Render("[Esc] Cancel"))
 		}
-	} else if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogQuitConfirm {
+	} else if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogQuitConfirm || d.Type == DialogCopyUntrackedFiles {
 		// Menu items (for menu-style dialogs like merge) - same styling as View()
 		for i, item := range d.MenuItems {
 			if i == d.MenuSelection {
@@ -1188,4 +1243,10 @@ type ResourceStatsToggleMsg struct {
 // ResourceStatsRefreshMsg is sent when the resource dialog needs to refresh stats
 type ResourceStatsRefreshMsg struct {
 	IsGlobal bool
+}
+
+// CopyUntrackedFilesConfirmMsg is sent when the copy untracked files dialog is confirmed
+type CopyUntrackedFilesConfirmMsg struct {
+	Action       CopyUntrackedFilesAction
+	WorkstreamID string
 }

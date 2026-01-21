@@ -1410,3 +1410,147 @@ func TestQuitConfirmDialog_View(t *testing.T) {
 		t.Error("View should contain 'n' key hint")
 	}
 }
+
+func TestNewCopyUntrackedFilesDialog(t *testing.T) {
+	files := []string{"file1.txt", "file2.txt", "dir/file3.txt"}
+	d := NewCopyUntrackedFilesDialog("ws-123", files)
+
+	if d.Type != DialogCopyUntrackedFiles {
+		t.Error("Type should be DialogCopyUntrackedFiles")
+	}
+	if !strings.Contains(d.Title, "Untracked") {
+		t.Error("Title should contain 'Untracked'")
+	}
+	if d.WorkstreamID != "ws-123" {
+		t.Errorf("WorkstreamID should be 'ws-123', got %q", d.WorkstreamID)
+	}
+	if len(d.MenuItems) != 2 {
+		t.Errorf("Should have 2 menu items, got %d", len(d.MenuItems))
+	}
+	if d.MenuSelection != 0 {
+		t.Error("Initial selection should be 0 (Yes)")
+	}
+	// Check that files are listed in body
+	if !strings.Contains(d.Body, "file1.txt") {
+		t.Error("Body should contain 'file1.txt'")
+	}
+	if !strings.Contains(d.Body, "3 untracked") {
+		t.Error("Body should contain file count")
+	}
+}
+
+func TestCopyUntrackedFilesDialog_ManyFiles(t *testing.T) {
+	// More than 5 files should show "... and N more"
+	files := []string{"f1.txt", "f2.txt", "f3.txt", "f4.txt", "f5.txt", "f6.txt", "f7.txt"}
+	d := NewCopyUntrackedFilesDialog("ws-123", files)
+
+	if !strings.Contains(d.Body, "... and 2 more") {
+		t.Error("Body should show '... and 2 more' for 7 files (5 shown + 2 more)")
+	}
+}
+
+func TestCopyUntrackedFilesDialog_Navigation(t *testing.T) {
+	d := NewCopyUntrackedFilesDialog("ws-123", []string{"file.txt"})
+
+	// Initial selection should be 0 (Yes)
+	if d.MenuSelection != 0 {
+		t.Errorf("Initial selection should be 0, got %d", d.MenuSelection)
+	}
+
+	// Navigate down to No
+	d, _ = d.Update(dSpecialKey(tea.KeyDown))
+	if d.MenuSelection != 1 {
+		t.Errorf("Selection should be 1 after down, got %d", d.MenuSelection)
+	}
+
+	// Navigate down at bottom - should stay at 1
+	d, _ = d.Update(dSpecialKey(tea.KeyDown))
+	if d.MenuSelection != 1 {
+		t.Errorf("Selection should stay at 1 at bottom, got %d", d.MenuSelection)
+	}
+
+	// Navigate up to Yes
+	d, _ = d.Update(dSpecialKey(tea.KeyUp))
+	if d.MenuSelection != 0 {
+		t.Errorf("Selection should be 0 after up, got %d", d.MenuSelection)
+	}
+}
+
+func TestCopyUntrackedFilesDialog_VimNavigation(t *testing.T) {
+	d := NewCopyUntrackedFilesDialog("ws-123", []string{"file.txt"})
+
+	// Navigate with j (down)
+	d, _ = d.Update(dKeyPress('j'))
+	if d.MenuSelection != 1 {
+		t.Errorf("Selection should be 1 after 'j', got %d", d.MenuSelection)
+	}
+
+	// Navigate with k (up)
+	d, _ = d.Update(dKeyPress('k'))
+	if d.MenuSelection != 0 {
+		t.Errorf("Selection should be 0 after 'k', got %d", d.MenuSelection)
+	}
+}
+
+func TestCopyUntrackedFilesDialog_EnterYes(t *testing.T) {
+	d := NewCopyUntrackedFilesDialog("ws-123", []string{"file.txt"})
+	// Selection 0 = Yes, copy untracked files
+	d.MenuSelection = 0
+	d, cmd := d.Update(dSpecialKey(tea.KeyEnter))
+
+	if cmd == nil {
+		t.Fatal("Should return a command on enter")
+	}
+
+	msg := cmd()
+	confirmMsg, ok := msg.(CopyUntrackedFilesConfirmMsg)
+	if !ok {
+		t.Fatalf("Should return CopyUntrackedFilesConfirmMsg, got %T", msg)
+	}
+	if confirmMsg.Action != CopyUntrackedFilesYes {
+		t.Errorf("Action should be CopyUntrackedFilesYes, got %v", confirmMsg.Action)
+	}
+	if confirmMsg.WorkstreamID != "ws-123" {
+		t.Errorf("WorkstreamID should be 'ws-123', got %q", confirmMsg.WorkstreamID)
+	}
+}
+
+func TestCopyUntrackedFilesDialog_EnterNo(t *testing.T) {
+	d := NewCopyUntrackedFilesDialog("ws-123", []string{"file.txt"})
+	// Selection 1 = No, start with clean worktree
+	d.MenuSelection = 1
+	d, cmd := d.Update(dSpecialKey(tea.KeyEnter))
+
+	if cmd == nil {
+		t.Fatal("Should return a command on enter")
+	}
+
+	msg := cmd()
+	confirmMsg, ok := msg.(CopyUntrackedFilesConfirmMsg)
+	if !ok {
+		t.Fatalf("Should return CopyUntrackedFilesConfirmMsg, got %T", msg)
+	}
+	if confirmMsg.Action != CopyUntrackedFilesNo {
+		t.Errorf("Action should be CopyUntrackedFilesNo, got %v", confirmMsg.Action)
+	}
+}
+
+func TestCopyUntrackedFilesDialog_View(t *testing.T) {
+	d := NewCopyUntrackedFilesDialog("ws-123", []string{"file1.txt", "file2.txt"})
+	d.SetSize(60, 18)
+
+	view := d.View()
+
+	if !strings.Contains(view, "Untracked") {
+		t.Error("View should contain 'Untracked'")
+	}
+	if !strings.Contains(view, "Yes") {
+		t.Error("View should contain 'Yes' menu item")
+	}
+	if !strings.Contains(view, "No") {
+		t.Error("View should contain 'No' menu item")
+	}
+	if !strings.Contains(view, "→") {
+		t.Error("View should contain selection indicator")
+	}
+}

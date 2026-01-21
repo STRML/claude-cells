@@ -114,6 +114,12 @@ type BranchConflictMsg struct {
 	BranchInfo   string // Summary of commits and diff on the existing branch
 }
 
+// UntrackedFilesPromptMsg is sent when untracked files are detected in the repo.
+type UntrackedFilesPromptMsg struct {
+	WorkstreamID   string
+	UntrackedFiles []string
+}
+
 // TitleGeneratedMsg is sent when a workstream title is generated via Claude CLI.
 type TitleGeneratedMsg struct {
 	WorkstreamID string
@@ -207,12 +213,46 @@ Task: %s`, ws.Prompt)
 // StartContainerCmd returns a command that creates and starts a container.
 // It first creates and checks out a feature branch for the workstream.
 func StartContainerCmd(ws *workstream.Workstream) tea.Cmd {
-	return startContainerWithOptions(ws, false)
+	return startContainerWithFullOptions(ws, false, false)
+}
+
+// CheckUntrackedFilesCmd checks for untracked files in the repo before starting a container.
+// If untracked files exist, returns UntrackedFilesPromptMsg. Otherwise returns StartContainerCmd result.
+func CheckUntrackedFilesCmd(ws *workstream.Workstream) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+
+		// Get current working directory as repo path
+		repoPath, err := os.Getwd()
+		if err != nil {
+			// On error, proceed without copying (fail gracefully)
+			return startContainerWithFullOptions(ws, false, false)()
+		}
+
+		gitRepo := GitClientFactory(repoPath)
+		untrackedFiles, err := gitRepo.GetUntrackedFiles(ctx)
+		if err != nil || len(untrackedFiles) == 0 {
+			// No untracked files or error checking - proceed normally
+			return startContainerWithFullOptions(ws, false, false)()
+		}
+
+		// Untracked files found - prompt user
+		return UntrackedFilesPromptMsg{
+			WorkstreamID:   ws.ID,
+			UntrackedFiles: untrackedFiles,
+		}
+	}
+}
+
+// StartContainerWithCopyUntrackedFilesCmd starts container and copies untracked files to the worktree.
+func StartContainerWithCopyUntrackedFilesCmd(ws *workstream.Workstream, copyFiles bool) tea.Cmd {
+	return startContainerWithFullOptions(ws, false, copyFiles)
 }
 
 // StartContainerWithExistingBranchCmd starts a container using an existing branch.
 func StartContainerWithExistingBranchCmd(ws *workstream.Workstream) tea.Cmd {
-	return startContainerWithOptions(ws, true)
+	return startContainerWithFullOptions(ws, true, false)
 }
 
 // StartContainerWithNewBranchCmd creates a new branch with a unique name and starts the container.
@@ -265,7 +305,7 @@ func StartContainerWithNewBranchCmd(ws *workstream.Workstream, existingBranches 
 		ws.BranchName = newName
 
 		// Now start with the new branch name
-		return startContainerWithOptions(ws, false)()
+		return startContainerWithFullOptions(ws, false, false)()
 	}
 }
 
@@ -298,7 +338,7 @@ func DeleteAndRestartContainerCmd(ws *workstream.Workstream) tea.Cmd {
 		}
 
 		// Now start with a fresh branch (false = create new branch)
-		return startContainerWithOptions(ws, false)()
+		return startContainerWithFullOptions(ws, false, false)()
 	}
 }
 
@@ -491,6 +531,44 @@ func resolveWorktreePath(ws *workstream.Workstream) string {
 	return ""
 }
 
+// copyUntrackedFilesToWorktree copies untracked files from the source repo to the worktree.
+// It preserves directory structure and creates parent directories as needed.
+func copyUntrackedFilesToWorktree(srcRepo, dstWorktree string, files []string) error {
+	var lastErr error
+	for _, relPath := range files {
+		srcPath := filepath.Join(srcRepo, relPath)
+		dstPath := filepath.Join(dstWorktree, relPath)
+
+		// Create parent directory if it doesn't exist
+		dstDir := filepath.Dir(dstPath)
+		if err := os.MkdirAll(dstDir, 0755); err != nil {
+			lastErr = fmt.Errorf("failed to create directory %s: %w", dstDir, err)
+			continue
+		}
+
+		// Read source file
+		data, err := os.ReadFile(srcPath)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to read %s: %w", relPath, err)
+			continue
+		}
+
+		// Get source file info for permissions
+		srcInfo, err := os.Stat(srcPath)
+		if err != nil {
+			lastErr = fmt.Errorf("failed to stat %s: %w", relPath, err)
+			continue
+		}
+
+		// Write to destination with same permissions
+		if err := os.WriteFile(dstPath, data, srcInfo.Mode()); err != nil {
+			lastErr = fmt.Errorf("failed to write %s: %w", relPath, err)
+			continue
+		}
+	}
+	return lastErr
+}
+
 // cleanupWorktree removes a worktree and its directory.
 // Errors are logged but not returned since cleanup is best-effort.
 func cleanupWorktree(ctx context.Context, gitRepo git.GitClient, branchName string) {
@@ -521,9 +599,10 @@ func pruneEmptyBranches(ctx context.Context, g git.GitClient, branches []string)
 	return pruned
 }
 
-// startContainerWithOptions is the internal implementation for starting containers.
+// startContainerWithFullOptions is the internal implementation for starting containers.
 // It uses git worktrees to avoid modifying the host repo's checked out branch.
-func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool) tea.Cmd {
+// If copyUntrackedFiles is true, untracked files from the host repo are copied to the worktree.
+func startContainerWithFullOptions(ws *workstream.Workstream, useExistingBranch bool, copyUntrackedFiles bool) tea.Cmd {
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 		defer cancel()
@@ -612,6 +691,17 @@ func startContainerWithOptions(ws *workstream.Workstream, useExistingBranch bool
 
 		// Store worktree path in workstream for later cleanup
 		ws.WorktreePath = worktreePath
+
+		// Copy untracked files to worktree if requested
+		if copyUntrackedFiles && !useExistingBranch {
+			untrackedFiles, err := gitRepo.GetUntrackedFiles(ctx)
+			if err == nil && len(untrackedFiles) > 0 {
+				if copyErr := copyUntrackedFilesToWorktree(repoPath, worktreePath, untrackedFiles); copyErr != nil {
+					// Log warning but don't fail - the container can still work
+					LogWarn("Failed to copy some untracked files: %v", copyErr)
+				}
+			}
+		}
 
 		// Create Docker client
 		dockerClient, err := docker.NewClient()

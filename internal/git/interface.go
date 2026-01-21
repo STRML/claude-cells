@@ -22,6 +22,7 @@ type GitClient interface {
 
 	// Working directory operations
 	HasUncommittedChanges(ctx context.Context) (bool, error)
+	GetUntrackedFiles(ctx context.Context) ([]string, error)
 	Stash(ctx context.Context) error
 	StashPop(ctx context.Context) error
 

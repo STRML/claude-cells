@@ -13,14 +13,15 @@ type MockGitClient struct {
 	mu sync.Mutex
 
 	// Internal state
-	currentBranch string
-	branches      map[string]bool
-	worktrees     map[string]string // path -> branch
-	hasChanges    bool
-	stashed       bool
-	baseBranch    string
-	repoID        string
-	remoteURL     string
+	currentBranch  string
+	branches       map[string]bool
+	worktrees      map[string]string // path -> branch
+	hasChanges     bool
+	untrackedFiles []string
+	stashed        bool
+	baseBranch     string
+	repoID         string
+	remoteURL      string
 
 	// Configurable function fields - set these to override default behavior
 	CurrentBranchFn              func(ctx context.Context) (string, error)
@@ -37,6 +38,7 @@ type MockGitClient struct {
 	GetBranchInfoFn              func(ctx context.Context, branchName string) (string, error)
 	GetBranchCommitLogsFn        func(ctx context.Context, branchName string) (string, error)
 	HasUncommittedChangesFn      func(ctx context.Context) (bool, error)
+	GetUntrackedFilesFn          func(ctx context.Context) ([]string, error)
 	StashFn                      func(ctx context.Context) error
 	StashPopFn                   func(ctx context.Context) error
 	PushFn                       func(ctx context.Context, branch string) error
@@ -89,6 +91,13 @@ func (m *MockGitClient) SetHasUncommittedChanges(hasChanges bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.hasChanges = hasChanges
+}
+
+// SetUntrackedFiles sets the list of untracked files to return.
+func (m *MockGitClient) SetUntrackedFiles(files []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.untrackedFiles = files
 }
 
 // SetBaseBranch sets the base branch (main/master).
@@ -327,6 +336,18 @@ func (m *MockGitClient) HasUncommittedChanges(ctx context.Context) (bool, error)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.hasChanges, nil
+}
+
+func (m *MockGitClient) GetUntrackedFiles(ctx context.Context) ([]string, error) {
+	if m.Err != nil {
+		return nil, m.Err
+	}
+	if m.GetUntrackedFilesFn != nil {
+		return m.GetUntrackedFilesFn(ctx)
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.untrackedFiles, nil
 }
 
 func (m *MockGitClient) Stash(ctx context.Context) error {

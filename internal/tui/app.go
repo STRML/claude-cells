@@ -1233,6 +1233,23 @@ Scroll Mode:
 		}
 		return m, nil
 
+	case UntrackedFilesPromptMsg:
+		// Untracked files detected - show dialog to ask if user wants to copy them
+		for i := range m.panes {
+			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				dialog := NewCopyUntrackedFilesDialog(msg.WorkstreamID, msg.UntrackedFiles)
+				// Adjust dialog height based on number of files shown
+				height := 15
+				if len(msg.UntrackedFiles) > 3 {
+					height = 18
+				}
+				dialog.SetSize(60, height)
+				m.dialog = &dialog
+				break
+			}
+		}
+		return m, nil
+
 	case TitleGeneratedMsg:
 		// Title generated via Claude CLI - update workstream and start container immediately
 		for i := range m.panes {
@@ -1252,7 +1269,7 @@ Scroll Mode:
 				// Set the title
 				ws.SetTitle(title)
 
-				// If pane is summarizing, derive branch name and start container immediately
+				// If pane is summarizing, derive branch name and check for untracked files
 				if m.panes[i].IsSummarizing() {
 					// Collect existing branch names for uniqueness
 					var existingBranches []string
@@ -1268,11 +1285,11 @@ Scroll Mode:
 					m.panes[i].SetSummarizeTitle(title)
 					m.panes[i].StartSummarizeFade()
 
-					// Start container immediately (don't wait for animation)
+					// Check for untracked files before starting container
 					m.panes[i].SetInitializing(true)
-					m.panes[i].SetInitStatus("Starting container...")
+					m.panes[i].SetInitStatus("Checking for untracked files...")
 
-					return m, StartContainerCmd(ws)
+					return m, CheckUntrackedFilesCmd(ws)
 				}
 				break
 			}
@@ -1351,6 +1368,23 @@ Scroll Mode:
 					return m, DeleteAndRestartContainerCmd(ws)
 				}
 				break
+			}
+		}
+		return m, nil
+
+	case CopyUntrackedFilesConfirmMsg:
+		m.dialog = nil
+		for i := range m.panes {
+			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				ws := m.panes[i].Workstream()
+				copyFiles := msg.Action == CopyUntrackedFilesYes
+				if copyFiles {
+					m.panes[i].AppendOutput("Starting container with untracked files...\n")
+				} else {
+					m.panes[i].AppendOutput("Starting container with clean worktree...\n")
+				}
+				m.panes[i].SetInitStatus("Starting container...")
+				return m, StartContainerWithCopyUntrackedFilesCmd(ws, copyFiles)
 			}
 		}
 		return m, nil

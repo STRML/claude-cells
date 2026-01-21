@@ -486,6 +486,27 @@ func (g *Git) GetBranchCommitLogs(ctx context.Context, branchName string) (strin
 	return strings.TrimSpace(out), nil
 }
 
+// GetUntrackedFiles returns a list of untracked files in the repository.
+// These are files that are not ignored and not added to the index.
+func (g *Git) GetUntrackedFiles(ctx context.Context) ([]string, error) {
+	// Use --others to list untracked files, --exclude-standard to respect .gitignore
+	out, err := g.run(ctx, "ls-files", "--others", "--exclude-standard")
+	if err != nil {
+		return nil, err
+	}
+	if out == "" {
+		return nil, nil
+	}
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	var files []string
+	for _, line := range lines {
+		if line != "" {
+			files = append(files, line)
+		}
+	}
+	return files, nil
+}
+
 // RepoID returns a stable identifier for the repository (the first commit hash).
 // This ID is unique to the repository and doesn't change regardless of where it's cloned.
 func (g *Git) RepoID(ctx context.Context) (string, error) {

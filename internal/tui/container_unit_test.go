@@ -2,6 +2,8 @@ package tui
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/STRML/claude-cells/internal/workstream"
@@ -747,5 +749,144 @@ func BenchmarkGetWorktreePath(b *testing.B) {
 	branchName := "feature/add-some-feature"
 	for i := 0; i < b.N; i++ {
 		getWorktreePath(branchName)
+	}
+}
+
+func TestUntrackedFilesPromptMsg(t *testing.T) {
+	msg := UntrackedFilesPromptMsg{
+		WorkstreamID:   "ws-1",
+		UntrackedFiles: []string{"file1.txt", "dir/file2.txt"},
+	}
+
+	if msg.WorkstreamID != "ws-1" {
+		t.Errorf("WorkstreamID = %q, want %q", msg.WorkstreamID, "ws-1")
+	}
+	if len(msg.UntrackedFiles) != 2 {
+		t.Errorf("UntrackedFiles length = %d, want 2", len(msg.UntrackedFiles))
+	}
+	if msg.UntrackedFiles[0] != "file1.txt" {
+		t.Errorf("UntrackedFiles[0] = %q, want %q", msg.UntrackedFiles[0], "file1.txt")
+	}
+	if msg.UntrackedFiles[1] != "dir/file2.txt" {
+		t.Errorf("UntrackedFiles[1] = %q, want %q", msg.UntrackedFiles[1], "dir/file2.txt")
+	}
+}
+
+func TestCopyUntrackedFilesToWorktree(t *testing.T) {
+	// Create temp source directory
+	srcDir, err := os.MkdirTemp("", "copy-test-src-*")
+	if err != nil {
+		t.Fatalf("Failed to create source temp dir: %v", err)
+	}
+	defer os.RemoveAll(srcDir)
+
+	// Create temp destination directory
+	dstDir, err := os.MkdirTemp("", "copy-test-dst-*")
+	if err != nil {
+		t.Fatalf("Failed to create dest temp dir: %v", err)
+	}
+	defer os.RemoveAll(dstDir)
+
+	// Create test files in source
+	testContent := []byte("test content")
+	nestedContent := []byte("nested content")
+
+	// Create a simple file
+	if err := os.WriteFile(filepath.Join(srcDir, "simple.txt"), testContent, 0644); err != nil {
+		t.Fatalf("Failed to create simple.txt: %v", err)
+	}
+
+	// Create a nested file
+	nestedDir := filepath.Join(srcDir, "subdir", "deep")
+	if err := os.MkdirAll(nestedDir, 0755); err != nil {
+		t.Fatalf("Failed to create nested directory: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(nestedDir, "nested.txt"), nestedContent, 0755); err != nil {
+		t.Fatalf("Failed to create nested.txt: %v", err)
+	}
+
+	// Files to copy
+	files := []string{
+		"simple.txt",
+		"subdir/deep/nested.txt",
+	}
+
+	// Run the copy function
+	err = copyUntrackedFilesToWorktree(srcDir, dstDir, files)
+	if err != nil {
+		t.Errorf("copyUntrackedFilesToWorktree returned error: %v", err)
+	}
+
+	// Verify simple file was copied
+	copiedContent, err := os.ReadFile(filepath.Join(dstDir, "simple.txt"))
+	if err != nil {
+		t.Errorf("Failed to read copied simple.txt: %v", err)
+	}
+	if string(copiedContent) != string(testContent) {
+		t.Errorf("simple.txt content = %q, want %q", string(copiedContent), string(testContent))
+	}
+
+	// Verify nested file was copied
+	copiedNested, err := os.ReadFile(filepath.Join(dstDir, "subdir", "deep", "nested.txt"))
+	if err != nil {
+		t.Errorf("Failed to read copied nested.txt: %v", err)
+	}
+	if string(copiedNested) != string(nestedContent) {
+		t.Errorf("nested.txt content = %q, want %q", string(copiedNested), string(nestedContent))
+	}
+
+	// Verify permissions are preserved
+	info, err := os.Stat(filepath.Join(dstDir, "subdir", "deep", "nested.txt"))
+	if err != nil {
+		t.Errorf("Failed to stat nested.txt: %v", err)
+	}
+	// Check that the file is executable (0755)
+	if info.Mode().Perm()&0100 == 0 {
+		t.Errorf("nested.txt should be executable, mode = %o", info.Mode().Perm())
+	}
+}
+
+func TestCopyUntrackedFilesToWorktree_NonexistentFile(t *testing.T) {
+	srcDir, err := os.MkdirTemp("", "copy-test-src-*")
+	if err != nil {
+		t.Fatalf("Failed to create source temp dir: %v", err)
+	}
+	defer os.RemoveAll(srcDir)
+
+	dstDir, err := os.MkdirTemp("", "copy-test-dst-*")
+	if err != nil {
+		t.Fatalf("Failed to create dest temp dir: %v", err)
+	}
+	defer os.RemoveAll(dstDir)
+
+	// Try to copy a non-existent file
+	files := []string{"nonexistent.txt"}
+
+	err = copyUntrackedFilesToWorktree(srcDir, dstDir, files)
+	// Should return an error but not panic
+	if err == nil {
+		t.Error("Expected error for non-existent file, got nil")
+	}
+}
+
+func TestCopyUntrackedFilesToWorktree_EmptyList(t *testing.T) {
+	srcDir, err := os.MkdirTemp("", "copy-test-src-*")
+	if err != nil {
+		t.Fatalf("Failed to create source temp dir: %v", err)
+	}
+	defer os.RemoveAll(srcDir)
+
+	dstDir, err := os.MkdirTemp("", "copy-test-dst-*")
+	if err != nil {
+		t.Fatalf("Failed to create dest temp dir: %v", err)
+	}
+	defer os.RemoveAll(dstDir)
+
+	// Empty file list
+	var files []string
+
+	err = copyUntrackedFilesToWorktree(srcDir, dstDir, files)
+	if err != nil {
+		t.Errorf("Expected no error for empty file list, got: %v", err)
 	}
 }
