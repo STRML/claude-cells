@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -845,5 +846,121 @@ func TestGit_MergeBranchWithOptions_SquashPreservesCommitLogs(t *testing.T) {
 	}
 	if !strings.Contains(commitMsg, "Squashed commits:") {
 		t.Errorf("Squash commit missing 'Squashed commits:' section, got: %s", commitMsg)
+	}
+}
+
+func TestGit_MergeBranchWithOptions_DirtyWorktreeError(t *testing.T) {
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// Get the base branch name
+	baseBranch, _ := g.CurrentBranch(ctx)
+
+	// Create a feature branch with a commit
+	err := g.CreateAndCheckout(ctx, "feature-dirty-test")
+	if err != nil {
+		t.Fatalf("CreateAndCheckout() error = %v", err)
+	}
+
+	_ = os.WriteFile(filepath.Join(dir, "feature.txt"), []byte("feature"), 0644)
+	exec.Command("git", "-C", dir, "add", "feature.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Add feature").Run()
+
+	// Go back to base branch
+	err = g.Checkout(ctx, baseBranch)
+	if err != nil {
+		t.Fatalf("Checkout() error = %v", err)
+	}
+
+	// Create an uncommitted change (dirty worktree)
+	_ = os.WriteFile(filepath.Join(dir, "dirty.txt"), []byte("uncommitted"), 0644)
+
+	// Try to merge - should fail with DirtyWorktreeError
+	err = g.MergeBranchWithOptions(ctx, "feature-dirty-test", false)
+
+	if err == nil {
+		t.Fatal("MergeBranchWithOptions() should fail with dirty worktree")
+	}
+
+	var dirtyErr *DirtyWorktreeError
+	if !errors.As(err, &dirtyErr) {
+		t.Errorf("Expected DirtyWorktreeError, got: %T (%v)", err, err)
+	}
+
+	// Also test squash merge
+	err = g.MergeBranchWithOptions(ctx, "feature-dirty-test", true)
+	if err == nil {
+		t.Fatal("MergeBranchWithOptions(squash) should fail with dirty worktree")
+	}
+	if !errors.As(err, &dirtyErr) {
+		t.Errorf("Expected DirtyWorktreeError for squash, got: %T (%v)", err, err)
+	}
+}
+
+func TestGit_MergeBranchWithOptions_RestoresStateOnFailure(t *testing.T) {
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// Get the base branch name
+	baseBranch, _ := g.CurrentBranch(ctx)
+
+	// Create a feature branch
+	err := g.CreateAndCheckout(ctx, "feature-restore-test")
+	if err != nil {
+		t.Fatalf("CreateAndCheckout() error = %v", err)
+	}
+
+	// Add a file that will conflict
+	_ = os.WriteFile(filepath.Join(dir, "conflict.txt"), []byte("feature content"), 0644)
+	exec.Command("git", "-C", dir, "add", "conflict.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Add conflict file on feature").Run()
+
+	// Go back to base and create a conflicting change
+	err = g.Checkout(ctx, baseBranch)
+	if err != nil {
+		t.Fatalf("Checkout() error = %v", err)
+	}
+
+	// Create a DIFFERENT feature branch (not the one we'll merge) and check it out
+	// This tests that we return to the original branch on failure
+	err = g.CreateAndCheckout(ctx, "working-branch")
+	if err != nil {
+		t.Fatalf("CreateAndCheckout(working-branch) error = %v", err)
+	}
+
+	// Add a commit so working-branch exists
+	_ = os.WriteFile(filepath.Join(dir, "working.txt"), []byte("working"), 0644)
+	exec.Command("git", "-C", dir, "add", "working.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Working branch commit").Run()
+
+	// Now attempt to merge feature-restore-test (which doesn't conflict)
+	// But use a non-existent branch to force a failure
+	err = g.MergeBranchWithOptions(ctx, "nonexistent-branch", false)
+	if err == nil {
+		t.Fatal("MergeBranchWithOptions() should fail for nonexistent branch")
+	}
+
+	// Verify we're back on the working branch (not stuck on main)
+	currentBranch, err := g.CurrentBranch(ctx)
+	if err != nil {
+		t.Fatalf("CurrentBranch() error = %v", err)
+	}
+	if currentBranch != "working-branch" {
+		t.Errorf("Expected to be on 'working-branch' after failed merge, got: %s", currentBranch)
+	}
+
+	// Verify worktree is clean (no staged changes)
+	hasChanges, err := g.HasUncommittedChanges(ctx)
+	if err != nil {
+		t.Fatalf("HasUncommittedChanges() error = %v", err)
+	}
+	if hasChanges {
+		t.Error("Worktree should be clean after failed merge")
 	}
 }

@@ -102,6 +102,15 @@ func (e *MergeConflictError) Error() string {
 	return fmt.Sprintf("merge conflict in branch %s: %d files with conflicts", e.Branch, len(e.ConflictFiles))
 }
 
+// DirtyWorktreeError represents uncommitted changes blocking an operation
+type DirtyWorktreeError struct {
+	Operation string
+}
+
+func (e *DirtyWorktreeError) Error() string {
+	return fmt.Sprintf("cannot %s: worktree has uncommitted changes", e.Operation)
+}
+
 // MergeBranch merges a branch into the current branch (typically main).
 // It fetches origin/main and merges the branch into main.
 // Returns MergeConflictError if there are conflicts that need resolution.
@@ -112,11 +121,38 @@ func (g *Git) MergeBranch(ctx context.Context, branch string) error {
 // MergeBranchWithOptions merges a branch into main with optional squash.
 // If squash is true, all commits are combined into a single commit.
 // Returns MergeConflictError if there are conflicts that need resolution.
+// Returns DirtyWorktreeError if there are uncommitted changes.
 func (g *Git) MergeBranchWithOptions(ctx context.Context, branch string, squash bool) error {
+	// Check for uncommitted changes first - fail early to avoid leaving worktree dirty
+	hasChanges, err := g.HasUncommittedChanges(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to check for uncommitted changes: %w", err)
+	}
+	if hasChanges {
+		return &DirtyWorktreeError{Operation: "merge"}
+	}
+
+	// Save the original branch so we can restore on failure
+	originalBranch, err := g.CurrentBranch(ctx)
+	if err != nil {
+		return fmt.Errorf("failed to get current branch: %w", err)
+	}
+
 	// Determine the base branch (main or master)
 	baseBranch, err := g.GetBaseBranch(ctx)
 	if err != nil {
 		baseBranch = "main" // Default to main
+	}
+
+	// restoreOriginalState returns to the original branch and cleans up any staged changes.
+	// This is called on non-conflict failures to leave the worktree clean.
+	restoreOriginalState := func() {
+		// Reset any staged changes (from failed squash merge)
+		_, _ = g.run(ctx, "reset", "--hard", "HEAD")
+		// Return to original branch if we moved
+		if originalBranch != baseBranch {
+			_, _ = g.run(ctx, "checkout", originalBranch)
+		}
 	}
 
 	// Fetch latest base branch from origin to ensure we're up to date
@@ -145,6 +181,8 @@ func (g *Git) MergeBranchWithOptions(ctx context.Context, branch string, squash 
 				_, _ = g.run(ctx, "merge", "--abort")
 				return &MergeConflictError{Branch: branch, ConflictFiles: conflictFiles}
 			}
+			// Non-conflict error - restore original state
+			restoreOriginalState()
 			return err
 		}
 
@@ -157,6 +195,8 @@ func (g *Git) MergeBranchWithOptions(ctx context.Context, branch string, squash 
 		// Squash merge requires a separate commit
 		_, err = g.run(ctx, "commit", "-m", commitMsg) //nolint:govet // err is shadowed but only used within this block
 		if err != nil {
+			// Commit failed - restore original state to clean up staged changes
+			restoreOriginalState()
 			return fmt.Errorf("failed to commit squash merge: %w", err)
 		}
 	} else {
@@ -170,6 +210,8 @@ func (g *Git) MergeBranchWithOptions(ctx context.Context, branch string, squash 
 				_, _ = g.run(ctx, "merge", "--abort")
 				return &MergeConflictError{Branch: branch, ConflictFiles: conflictFiles}
 			}
+			// Non-conflict error - restore original state
+			restoreOriginalState()
 			return err
 		}
 	}
