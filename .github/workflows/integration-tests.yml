@@ -92,6 +92,9 @@ jobs:
       - name: Load Docker image
         run: docker load -i /tmp/ccells-base.tar
 
+      - name: Pull alpine image
+        run: docker pull alpine:latest
+
       - name: Run integration tests
         run: go test -tags=integration -race -v ./...
         timeout-minutes: 10
