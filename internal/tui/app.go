@@ -1163,22 +1163,33 @@ Scroll Mode:
 			// User chose to keep - do nothing
 
 		case DialogMergeConflict:
-			// Clear the global dialog first (merge conflict uses global dialog)
-			m.dialog = nil
-			// Value is "0" for "Rebase onto main", "1" for "Cancel"
+			// Clear the in-pane dialog
+			for i := range m.panes {
+				if m.panes[i].Workstream().ID == msg.WorkstreamID {
+					m.panes[i].ClearInPaneDialog()
+					break
+				}
+			}
+			// Value is "0" for "Ask Claude to fix", "1" for "Abort"
 			if msg.Value == "0" {
-				// User chose to rebase
+				// User chose to have Claude fix the conflicts
 				for i := range m.panes {
 					if m.panes[i].Workstream().ID == msg.WorkstreamID {
-						ws := m.panes[i].Workstream()
-						m.toast = "Rebasing onto main..."
+						m.toast = "Asking Claude to fix conflicts..."
 						m.toastExpiry = time.Now().Add(toastDuration)
-						m.panes[i].AppendOutput("\nRebasing branch onto main...\n")
-						return m, RebaseBranchCmd(ws)
+						m.panes[i].AppendOutput("\nAsking Claude to resolve merge conflicts...\n")
+
+						// Build the prompt for Claude
+						fileList := strings.Join(msg.ConflictFiles, ", ")
+						prompt := fmt.Sprintf("Please run `git fetch origin main && git rebase origin/main` to start the rebase, then resolve the merge conflicts in these files: %s. After resolving each conflict, run `git add <file>` and then `git rebase --continue`. Let me know when done.\r", fileList)
+
+						// Send the prompt to Claude (with \r to submit)
+						_ = m.panes[i].SendToPTY(prompt)
+						return m, nil
 					}
 				}
 			}
-			// User chose to cancel - nothing else to do
+			// User chose to abort - nothing else to do
 
 		case DialogFirstRunIntroduction:
 			// Mark introduction as shown and persist

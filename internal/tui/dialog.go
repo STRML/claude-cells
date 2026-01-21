@@ -44,7 +44,8 @@ type DialogModel struct {
 	useTextArea  bool           // Whether to use textarea instead of textinput
 	ConfirmWord  string         // Word required to confirm (e.g., "destroy")
 	WorkstreamID string
-	BranchInfo   string // Branch statistics to pass through dialogs
+	BranchInfo   string   // Branch statistics to pass through dialogs
+	ConflictFiles []string // Files with merge/rebase conflicts
 	width        int
 	height       int
 	// Menu-style dialogs
@@ -304,21 +305,23 @@ func NewPostMergeDestroyDialog(branchName, workstreamID string) DialogModel {
 }
 
 // NewMergeConflictDialog creates a dialog for handling merge conflicts
+// This is shown when auto-rebase fails due to real conflicts that need resolution.
 func NewMergeConflictDialog(branchName, workstreamID string, conflictFiles []string) DialogModel {
-	body := fmt.Sprintf("Merge of '%s' into main has conflicts.\n\nConflicting files:\n", branchName)
+	body := fmt.Sprintf("Rebase of '%s' onto main has conflicts.\n\nConflicting files:\n", branchName)
 	for _, f := range conflictFiles {
 		body += fmt.Sprintf("  • %s\n", f)
 	}
-	body += "\nYou can rebase onto main and resolve conflicts in the container,\nor cancel and keep the current state."
+	body += "\nClaude can attempt to resolve these conflicts automatically,\nor you can abort and resolve them manually."
 
 	return DialogModel{
-		Type:         DialogMergeConflict,
-		Title:        "Merge Conflict",
-		Body:         body,
-		WorkstreamID: workstreamID,
+		Type:          DialogMergeConflict,
+		Title:         "Rebase Conflict",
+		Body:          body,
+		WorkstreamID:  workstreamID,
+		ConflictFiles: conflictFiles,
 		MenuItems: []string{
-			"Rebase onto main (resolve conflicts in container)",
-			"Cancel (keep current state)",
+			"Ask Claude to fix the conflicts",
+			"Abort (keep current state)",
 		},
 		MenuSelection: 0,
 	}
@@ -776,16 +779,18 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 			}
 
 			if d.Type == DialogMergeConflict {
-				// Selection 0 = "Rebase onto main", 1 = "Cancel"
+				// Selection 0 = "Ask Claude to fix", 1 = "Abort"
 				selection := d.MenuSelection
 				if selection == 1 {
 					return d, func() tea.Msg { return DialogCancelMsg{} }
 				}
+				conflictFiles := d.ConflictFiles
 				return d, func() tea.Msg {
 					return DialogConfirmMsg{
-						Type:         d.Type,
-						WorkstreamID: d.WorkstreamID,
-						Value:        fmt.Sprintf("%d", selection),
+						Type:          d.Type,
+						WorkstreamID:  d.WorkstreamID,
+						Value:         fmt.Sprintf("%d", selection),
+						ConflictFiles: conflictFiles,
 					}
 				}
 			}
@@ -1197,9 +1202,10 @@ func (d DialogModel) ViewInPane() string {
 
 // DialogConfirmMsg is sent when dialog is confirmed
 type DialogConfirmMsg struct {
-	Type         DialogType
-	WorkstreamID string
-	Value        string
+	Type          DialogType
+	WorkstreamID  string
+	Value         string
+	ConflictFiles []string // Files with merge/rebase conflicts (for DialogMergeConflict)
 }
 
 // DialogCancelMsg is sent when dialog is cancelled

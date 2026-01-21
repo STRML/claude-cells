@@ -1017,3 +1017,231 @@ func TestGit_MergeBranchWithOptions_RestoresStateOnFailure(t *testing.T) {
 		t.Error("Worktree should be clean after failed merge")
 	}
 }
+
+func TestGit_MergeBranchWithOptions_AutoRebaseAfterSquashMerge(t *testing.T) {
+	// This test verifies the auto-rebase functionality when:
+	// 1. A branch is squash-merged to main
+	// 2. More work is done on the branch
+	// 3. A second merge is attempted (which would normally conflict)
+	// 4. The auto-rebase kicks in and handles it automatically
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// Get the base branch name (main or master)
+	baseBranch, _ := g.CurrentBranch(ctx)
+
+	// Create and checkout a feature branch
+	err := g.CreateAndCheckout(ctx, "feature-auto-rebase")
+	if err != nil {
+		t.Fatalf("CreateAndCheckout() error = %v", err)
+	}
+
+	// Make initial commits on the feature branch
+	_ = os.WriteFile(filepath.Join(dir, "feature.txt"), []byte("initial feature"), 0644)
+	exec.Command("git", "-C", dir, "add", "feature.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Add initial feature").Run()
+
+	// First squash merge to main
+	err = g.Checkout(ctx, baseBranch)
+	if err != nil {
+		t.Fatalf("Checkout() error = %v", err)
+	}
+
+	err = g.MergeBranchWithOptions(ctx, "feature-auto-rebase", true)
+	if err != nil {
+		t.Fatalf("First MergeBranchWithOptions() error = %v", err)
+	}
+
+	// Verify first merge succeeded
+	cmd := exec.Command("git", "log", "-1", "--format=%s")
+	cmd.Dir = dir
+	out, _ := cmd.Output()
+	if !strings.Contains(string(out), "Squash merge branch 'feature-auto-rebase'") {
+		t.Errorf("First squash merge not found in history, got: %s", string(out))
+	}
+
+	// Continue working on the feature branch
+	err = g.Checkout(ctx, "feature-auto-rebase")
+	if err != nil {
+		t.Fatalf("Checkout() error = %v", err)
+	}
+
+	// Add more commits (this creates the "diverged history" scenario)
+	_ = os.WriteFile(filepath.Join(dir, "feature.txt"), []byte("updated feature"), 0644)
+	exec.Command("git", "-C", dir, "add", "feature.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Update feature").Run()
+
+	_ = os.WriteFile(filepath.Join(dir, "feature2.txt"), []byte("second feature"), 0644)
+	exec.Command("git", "-C", dir, "add", "feature2.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Add second feature").Run()
+
+	// Second squash merge - this would normally fail with conflicts
+	// because the branch still has the original commits that conflict
+	// with the squashed commit on main. Auto-rebase should handle this.
+	err = g.Checkout(ctx, baseBranch)
+	if err != nil {
+		t.Fatalf("Checkout() error = %v", err)
+	}
+
+	err = g.MergeBranchWithOptions(ctx, "feature-auto-rebase", true)
+	if err != nil {
+		t.Fatalf("Second MergeBranchWithOptions() should auto-rebase and succeed, got error = %v", err)
+	}
+
+	// Verify second merge succeeded
+	cmd = exec.Command("git", "log", "-1", "--format=%B")
+	cmd.Dir = dir
+	out, _ = cmd.Output()
+	commitMsg := string(out)
+
+	// The second merge should contain only the new commits (after rebase)
+	if !strings.Contains(commitMsg, "Squash merge branch 'feature-auto-rebase'") {
+		t.Errorf("Second squash merge header not found, got: %s", commitMsg)
+	}
+	if !strings.Contains(commitMsg, "Update feature") {
+		t.Errorf("Second squash merge missing 'Update feature', got: %s", commitMsg)
+	}
+	if !strings.Contains(commitMsg, "Add second feature") {
+		t.Errorf("Second squash merge missing 'Add second feature', got: %s", commitMsg)
+	}
+
+	// Verify both files exist on main
+	if _, err := os.Stat(filepath.Join(dir, "feature.txt")); os.IsNotExist(err) {
+		t.Error("feature.txt not found on main after merge")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "feature2.txt")); os.IsNotExist(err) {
+		t.Error("feature2.txt not found on main after merge")
+	}
+
+	// Verify content is updated
+	content, _ := os.ReadFile(filepath.Join(dir, "feature.txt"))
+	if string(content) != "updated feature" {
+		t.Errorf("feature.txt content = %q, want 'updated feature'", string(content))
+	}
+}
+
+func TestGit_MergeBranchWithOptions_AutoRebaseWhenMainMoved(t *testing.T) {
+	// This test verifies auto-rebase works when main has moved ahead
+	// but there are no actual content conflicts (just history divergence).
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// Get the base branch name (main or master)
+	baseBranch, _ := g.CurrentBranch(ctx)
+
+	// Create a feature branch
+	err := g.CreateAndCheckout(ctx, "feature-main-moved")
+	if err != nil {
+		t.Fatalf("CreateAndCheckout() error = %v", err)
+	}
+
+	// Make a commit on the feature branch (touches file1.txt)
+	_ = os.WriteFile(filepath.Join(dir, "file1.txt"), []byte("feature content"), 0644)
+	exec.Command("git", "-C", dir, "add", "file1.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Add feature file").Run()
+
+	// Go back to main and make a commit (touches different file - file2.txt)
+	err = g.Checkout(ctx, baseBranch)
+	if err != nil {
+		t.Fatalf("Checkout() error = %v", err)
+	}
+
+	_ = os.WriteFile(filepath.Join(dir, "file2.txt"), []byte("main content"), 0644)
+	exec.Command("git", "-C", dir, "add", "file2.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Add main file").Run()
+
+	// Try to merge - should auto-rebase and succeed (no content conflicts)
+	err = g.MergeBranchWithOptions(ctx, "feature-main-moved", true)
+	if err != nil {
+		t.Fatalf("MergeBranchWithOptions() should auto-rebase and succeed, got error = %v", err)
+	}
+
+	// Verify both files exist on main
+	if _, err := os.Stat(filepath.Join(dir, "file1.txt")); os.IsNotExist(err) {
+		t.Error("file1.txt (from feature) not found on main after merge")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "file2.txt")); os.IsNotExist(err) {
+		t.Error("file2.txt (from main) not found on main after merge")
+	}
+
+	// Verify commit message
+	cmd := exec.Command("git", "log", "-1", "--format=%s")
+	cmd.Dir = dir
+	out, _ := cmd.Output()
+	if !strings.Contains(string(out), "Squash merge branch 'feature-main-moved'") {
+		t.Errorf("Expected squash merge commit, got: %s", string(out))
+	}
+}
+
+func TestGit_MergeBranchWithOptions_AutoRebaseWithRealConflicts(t *testing.T) {
+	// This test verifies that when there are REAL conflicts (not just
+	// diverged history from squash merge), the auto-rebase properly
+	// returns a MergeConflictError for manual resolution.
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// Get the base branch name (main or master)
+	baseBranch, _ := g.CurrentBranch(ctx)
+
+	// Create and checkout a feature branch
+	err := g.CreateAndCheckout(ctx, "feature-real-conflict")
+	if err != nil {
+		t.Fatalf("CreateAndCheckout() error = %v", err)
+	}
+
+	// Make a commit on the feature branch
+	_ = os.WriteFile(filepath.Join(dir, "shared.txt"), []byte("feature version"), 0644)
+	exec.Command("git", "-C", dir, "add", "shared.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Add feature version").Run()
+
+	// Go back to main and make a conflicting commit
+	err = g.Checkout(ctx, baseBranch)
+	if err != nil {
+		t.Fatalf("Checkout() error = %v", err)
+	}
+
+	_ = os.WriteFile(filepath.Join(dir, "shared.txt"), []byte("main version"), 0644)
+	exec.Command("git", "-C", dir, "add", "shared.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Add main version").Run()
+
+	// Try to merge - should get a conflict error since the rebase will also fail
+	err = g.MergeBranchWithOptions(ctx, "feature-real-conflict", true)
+	if err == nil {
+		t.Fatal("MergeBranchWithOptions() should fail with conflict, got nil")
+	}
+
+	// Should be a MergeConflictError
+	mergeErr, ok := err.(*MergeConflictError)
+	if !ok {
+		t.Fatalf("Expected MergeConflictError, got %T: %v", err, err)
+	}
+
+	// Verify the conflict file is reported
+	found := false
+	for _, f := range mergeErr.ConflictFiles {
+		if f == "shared.txt" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("MergeConflictError.ConflictFiles = %v, should contain 'shared.txt'", mergeErr.ConflictFiles)
+	}
+
+	// Verify repo is in clean state (no ongoing merge or rebase)
+	cmd := exec.Command("git", "status", "--porcelain")
+	cmd.Dir = dir
+	out, _ := cmd.Output()
+	if len(out) > 0 {
+		t.Errorf("Repository should be clean after aborted merge, got: %s", string(out))
+	}
+}

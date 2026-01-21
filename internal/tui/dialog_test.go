@@ -850,8 +850,8 @@ func TestNewMergeConflictDialog(t *testing.T) {
 	if d.Type != DialogMergeConflict {
 		t.Error("Type should be DialogMergeConflict")
 	}
-	if !strings.Contains(d.Title, "Merge Conflict") {
-		t.Error("Title should contain 'Merge Conflict'")
+	if !strings.Contains(d.Title, "Rebase Conflict") {
+		t.Error("Title should contain 'Rebase Conflict'")
 	}
 	if d.WorkstreamID != "ws-123" {
 		t.Errorf("WorkstreamID should be 'ws-123', got %q", d.WorkstreamID)
@@ -916,9 +916,10 @@ func TestMergeConflictDialog_VimNavigation(t *testing.T) {
 	}
 }
 
-func TestMergeConflictDialog_EnterRebase(t *testing.T) {
-	d := NewMergeConflictDialog("feature-branch", "ws-123", []string{"file1.go"})
-	// Selection 0 = Rebase onto main
+func TestMergeConflictDialog_EnterAskClaude(t *testing.T) {
+	conflictFiles := []string{"file1.go", "file2.go"}
+	d := NewMergeConflictDialog("feature-branch", "ws-123", conflictFiles)
+	// Selection 0 = Ask Claude to fix
 	d.MenuSelection = 0
 	d, cmd := d.Update(dSpecialKey(tea.KeyEnter))
 
@@ -938,13 +939,20 @@ func TestMergeConflictDialog_EnterRebase(t *testing.T) {
 		t.Errorf("WorkstreamID should be 'ws-123', got %q", confirmMsg.WorkstreamID)
 	}
 	if confirmMsg.Value != "0" {
-		t.Errorf("Value should be '0' for rebase, got %q", confirmMsg.Value)
+		t.Errorf("Value should be '0' for Ask Claude, got %q", confirmMsg.Value)
+	}
+	// Verify ConflictFiles are passed through
+	if len(confirmMsg.ConflictFiles) != 2 {
+		t.Errorf("ConflictFiles should have 2 files, got %d", len(confirmMsg.ConflictFiles))
+	}
+	if confirmMsg.ConflictFiles[0] != "file1.go" || confirmMsg.ConflictFiles[1] != "file2.go" {
+		t.Errorf("ConflictFiles should be [file1.go, file2.go], got %v", confirmMsg.ConflictFiles)
 	}
 }
 
-func TestMergeConflictDialog_EnterCancel(t *testing.T) {
+func TestMergeConflictDialog_EnterAbort(t *testing.T) {
 	d := NewMergeConflictDialog("feature-branch", "ws-123", []string{"file1.go"})
-	// Selection 1 = Cancel
+	// Selection 1 = Abort
 	d.MenuSelection = 1
 	d, cmd := d.Update(dSpecialKey(tea.KeyEnter))
 
@@ -954,7 +962,29 @@ func TestMergeConflictDialog_EnterCancel(t *testing.T) {
 
 	msg := cmd()
 	if _, ok := msg.(DialogCancelMsg); !ok {
-		t.Errorf("Should return DialogCancelMsg on cancel selection, got %T", msg)
+		t.Errorf("Should return DialogCancelMsg on abort selection, got %T", msg)
+	}
+}
+
+func TestMergeConflictDialog_ConflictFilesStored(t *testing.T) {
+	conflictFiles := []string{"src/main.go", "pkg/util.go", "internal/app.go"}
+	d := NewMergeConflictDialog("feature-branch", "ws-456", conflictFiles)
+
+	// Verify ConflictFiles are stored in DialogModel
+	if len(d.ConflictFiles) != 3 {
+		t.Errorf("DialogModel.ConflictFiles should have 3 files, got %d", len(d.ConflictFiles))
+	}
+	for i, f := range conflictFiles {
+		if d.ConflictFiles[i] != f {
+			t.Errorf("ConflictFiles[%d] should be %q, got %q", i, f, d.ConflictFiles[i])
+		}
+	}
+
+	// Verify files appear in the body text
+	for _, f := range conflictFiles {
+		if !strings.Contains(d.Body, f) {
+			t.Errorf("Body should contain conflict file %q", f)
+		}
 	}
 }
 
@@ -964,14 +994,14 @@ func TestMergeConflictDialog_View(t *testing.T) {
 
 	view := d.View()
 
-	if !strings.Contains(view, "Merge Conflict") {
-		t.Error("View should contain 'Merge Conflict'")
+	if !strings.Contains(view, "Rebase Conflict") {
+		t.Error("View should contain 'Rebase Conflict'")
 	}
-	if !strings.Contains(view, "Rebase") {
-		t.Error("View should contain 'Rebase' menu item")
+	if !strings.Contains(view, "Ask Claude") {
+		t.Error("View should contain 'Ask Claude' menu item")
 	}
-	if !strings.Contains(view, "Cancel") {
-		t.Error("View should contain 'Cancel' menu item")
+	if !strings.Contains(view, "Abort") {
+		t.Error("View should contain 'Abort' menu item")
 	}
 	if !strings.Contains(view, "→") {
 		t.Error("View should contain selection indicator")

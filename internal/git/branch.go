@@ -193,7 +193,9 @@ func (g *Git) MergeBranch(ctx context.Context, branch string) error {
 
 // MergeBranchWithOptions merges a branch into main with optional squash.
 // If squash is true, all commits are combined into a single commit.
-// Returns MergeConflictError if there are conflicts that need resolution.
+// If a merge conflict occurs (common after a previous squash merge), this will
+// automatically attempt to rebase the branch onto main and retry the merge.
+// Returns MergeConflictError if there are conflicts that need manual resolution.
 // Returns DirtyWorktreeError if there are uncommitted changes.
 func (g *Git) MergeBranchWithOptions(ctx context.Context, branch string, squash bool) error {
 	// Check for uncommitted changes first - fail early to avoid leaving worktree dirty
@@ -205,6 +207,13 @@ func (g *Git) MergeBranchWithOptions(ctx context.Context, branch string, squash 
 		return &DirtyWorktreeError{Operation: "merge"}
 	}
 
+	return g.mergeBranchInternal(ctx, branch, squash, true)
+}
+
+// mergeBranchInternal is the internal merge implementation.
+// If autoRebase is true and a merge conflict occurs, it will attempt to rebase
+// the branch onto main and retry the merge once.
+func (g *Git) mergeBranchInternal(ctx context.Context, branch string, squash bool, autoRebase bool) error {
 	// Save the original branch so we can restore on failure
 	originalBranch, err := g.CurrentBranch(ctx)
 	if err != nil {
@@ -252,6 +261,15 @@ func (g *Git) MergeBranchWithOptions(ctx context.Context, branch string, squash 
 			if conflictErr == nil && len(conflictFiles) > 0 {
 				// Abort the failed merge to leave repo in clean state
 				_, _ = g.run(ctx, "merge", "--abort")
+
+				// If autoRebase is enabled, try rebasing and retrying
+				if autoRebase {
+					rebaseErr := g.rebaseAndRetryMerge(ctx, branch, squash)
+					if rebaseErr != nil {
+						return rebaseErr
+					}
+					return nil
+				}
 				return &MergeConflictError{Branch: branch, ConflictFiles: conflictFiles}
 			}
 			// Non-conflict error - restore original state
@@ -285,6 +303,15 @@ func (g *Git) MergeBranchWithOptions(ctx context.Context, branch string, squash 
 			if conflictErr == nil && len(conflictFiles) > 0 {
 				// Abort the failed merge to leave repo in clean state
 				_, _ = g.run(ctx, "merge", "--abort")
+
+				// If autoRebase is enabled, try rebasing and retrying
+				if autoRebase {
+					rebaseErr := g.rebaseAndRetryMerge(ctx, branch, squash)
+					if rebaseErr != nil {
+						return rebaseErr
+					}
+					return nil
+				}
 				return &MergeConflictError{Branch: branch, ConflictFiles: conflictFiles}
 			}
 			// Non-conflict error - restore original state
@@ -293,6 +320,49 @@ func (g *Git) MergeBranchWithOptions(ctx context.Context, branch string, squash 
 		}
 	}
 	return nil
+}
+
+// rebaseAndRetryMerge attempts to rebase the branch onto the base branch and retry the merge.
+// This handles the common case where a branch was previously squash-merged, then
+// more work was done on it, causing conflicts on the next merge attempt.
+// Returns nil on success, MergeConflictError if rebase has conflicts.
+func (g *Git) rebaseAndRetryMerge(ctx context.Context, branch string, squash bool) error {
+	// Determine the base branch
+	baseBranch, err := g.GetBaseBranch(ctx)
+	if err != nil {
+		baseBranch = "main"
+	}
+
+	// Ensure working directory is clean before checkout
+	// (merge --abort should have done this, but be safe)
+	_, _ = g.run(ctx, "reset", "--hard", "HEAD")
+
+	// Checkout the branch to rebase it
+	if _, err := g.run(ctx, "checkout", branch); err != nil {
+		return fmt.Errorf("failed to checkout branch for rebase: %w", err)
+	}
+
+	// Attempt to rebase onto origin/baseBranch, falling back to local if no remote
+	_, err = g.run(ctx, "rebase", "origin/"+baseBranch)
+	if err != nil && strings.Contains(err.Error(), "invalid upstream") {
+		// No remote - try local base branch
+		_, err = g.run(ctx, "rebase", baseBranch)
+	}
+	if err != nil {
+		// Check if rebase has conflicts
+		conflictFiles, conflictErr := g.GetConflictFiles(ctx)
+		if conflictErr == nil && len(conflictFiles) > 0 {
+			// Abort the rebase to leave repo in clean state
+			_, _ = g.run(ctx, "rebase", "--abort")
+			return &MergeConflictError{Branch: branch, ConflictFiles: conflictFiles}
+		}
+		// Abort any partial rebase
+		_, _ = g.run(ctx, "rebase", "--abort")
+		return fmt.Errorf("rebase failed: %w", err)
+	}
+
+	// Rebase succeeded - retry the merge (without auto-rebase to prevent infinite loop)
+	return g.mergeBranchInternal(ctx, branch, squash, false)
 }
 
 // GetConflictFiles returns list of files with merge conflicts
