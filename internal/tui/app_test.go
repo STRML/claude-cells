@@ -2524,6 +2524,248 @@ func TestAppModel_ScrollMode_ArrowsDontNavigate_InScrollMode(t *testing.T) {
 	}
 }
 
+func TestAppModel_ScrollMode_EnterWithPgUp_NavMode(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Ensure in nav mode (default)
+	if app.inputMode {
+		t.Fatal("Should start in nav mode")
+	}
+
+	// Should not be in scroll mode initially
+	if app.panes[0].IsScrollMode() {
+		t.Error("Pane should not be in scroll mode initially")
+	}
+
+	// Press pgup in nav mode - should enter scroll mode
+	model, _ = app.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
+	app = model.(AppModel)
+
+	if !app.panes[0].IsScrollMode() {
+		t.Error("Pressing pgup in nav mode should enter scroll mode")
+	}
+}
+
+func TestAppModel_ScrollMode_EnterWithPgUp_NavMode_KittyCode(t *testing.T) {
+	// Test with the actual Kitty keyboard protocol code (1114122)
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Ensure in nav mode (default)
+	if app.inputMode {
+		t.Fatal("Should start in nav mode")
+	}
+
+	// Should not be in scroll mode initially
+	if app.panes[0].IsScrollMode() {
+		t.Error("Pane should not be in scroll mode initially")
+	}
+
+	// Press pgup with Kitty code 1114122 - should enter scroll mode
+	kittyPgUp := tea.KeyPressMsg{Code: 1114122}
+	t.Logf("Kitty pgup key string: %q", kittyPgUp.String())
+
+	model, _ = app.Update(kittyPgUp)
+	app = model.(AppModel)
+
+	if !app.panes[0].IsScrollMode() {
+		t.Errorf("Pressing pgup (Kitty code 1114122, string=%q) in nav mode should enter scroll mode", kittyPgUp.String())
+	}
+}
+
+func TestAppModel_ScrollMode_EnterWithPgDown_NavMode(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Ensure in nav mode (default)
+	if app.inputMode {
+		t.Fatal("Should start in nav mode")
+	}
+
+	// First enter scroll mode via pgup (so we're not at bottom)
+	model, _ = app.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
+	app = model.(AppModel)
+
+	if !app.panes[0].IsScrollMode() {
+		t.Fatal("Should be in scroll mode after pgup")
+	}
+
+	// Press pgdown - should stay in scroll mode (if not at bottom)
+	// Note: With empty pane, pgdown may exit scroll mode since we're at bottom
+	// This test verifies the flow works without crashing
+	model, _ = app.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	app = model.(AppModel)
+	// At bottom, scroll mode should be exited
+}
+
+func TestAppModel_ScrollMode_CtrlBPgUp_InputMode(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Enter input mode
+	app.inputMode = true
+
+	// Should not be in scroll mode initially
+	if app.panes[0].IsScrollMode() {
+		t.Error("Pane should not be in scroll mode initially")
+	}
+
+	// Press ctrl+b to set tmux prefix
+	model, _ = app.Update(ctrlKey('b'))
+	app = model.(AppModel)
+
+	if !app.tmuxPrefix {
+		t.Fatal("ctrl+b should set tmux prefix")
+	}
+
+	// Press pgup with tmux prefix - should enter scroll mode
+	model, _ = app.Update(tea.KeyPressMsg{Code: tea.KeyPgUp})
+	app = model.(AppModel)
+
+	if !app.panes[0].IsScrollMode() {
+		t.Error("Pressing ctrl+b pgup in input mode should enter scroll mode")
+	}
+	if app.tmuxPrefix {
+		t.Error("tmux prefix should be reset after use")
+	}
+}
+
+func TestAppModel_ScrollMode_CtrlBPgDown_InputMode(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+	app = model.(AppModel)
+
+	// Enter input mode and scroll mode
+	app.inputMode = true
+	app.panes[0].EnterScrollMode()
+
+	// Press ctrl+b to set tmux prefix
+	model, _ = app.Update(ctrlKey('b'))
+	app = model.(AppModel)
+
+	if !app.tmuxPrefix {
+		t.Fatal("ctrl+b should set tmux prefix")
+	}
+
+	// Press pgdown with tmux prefix
+	model, _ = app.Update(tea.KeyPressMsg{Code: tea.KeyPgDown})
+	app = model.(AppModel)
+
+	if app.tmuxPrefix {
+		t.Error("tmux prefix should be reset after use")
+	}
+	// Note: With empty pane, we're likely at bottom, so scroll mode may be exited
+}
+
+func TestKeyStringRepresentations(t *testing.T) {
+	// Verify that key string representations match what the code expects
+	tests := []struct {
+		name     string
+		key      tea.KeyPressMsg
+		expected string
+	}{
+		{"pgup via Code", tea.KeyPressMsg{Code: tea.KeyPgUp}, "pgup"},
+		{"pgdown via Code", tea.KeyPressMsg{Code: tea.KeyPgDown}, "pgdown"},
+		{"pgup via Kitty code 1114122", tea.KeyPressMsg{Code: 1114122}, "pgup"},
+		{"pgdown via Kitty code 1114123", tea.KeyPressMsg{Code: 1114123}, "pgdown"},
+		{"up via Code", tea.KeyPressMsg{Code: tea.KeyUp}, "up"},
+		{"down via Code", tea.KeyPressMsg{Code: tea.KeyDown}, "down"},
+		{"ctrl+b", tea.KeyPressMsg{Code: 'b', Mod: tea.ModCtrl}, "ctrl+b"},
+		{"ctrl+u", tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl}, "ctrl+u"},
+		{"ctrl+d", tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl}, "ctrl+d"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.key.String()
+			if got != tt.expected {
+				t.Errorf("Key %s: expected String() = %q, got %q", tt.name, tt.expected, got)
+			}
+		})
+	}
+}
+
+// TestAppModel_ScrollMode_NavMode_AllScrollKeys tests all scroll-related keys in nav mode
+func TestAppModel_ScrollMode_NavMode_AllScrollKeys(t *testing.T) {
+	tests := []struct {
+		name           string
+		key            tea.KeyPressMsg
+		shouldEnter    bool // Should this key enter scroll mode?
+		description    string
+	}{
+		{"pgup", tea.KeyPressMsg{Code: tea.KeyPgUp}, true, "Page up should enter scroll mode"},
+		{"pgdown", tea.KeyPressMsg{Code: tea.KeyPgDown}, false, "Page down doesn't enter scroll mode (it's for scrolling while in scroll mode)"},
+		{"ctrl+u", tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl}, true, "Ctrl+U (half-page up) should enter scroll mode"},
+		{"ctrl+d", tea.KeyPressMsg{Code: 'd', Mod: tea.ModCtrl}, false, "Ctrl+D (half-page down) doesn't enter scroll mode"},
+		{"bracket [", keyPress('['), true, "Bracket '[' should enter scroll mode"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			app := NewAppModel(context.Background())
+			app.width = 100
+			app.height = 40
+
+			// Create a workstream
+			model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
+			app = model.(AppModel)
+
+			// Verify prerequisites
+			if app.inputMode {
+				t.Fatal("Should start in nav mode (inputMode=false)")
+			}
+			if len(app.panes) != 1 {
+				t.Fatalf("Expected 1 pane, got %d", len(app.panes))
+			}
+			if app.focusedPane != 0 {
+				t.Fatalf("Expected focusedPane=0, got %d", app.focusedPane)
+			}
+			if app.panes[0].IsScrollMode() {
+				t.Fatal("Pane should not be in scroll mode initially")
+			}
+
+			// Send the key
+			model, _ = app.Update(tt.key)
+			app = model.(AppModel)
+
+			// Check result
+			if tt.shouldEnter {
+				if !app.panes[0].IsScrollMode() {
+					t.Errorf("%s: %s - expected scroll mode to be entered, but it wasn't", tt.name, tt.description)
+				}
+			} else {
+				// For keys that don't enter scroll mode, verify they at least don't crash
+				// (scroll mode state depends on whether at bottom, etc.)
+			}
+		})
+	}
+}
+
 // ============================================================================
 // Workstream Renumbering After Destruction Tests
 // ============================================================================
