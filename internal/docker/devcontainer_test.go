@@ -257,7 +257,7 @@ func TestGetProjectImage(t *testing.T) {
 		{
 			name:       "fallback to default when no devcontainer.json",
 			setupFiles: map[string]string{},
-			wantImage:  DefaultImage,
+			wantImage:  GetBaseImageName(), // Hash-tagged name for content-based rebuilds
 			wantBuild:  false,
 		},
 		{

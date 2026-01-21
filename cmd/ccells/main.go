@@ -372,13 +372,13 @@ func validatePrerequisites() error {
 			}
 
 			fmt.Printf("✓ Image '%s' built successfully\n", result.ImageName)
-		} else if result.ImageName == docker.DefaultImage {
-			// Build the default ccells image
+		} else if result.ImageName == docker.GetBaseImageName() {
+			// Build the default ccells image (hash-tagged for content-based rebuilds)
 			var buildOutput bytes.Buffer
 			buildCtx, buildCancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer buildCancel()
 
-			spin := newSpinner(fmt.Sprintf("Building image '%s'...", docker.DefaultImage))
+			spin := newSpinner(fmt.Sprintf("Building image '%s'...", result.ImageName))
 			spin.Start(buildCtx)
 			err := docker.BuildImage(buildCtx, &buildOutput)
 			spin.Stop()
@@ -387,7 +387,7 @@ func validatePrerequisites() error {
 				return fmt.Errorf("failed to build image: %w", err)
 			}
 
-			fmt.Printf("✓ Image '%s' built successfully\n", docker.DefaultImage)
+			fmt.Printf("✓ Image '%s' built successfully\n", result.ImageName)
 		} else {
 			// External image from devcontainer.json - prompt to pull
 			return fmt.Errorf("image '%s' from devcontainer.json not found. Run: docker pull %s", result.ImageName, result.ImageName)

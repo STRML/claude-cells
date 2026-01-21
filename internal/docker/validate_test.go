@@ -212,3 +212,107 @@ func TestBuildImage(t *testing.T) {
 		t.Log("BuildImage with cancelled context didn't error (build may have been very fast)")
 	}
 }
+
+func TestComputeBaseImageHash(t *testing.T) {
+	// Skip if Dockerfile can't be found
+	if _, err := findDockerfile(); err != nil {
+		t.Skipf("Dockerfile not found: %v", err)
+	}
+
+	hash := computeBaseImageHash()
+
+	// Hash should be non-empty when Dockerfile exists
+	if hash == "" {
+		t.Error("computeBaseImageHash() returned empty hash when Dockerfile exists")
+	}
+
+	// Hash should be 12 characters (first 12 chars of hex-encoded sha256)
+	if len(hash) != 12 {
+		t.Errorf("computeBaseImageHash() returned hash of length %d, want 12", len(hash))
+	}
+
+	// Hash should be consistent (same input = same output)
+	hash2 := computeBaseImageHash()
+	if hash != hash2 {
+		t.Errorf("computeBaseImageHash() not deterministic: %s != %s", hash, hash2)
+	}
+}
+
+func TestGetBaseImageName(t *testing.T) {
+	// Skip if Dockerfile can't be found
+	if _, err := findDockerfile(); err != nil {
+		t.Skipf("Dockerfile not found: %v", err)
+	}
+
+	name := GetBaseImageName()
+
+	// Name should start with "ccells-base:"
+	if len(name) < 13 || name[:12] != "ccells-base:" {
+		t.Errorf("GetBaseImageName() = %q, want prefix 'ccells-base:'", name)
+	}
+
+	// Name should have a hash suffix (12 chars after the colon)
+	parts := []rune(name)
+	colonIdx := 11 // "ccells-base" is 11 chars
+	if parts[colonIdx] != ':' {
+		t.Errorf("GetBaseImageName() = %q, missing colon at expected position", name)
+	}
+
+	hashPart := name[12:] // Everything after "ccells-base:"
+	if len(hashPart) != 12 {
+		t.Errorf("GetBaseImageName() hash part length = %d, want 12 (got %q)", len(hashPart), hashPart)
+	}
+
+	// Name should be consistent
+	name2 := GetBaseImageName()
+	if name != name2 {
+		t.Errorf("GetBaseImageName() not deterministic: %s != %s", name, name2)
+	}
+}
+
+func TestBaseImageHashChangesWithDockerfile(t *testing.T) {
+	// This test verifies that if the Dockerfile content changes,
+	// the hash will change too (content-based rebuild trigger)
+
+	// Skip if Dockerfile can't be found
+	dockerfilePath, err := findDockerfile()
+	if err != nil {
+		t.Skipf("Dockerfile not found: %v", err)
+	}
+
+	// Get current hash
+	hash1 := computeBaseImageHash()
+	if hash1 == "" {
+		t.Fatal("Could not compute initial hash")
+	}
+
+	// Read current content
+	originalContent, err := os.ReadFile(dockerfilePath)
+	if err != nil {
+		t.Fatalf("Failed to read Dockerfile: %v", err)
+	}
+
+	// Temporarily modify the Dockerfile
+	modifiedContent := append(originalContent, []byte("\n# test comment for hash change\n")...)
+	if err := os.WriteFile(dockerfilePath, modifiedContent, 0644); err != nil {
+		t.Fatalf("Failed to write modified Dockerfile: %v", err)
+	}
+
+	// Restore original content when done
+	defer func() {
+		if err := os.WriteFile(dockerfilePath, originalContent, 0644); err != nil {
+			t.Errorf("Failed to restore Dockerfile: %v", err)
+		}
+	}()
+
+	// Get new hash
+	hash2 := computeBaseImageHash()
+	if hash2 == "" {
+		t.Fatal("Could not compute hash after modification")
+	}
+
+	// Hashes should be different
+	if hash1 == hash2 {
+		t.Error("computeBaseImageHash() returned same hash after Dockerfile modification")
+	}
+}

@@ -198,8 +198,9 @@ func GetProjectImage(projectPath string) (string, bool, error) {
 	}
 
 	// No devcontainer.json - use default image (which has Claude Code pre-installed)
+	// Use hash-tagged name so Dockerfile changes trigger rebuilds
 	if cfg == nil {
-		return DefaultImage, false, nil
+		return GetBaseImageName(), false, nil
 	}
 
 	// Always generate our own image name - we'll build a derived image with Claude Code
@@ -221,7 +222,8 @@ func GetProjectImage(projectPath string) (string, bool, error) {
 	}
 
 	// Neither image nor build specified - use default
-	return DefaultImage, false, nil
+	// Use hash-tagged name so Dockerfile changes trigger rebuilds
+	return GetBaseImageName(), false, nil
 }
 
 // GetBaseImage returns the base image specified in devcontainer.json (if any).
