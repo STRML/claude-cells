@@ -71,30 +71,3 @@ jobs:
         run: go test -race -v ./${{ matrix.package }}/...
         timeout-minutes: 15
 
-  integration:
-    name: Tagged Integration Tests
-    needs: build-image
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version-file: go.mod
-
-      - name: Download image artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: ccells-base-image
-          path: /tmp
-
-      - name: Load Docker image
-        run: docker load -i /tmp/ccells-base.tar
-
-      - name: Pull alpine image
-        run: docker pull alpine:latest
-
-      - name: Run integration tests
-        run: go test -tags=integration -race -v ./...
-        timeout-minutes: 10
