@@ -114,6 +114,16 @@ func GetClaudeConfig() (*ConfigPaths, error) {
 	return globalConfig, globalConfigErr
 }
 
+// CCellsCommitCommand is the content for the /ccells-commit skill
+const CCellsCommitCommand = `You are running inside Claude Cells (ccells), a terminal UI that manages multiple Claude Code instances in isolated Docker containers.
+
+Please commit all changes in this repository with an appropriate commit message that summarizes what was done.
+
+After the commit is complete, inform the user:
+- Briefly summarize what was committed
+- Tell them they can press **Esc Esc m** to open the merge dialog and merge this branch into main
+`
+
 // CCellsInstructions is the CLAUDE.md content for ccells containers
 const CCellsInstructions = `# Claude Cells Session
 
@@ -216,6 +226,18 @@ func CreateContainerConfig(containerName string) (*ConfigPaths, error) {
 	claudeMdPath := filepath.Join(dstClaudeDir, "CLAUDE.md")
 	if err := os.WriteFile(claudeMdPath, []byte(CCellsInstructions), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write CLAUDE.md: %w", err)
+	}
+
+	// Create commands directory and ccells-commit skill
+	// This is done here rather than in the startup script to ensure proper permissions
+	// (the copied commands directory from host may have restrictive permissions)
+	commandsDir := filepath.Join(dstClaudeDir, "commands")
+	if err := os.MkdirAll(commandsDir, 0755); err != nil {
+		return nil, fmt.Errorf("failed to create commands directory: %w", err)
+	}
+	ccellsCommitPath := filepath.Join(commandsDir, "ccells-commit.md")
+	if err := os.WriteFile(ccellsCommitPath, []byte(CCellsCommitCommand), 0644); err != nil {
+		return nil, fmt.Errorf("failed to write ccells-commit.md: %w", err)
 	}
 
 	// Only include GitConfig path if file was actually copied

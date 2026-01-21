@@ -8,6 +8,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/STRML/claude-cells/internal/docker"
 )
 
 func TestPTYOptions(t *testing.T) {
@@ -848,16 +850,6 @@ func TestContainerSetupScript_SingleConfigDir(t *testing.T) {
 			desc:     "should use $HOME/.claude as config directory",
 		},
 		{
-			name:     "creates ccells-commit command",
-			contains: "ccells-commit.md",
-			desc:     "ccells-commit.md should be created for the /ccells-commit skill",
-		},
-		{
-			name:     "creates commands in CONFIG_DIR",
-			contains: `$CONFIG_DIR/commands`,
-			desc:     "commands should be created in CONFIG_DIR",
-		},
-		{
 			name:     "handles session data in CONFIG_DIR",
 			contains: `$CONFIG_DIR/projects`,
 			desc:     "session data should use CONFIG_DIR",
@@ -873,8 +865,10 @@ func TestContainerSetupScript_SingleConfigDir(t *testing.T) {
 	}
 }
 
-// TestContainerSetupScript_CcellsCommitCommand verifies the ccells-commit command content.
-func TestContainerSetupScript_CcellsCommitCommand(t *testing.T) {
+// TestCCellsCommitCommand verifies the ccells-commit command content.
+// The ccells-commit.md file is now created in CreateContainerConfig (config.go)
+// rather than in the container startup script.
+func TestCCellsCommitCommand(t *testing.T) {
 	// Verify the command contains essential information
 	checks := []struct {
 		contains string
@@ -887,8 +881,8 @@ func TestContainerSetupScript_CcellsCommitCommand(t *testing.T) {
 	}
 
 	for _, check := range checks {
-		if !strings.Contains(containerSetupScript, check.contains) {
-			t.Errorf("ccells-commit command should contain %q: %s", check.contains, check.desc)
+		if !strings.Contains(docker.CCellsCommitCommand, check.contains) {
+			t.Errorf("CCellsCommitCommand should contain %q: %s", check.contains, check.desc)
 		}
 	}
 }

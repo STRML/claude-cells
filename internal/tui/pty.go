@@ -92,18 +92,6 @@ if pgrep -x "claude" >/dev/null 2>&1; then
   sleep 1
 fi
 
-# Create ccells-specific commands in the config directory
-mkdir -p "$CONFIG_DIR/commands" 2>/dev/null
-cat > "$CONFIG_DIR/commands/ccells-commit.md" << 'CCELLS_CMD'
-You are running inside Claude Cells (ccells), a terminal UI that manages multiple Claude Code instances in isolated Docker containers.
-
-Please commit all changes in this repository with an appropriate commit message that summarizes what was done.
-
-After the commit is complete, inform the user:
-- Briefly summarize what was committed
-- Tell them they can press **Esc Esc m** to open the merge dialog and merge this branch into main
-CCELLS_CMD
-
 # Copy session data for --continue (needed when resuming sessions)
 # Session data on host is stored under encoded HOST path (e.g., -Users-samuelreed-git-oss-docker-tui)
 # But container runs in /workspace, so Claude looks for -workspace
