@@ -135,6 +135,55 @@ type prContentResponse struct {
 	Body  string `json:"body"`
 }
 
+// claudeCLIEnvelope is the JSON envelope returned by claude CLI with --output-format json.
+type claudeCLIEnvelope struct {
+	Type    string `json:"type"`
+	Result  string `json:"result"`
+	IsError bool   `json:"is_error"`
+}
+
+// extractCLIResult extracts the actual result from Claude CLI's JSON envelope.
+// When using --output-format json, the CLI wraps responses in an envelope like:
+// {"type":"result","result":"actual content here",...}
+func extractCLIResult(output string) string {
+	var envelope claudeCLIEnvelope
+	if err := json.Unmarshal([]byte(output), &envelope); err != nil {
+		// Not a CLI envelope, return as-is
+		return output
+	}
+	if envelope.Type == "result" && envelope.Result != "" {
+		return envelope.Result
+	}
+	return output
+}
+
+// stripMarkdownCodeBlock removes markdown code block fencing from a string.
+// Handles patterns like: ```json\n{...}\n``` or ```\n{...}\n```
+func stripMarkdownCodeBlock(s string) string {
+	s = strings.TrimSpace(s)
+
+	// Check for code block start
+	if !strings.HasPrefix(s, "```") {
+		return s
+	}
+
+	// Find end of first line (the opening fence with optional language)
+	firstNewline := strings.Index(s, "\n")
+	if firstNewline == -1 {
+		return s
+	}
+
+	// Find closing fence
+	closingFence := strings.LastIndex(s, "```")
+	if closingFence <= firstNewline {
+		return s
+	}
+
+	// Extract content between fences
+	content := s[firstNewline+1 : closingFence]
+	return strings.TrimSpace(content)
+}
+
 // GeneratePRContent uses Claude to generate a PR title and description based on
 // the branch commits and workstream context. Returns sensible defaults on failure.
 func GeneratePRContent(ctx context.Context, gitClient GitClient, branchName, workstreamPrompt string) (title, body string) {
@@ -162,6 +211,12 @@ func GeneratePRContent(ctx context.Context, gitClient GitClient, branchName, wor
 	if err != nil {
 		return defaultTitle, defaultBody
 	}
+
+	// Extract result from CLI envelope (--output-format json wraps in envelope)
+	result = extractCLIResult(result)
+
+	// Strip markdown code blocks if present (Claude often wraps JSON in ```json...```)
+	result = stripMarkdownCodeBlock(result)
 
 	// Parse the JSON response
 	var resp prContentResponse

@@ -168,6 +168,9 @@ Commits being squashed:
 		return ""
 	}
 
+	// Strip markdown code blocks if Claude wrapped the output
+	title = stripMarkdownCodeBlock(title)
+
 	// Basic validation - should start with a conventional type
 	validPrefixes := []string{"feat:", "fix:", "docs:", "style:", "refactor:", "perf:", "test:", "build:", "ci:", "chore:"}
 	isValid := false
