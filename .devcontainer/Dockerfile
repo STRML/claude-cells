@@ -1,8 +1,8 @@
 FROM golang:1.25.5
 
-# Install Node.js for tooling (e.g., ccstatusline)
+# Install Node.js for tooling (e.g., ccstatusline) and jq for JSON processing
 RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
-    apt-get install -y nodejs && \
+    apt-get install -y nodejs jq && \
     rm -rf /var/lib/apt/lists/* && \
     npm install -g ccstatusline
 
