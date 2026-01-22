@@ -20,47 +20,62 @@ import (
 	"github.com/docker/docker/client"
 )
 
-// containerTracker holds the global container tracker for crash recovery
-var containerTracker *docker.ContainerTracker
+// containerServices holds the container tracking services.
+// This is set by the app layer and accessed by container commands.
+// Thread-safe: these are set once at startup and read-only thereafter.
+type containerServices struct {
+	tracker   *docker.ContainerTracker
+	refresher *docker.CredentialRefresher
+}
 
-// credentialRefresher holds the global credential refresher for OAuth token updates
-var credentialRefresher *docker.CredentialRefresher
+// services holds the global container services instance
+var services containerServices
 
 // SetContainerTracker sets the container tracker for tracking container lifecycle
 func SetContainerTracker(tracker *docker.ContainerTracker) {
-	containerTracker = tracker
+	services.tracker = tracker
 }
 
 // SetCredentialRefresher sets the credential refresher for OAuth token updates
 func SetCredentialRefresher(refresher *docker.CredentialRefresher) {
-	credentialRefresher = refresher
+	services.refresher = refresher
+}
+
+// GetContainerTracker returns the container tracker (for use in main.go cleanup)
+func GetContainerTracker() *docker.ContainerTracker {
+	return services.tracker
+}
+
+// GetCredentialRefresher returns the credential refresher
+func GetCredentialRefresher() *docker.CredentialRefresher {
+	return services.refresher
 }
 
 // trackContainer adds a container to the tracker if available
 func trackContainer(containerID, workstreamID, branchName, repoPath string) {
-	if containerTracker != nil {
-		containerTracker.Track(containerID, workstreamID, branchName, repoPath)
+	if services.tracker != nil {
+		services.tracker.Track(containerID, workstreamID, branchName, repoPath)
 	}
 }
 
 // untrackContainer removes a container from the tracker if available
 func untrackContainer(containerID string) {
-	if containerTracker != nil {
-		containerTracker.Untrack(containerID)
+	if services.tracker != nil {
+		services.tracker.Untrack(containerID)
 	}
 }
 
 // registerContainerCredentials registers a container with the credential refresher
 func registerContainerCredentials(containerID, containerName, configDir string) {
-	if credentialRefresher != nil {
-		credentialRefresher.RegisterContainer(containerID, containerName, configDir)
+	if services.refresher != nil {
+		services.refresher.RegisterContainer(containerID, containerName, configDir)
 	}
 }
 
 // unregisterContainerCredentials removes a container from the credential refresher
 func unregisterContainerCredentials(containerID string) {
-	if credentialRefresher != nil {
-		credentialRefresher.UnregisterContainer(containerID)
+	if services.refresher != nil {
+		services.refresher.UnregisterContainer(containerID)
 	}
 }
 

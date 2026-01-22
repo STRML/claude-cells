@@ -595,39 +595,67 @@ func TestContainerCountMsg(t *testing.T) {
 
 func TestTrackContainer(t *testing.T) {
 	// Save original tracker
-	original := containerTracker
+	original := services.tracker
 	defer func() {
-		containerTracker = original
+		services.tracker = original
 	}()
 
 	// Test with nil tracker (should not panic)
-	containerTracker = nil
+	services.tracker = nil
 	trackContainer("container-1", "ws-1", "branch-1", "/repo/path")
 }
 
 func TestUntrackContainer(t *testing.T) {
 	// Save original tracker
-	original := containerTracker
+	original := services.tracker
 	defer func() {
-		containerTracker = original
+		services.tracker = original
 	}()
 
 	// Test with nil tracker (should not panic)
-	containerTracker = nil
+	services.tracker = nil
 	untrackContainer("container-1")
 }
 
 func TestSetContainerTracker(t *testing.T) {
 	// Save original
-	original := containerTracker
+	original := services.tracker
 	defer func() {
-		containerTracker = original
+		services.tracker = original
 	}()
 
 	// Test setting nil
 	SetContainerTracker(nil)
-	if containerTracker != nil {
-		t.Error("containerTracker should be nil")
+	if services.tracker != nil {
+		t.Error("services.tracker should be nil")
+	}
+}
+
+func TestGetContainerTracker(t *testing.T) {
+	// Save original
+	original := services.tracker
+	defer func() {
+		services.tracker = original
+	}()
+
+	// Set to nil
+	services.tracker = nil
+	if GetContainerTracker() != nil {
+		t.Error("GetContainerTracker should return nil")
+	}
+}
+
+func TestGetCredentialRefresher(t *testing.T) {
+	// Save original
+	original := services.refresher
+	defer func() {
+		services.refresher = original
+	}()
+
+	// Set to nil
+	services.refresher = nil
+	if GetCredentialRefresher() != nil {
+		t.Error("GetCredentialRefresher should return nil")
 	}
 }
 
