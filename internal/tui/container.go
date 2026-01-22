@@ -1103,9 +1103,8 @@ func CreatePRCmd(ws *workstream.Workstream) tea.Cmd {
 		// Create PR using gh CLI - run from worktree so it picks up the right branch
 		gh := git.NewGH()
 
-		// Generate PR title and body from the workstream prompt
-		prTitle := ws.BranchName
-		prBody := fmt.Sprintf("## Summary\n\n%s\n\n## Changes\n\nCreated by [claude-cells](https://github.com/STRML/claude-cells).", ws.Prompt)
+		// Generate PR title and body using Claude
+		prTitle, prBody := git.GeneratePRContent(ctx, gitRepo, ws.BranchName, ws.Prompt)
 
 		pr, err := gh.CreatePR(ctx, worktreePath, &git.PRRequest{
 			Title: prTitle,
