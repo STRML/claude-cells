@@ -109,15 +109,36 @@ func TestGit_HasUncommittedChanges(t *testing.T) {
 		t.Error("HasUncommittedChanges() = true, want false for clean repo")
 	}
 
-	// Create uncommitted file
-	_ = os.WriteFile(filepath.Join(dir, "test.txt"), []byte("test"), 0644)
+	// Untracked files should NOT be considered uncommitted changes
+	// (they don't affect merge/rebase operations)
+	_ = os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("untracked"), 0644)
+
+	hasChanges, err = g.HasUncommittedChanges(ctx)
+	if err != nil {
+		t.Fatalf("HasUncommittedChanges() error = %v", err)
+	}
+	if hasChanges {
+		t.Error("HasUncommittedChanges() = true, want false for untracked file")
+	}
+
+	// Create and commit a tracked file
+	_ = os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("original"), 0644)
+	cmd := exec.Command("git", "add", "tracked.txt")
+	cmd.Dir = dir
+	_, _ = cmd.CombinedOutput()
+	cmd = exec.Command("git", "commit", "-m", "add tracked file")
+	cmd.Dir = dir
+	_, _ = cmd.CombinedOutput()
+
+	// Modified tracked file SHOULD be considered uncommitted changes
+	_ = os.WriteFile(filepath.Join(dir, "tracked.txt"), []byte("modified content"), 0644)
 
 	hasChanges, err = g.HasUncommittedChanges(ctx)
 	if err != nil {
 		t.Fatalf("HasUncommittedChanges() error = %v", err)
 	}
 	if !hasChanges {
-		t.Error("HasUncommittedChanges() = false, want true after adding file")
+		t.Error("HasUncommittedChanges() = false, want true for modified tracked file")
 	}
 }
 
@@ -928,8 +949,12 @@ func TestGit_MergeBranchWithOptions_DirtyWorktreeError(t *testing.T) {
 		t.Fatalf("Checkout() error = %v", err)
 	}
 
-	// Create an uncommitted change (dirty worktree)
-	_ = os.WriteFile(filepath.Join(dir, "dirty.txt"), []byte("uncommitted"), 0644)
+	// Create a tracked file with uncommitted modifications (dirty worktree)
+	// First commit a file, then modify it without committing
+	_ = os.WriteFile(filepath.Join(dir, "dirty.txt"), []byte("original"), 0644)
+	exec.Command("git", "-C", dir, "add", "dirty.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Add dirty file").Run()
+	_ = os.WriteFile(filepath.Join(dir, "dirty.txt"), []byte("modified uncommitted"), 0644)
 
 	// Try to merge - should fail with DirtyWorktreeError
 	err = g.MergeBranchWithOptions(ctx, "feature-dirty-test", false)
@@ -950,6 +975,52 @@ func TestGit_MergeBranchWithOptions_DirtyWorktreeError(t *testing.T) {
 	}
 	if !errors.As(err, &dirtyErr) {
 		t.Errorf("Expected DirtyWorktreeError for squash, got: %T (%v)", err, err)
+	}
+}
+
+func TestGit_MergeBranchWithOptions_UntrackedFilesAllowed(t *testing.T) {
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// Get the base branch name
+	baseBranch, _ := g.CurrentBranch(ctx)
+
+	// Create a feature branch with a commit
+	err := g.CreateAndCheckout(ctx, "feature-untracked-test")
+	if err != nil {
+		t.Fatalf("CreateAndCheckout() error = %v", err)
+	}
+
+	_ = os.WriteFile(filepath.Join(dir, "feature.txt"), []byte("feature"), 0644)
+	exec.Command("git", "-C", dir, "add", "feature.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Add feature").Run()
+
+	// Go back to base branch
+	err = g.Checkout(ctx, baseBranch)
+	if err != nil {
+		t.Fatalf("Checkout() error = %v", err)
+	}
+
+	// Create an untracked file - this should NOT block the merge
+	_ = os.WriteFile(filepath.Join(dir, "untracked.txt"), []byte("untracked content"), 0644)
+
+	// Squash merge should succeed even with untracked files
+	err = g.MergeBranchWithOptions(ctx, "feature-untracked-test", true)
+	if err != nil {
+		t.Fatalf("MergeBranchWithOptions() should succeed with untracked files, got error: %v", err)
+	}
+
+	// Verify the merge succeeded
+	if _, err := os.Stat(filepath.Join(dir, "feature.txt")); os.IsNotExist(err) {
+		t.Error("feature.txt not found on main after merge")
+	}
+
+	// Verify untracked file is still there
+	if _, err := os.Stat(filepath.Join(dir, "untracked.txt")); os.IsNotExist(err) {
+		t.Error("untracked.txt should still exist after merge")
 	}
 }
 

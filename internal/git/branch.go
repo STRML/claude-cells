@@ -55,9 +55,11 @@ func (g *Git) CreateAndCheckout(ctx context.Context, name string) error {
 	return err
 }
 
-// HasUncommittedChanges returns true if there are uncommitted changes.
+// HasUncommittedChanges returns true if there are uncommitted changes to tracked files.
+// Untracked files are not considered uncommitted changes since they don't affect
+// operations like merge or rebase (unless a file with the same name is being added).
 func (g *Git) HasUncommittedChanges(ctx context.Context) (bool, error) {
-	out, err := g.run(ctx, "status", "--porcelain")
+	out, err := g.run(ctx, "status", "--porcelain", "-uno")
 	if err != nil {
 		return false, err
 	}
