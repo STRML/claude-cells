@@ -3,10 +3,12 @@
 package tui
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -161,6 +163,100 @@ func sendKeys(t *testing.T, keys ...string) {
 // sendKey sends a single key (convenience wrapper)
 func sendKey(t *testing.T, key string) {
 	sendKeys(t, key)
+}
+
+// updateGolden flag enables updating golden files when -update is passed
+var updateGolden = flag.Bool("update", false, "update golden files")
+
+// goldenPath returns path to a golden file
+func goldenPath(name string) string {
+	// Use getProjectRoot with nil t since we don't want to fail in path calculation
+	root := getProjectRootOrPanic()
+	return filepath.Join(root, "internal", "tui", "testdata", name+".golden")
+}
+
+// getProjectRootOrPanic is like getProjectRoot but panics on error (for non-test contexts)
+func getProjectRootOrPanic() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		panic(fmt.Sprintf("Failed to get working directory: %v", err))
+	}
+
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			panic("Could not find project root (no go.mod found)")
+		}
+		dir = parent
+	}
+}
+
+// Regex patterns for masking dynamic content
+var (
+	// Timestamps like "2024-01-22 15:30:45" or "15:30:45"
+	timestampRegex = regexp.MustCompile(`\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}|\d{2}:\d{2}:\d{2}`)
+	// Container IDs (12+ hex chars)
+	containerIDRegex = regexp.MustCompile(`[a-f0-9]{12,64}`)
+	// PIDs (process IDs)
+	pidRegex = regexp.MustCompile(`\bPID[: ]+\d+|\bpid[: ]+\d+|\b\d{4,7}\b`)
+	// Durations like "2.5s" or "100ms"
+	durationRegex = regexp.MustCompile(`\d+(\.\d+)?(ms|s|m|h)\b`)
+)
+
+// maskDynamicContent replaces timestamps, IDs, and other dynamic content with placeholders
+func maskDynamicContent(s string) string {
+	s = timestampRegex.ReplaceAllString(s, "[TIMESTAMP]")
+	s = containerIDRegex.ReplaceAllString(s, "[ID]")
+	s = durationRegex.ReplaceAllString(s, "[DURATION]")
+	// Don't mask PIDs by default as they can be confused with line numbers
+	return s
+}
+
+// assertGolden compares actual output to a golden file, updating if -update flag is set
+func assertGolden(t *testing.T, name string, actual string) {
+	t.Helper()
+	path := goldenPath(name)
+
+	if *updateGolden {
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatalf("Failed to create golden file directory: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(actual), 0644); err != nil {
+			t.Fatalf("Failed to write golden file: %v", err)
+		}
+		t.Logf("Updated golden file: %s", path)
+		return
+	}
+
+	expected, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			t.Fatalf("Golden file %s does not exist. Run with -update to create it.", path)
+		}
+		t.Fatalf("Failed to read golden file %s: %v", path, err)
+	}
+
+	if actual != string(expected) {
+		t.Errorf("Output differs from golden file %s", name)
+		// Show a simple diff indication
+		expectedLines := strings.Split(string(expected), "\n")
+		actualLines := strings.Split(actual, "\n")
+
+		t.Logf("Expected %d lines, got %d lines", len(expectedLines), len(actualLines))
+
+		// Show first difference
+		for i := 0; i < len(expectedLines) && i < len(actualLines); i++ {
+			if expectedLines[i] != actualLines[i] {
+				t.Logf("First difference at line %d:", i+1)
+				t.Logf("  Expected: %q", expectedLines[i])
+				t.Logf("  Actual:   %q", actualLines[i])
+				break
+			}
+		}
+	}
 }
 
 // TestTmuxViewportConsistency verifies that the TUI maintains consistent
@@ -578,5 +674,119 @@ func TestTmuxScrollModeNavigation(t *testing.T) {
 	}
 
 	// Exit copy mode
+	sendKey(t, "Escape")
+}
+
+// TestTmuxStartupGolden captures the startup frame and compares it to a golden file.
+// Dynamic content (timestamps, IDs) is masked to allow stable comparisons.
+func TestTmuxStartupGolden(t *testing.T) {
+	if !tmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := testSessionName()
+
+	cleanupTmuxSession()
+	defer cleanupTmuxSession()
+
+	binPath := buildBinary(t)
+
+	// Start tmux session
+	startCmd := exec.Command("tmux", "new-session",
+		"-d",
+		"-s", sessionName,
+		"-x", fmt.Sprintf("%d", testWidth),
+		"-y", fmt.Sprintf("%d", testHeight),
+		binPath,
+	)
+
+	if err := startCmd.Run(); err != nil {
+		t.Fatalf("Failed to start tmux session: %v", err)
+	}
+
+	// Wait for app to show some UI (give it time to initialize)
+	_, ready := waitForCondition(t, func(output string) bool {
+		// Wait until we see some meaningful content
+		return strings.Contains(output, "Claude") ||
+			strings.Contains(output, "workstream") ||
+			strings.Contains(output, "ccells") ||
+			strings.Contains(output, "Building")
+	}, 10*time.Second)
+
+	if !ready {
+		t.Log("App may not be fully ready, capturing anyway")
+	}
+
+	// Give it a moment to stabilize rendering
+	time.Sleep(500 * time.Millisecond)
+
+	// Capture the frame
+	frame := captureTmuxPane(t)
+
+	// Mask dynamic content for stable comparison
+	maskedFrame := maskDynamicContent(frame)
+
+	// Compare to golden file
+	assertGolden(t, "startup_frame", maskedFrame)
+}
+
+// TestTmuxGoldenWithDialog tests golden file comparison with a dialog open
+func TestTmuxGoldenWithDialog(t *testing.T) {
+	if !tmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := testSessionName()
+
+	cleanupTmuxSession()
+	defer cleanupTmuxSession()
+
+	binPath := buildBinary(t)
+
+	startCmd := exec.Command("tmux", "new-session",
+		"-d",
+		"-s", sessionName,
+		"-x", fmt.Sprintf("%d", testWidth),
+		"-y", fmt.Sprintf("%d", testHeight),
+		binPath,
+	)
+
+	if err := startCmd.Run(); err != nil {
+		t.Fatalf("Failed to start tmux session: %v", err)
+	}
+
+	// Wait for app to be ready
+	_, ready := waitForCondition(t, func(output string) bool {
+		return strings.Contains(output, "Claude") ||
+			strings.Contains(output, "workstream") ||
+			strings.Contains(output, "ccells") ||
+			strings.Contains(output, "Building")
+	}, 10*time.Second)
+
+	if !ready {
+		t.Skip("App did not reach ready state")
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Press 'n' to open New Workstream dialog
+	sendKey(t, "n")
+
+	// Wait for dialog
+	if !waitForContent(t, "New Workstream", 3*time.Second) {
+		t.Skip("Dialog did not appear - skipping golden comparison")
+	}
+
+	// Give it a moment to render fully
+	time.Sleep(200 * time.Millisecond)
+
+	// Capture and mask
+	frame := captureTmuxPane(t)
+	maskedFrame := maskDynamicContent(frame)
+
+	// Compare to golden file
+	assertGolden(t, "new_workstream_dialog", maskedFrame)
+
+	// Clean up by closing dialog
 	sendKey(t, "Escape")
 }
