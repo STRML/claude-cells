@@ -50,6 +50,11 @@ func TestClaudeCodeContainer(t *testing.T) {
 	}
 	claudeCfg := filepath.Join(homeDir, ".claude")
 
+	// Skip if ~/.claude doesn't exist (e.g., CI environment)
+	if _, err := os.Stat(claudeCfg); os.IsNotExist(err) {
+		t.Skip("~/.claude not found, skipping (CI environment)")
+	}
+
 	// Create container config
 	cfg := &ContainerConfig{
 		Name:      "ccells-integration-test-" + time.Now().Format("150405"),
@@ -188,6 +193,11 @@ func TestContainerClaudeCodeExec(t *testing.T) {
 	homeDir, _ := os.UserHomeDir()
 	claudeCfg := filepath.Join(homeDir, ".claude")
 
+	// Skip if ~/.claude doesn't exist (e.g., CI environment)
+	if _, err := os.Stat(claudeCfg); os.IsNotExist(err) {
+		t.Skip("~/.claude not found, skipping (CI environment)")
+	}
+
 	cfg := &ContainerConfig{
 		Name:      "ccells-claude-exec-test-" + time.Now().Format("150405"),
 		Image:     RequiredImage,
@@ -241,13 +251,14 @@ func TestMultipleContainers(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	// Use alpine for speed
+	testImage := getTestImage(t, client, ctx)
+
 	var containerIDs []string
 	branches := []string{"feature-auth", "bugfix-login", "feature/nested-name"}
 
 	for _, branch := range branches {
 		cfg := NewContainerConfig(branch, "/tmp")
-		cfg.Image = "alpine:latest"
+		cfg.Image = testImage
 		cfg.Name = cfg.Name + "-" + time.Now().Format("150405.000")
 
 		containerID, err := client.CreateContainer(ctx, cfg)

@@ -55,9 +55,9 @@ func buildQueryArgs(prompt string, outputFormat string, model string) []string {
 	args := []string{
 		"-p", prompt,
 		"--no-session-persistence",
-		"--tools", "",                // Disable all tools
-		"--disable-slash-commands",   // Disable skills
-		"--strict-mcp-config",        // Only use MCP from --mcp-config (none)
+		"--tools", "", // Disable all tools
+		"--disable-slash-commands",                                    // Disable skills
+		"--strict-mcp-config",                                         // Only use MCP from --mcp-config (none)
 		"--system-prompt", "You are a helpful assistant. Be concise.", // Minimal system prompt
 	}
 	if model != "" {

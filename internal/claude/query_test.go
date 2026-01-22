@@ -2,6 +2,7 @@ package claude
 
 import (
 	"context"
+	"os/exec"
 	"strings"
 	"testing"
 	"time"
@@ -372,6 +373,11 @@ func TestQueryWithExecutor_PromptWithNewlines(t *testing.T) {
 // =============================================================================
 
 func TestQuery_CanceledContext(t *testing.T) {
+	// Skip if claude isn't installed
+	if _, err := exec.LookPath("claude"); err != nil {
+		t.Skip("claude not installed")
+	}
+
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // Cancel immediately
 
@@ -388,18 +394,6 @@ func TestQuery_CanceledContext(t *testing.T) {
 // =============================================================================
 // Helper functions
 // =============================================================================
-
-func slicesEqual(a, b []string) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if a[i] != b[i] {
-			return false
-		}
-	}
-	return true
-}
 
 func indexOf(slice []string, item string) int {
 	for i, v := range slice {
