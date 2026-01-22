@@ -251,7 +251,6 @@ func NewPTYSession(ctx context.Context, dockerClient *client.Client, containerID
 		ConsoleSize:  &[2]uint{uint(height), uint(width)},
 	}
 
-	LogDebug("PTY creating exec for %s in container %s", workstreamID, containerID[:12])
 	execResp, err := dockerClient.ContainerExecCreate(ctx, containerID, execCfg)
 	if err != nil {
 		LogWarn("PTY exec create failed for %s: %v", workstreamID, err)
@@ -259,7 +258,6 @@ func NewPTYSession(ctx context.Context, dockerClient *client.Client, containerID
 	}
 
 	// Attach to the exec session
-	LogDebug("PTY attaching to exec %s for %s", execResp.ID[:12], workstreamID)
 	attachResp, err := dockerClient.ContainerExecAttach(ctx, execResp.ID, container.ExecAttachOptions{
 		Tty:         true,
 		ConsoleSize: &[2]uint{uint(height), uint(width)},
@@ -323,7 +321,6 @@ func (p *PTYSession) Resize(width, height int) error {
 // It also handles auto-accepting the bypass permissions prompt if it appears,
 // and captures the Claude session ID from output.
 func (p *PTYSession) StartReadLoop() {
-	LogDebug("PTY read loop started for %s", p.workstreamID)
 	buf := make([]byte, 4096)
 
 	// For detecting the bypass permissions prompt during startup
@@ -340,7 +337,6 @@ func (p *PTYSession) StartReadLoop() {
 		// Check context first (non-blocking)
 		select {
 		case <-p.ctx.Done():
-			LogDebug("PTY read loop exiting (context done) for %s, total bytes read: %d", p.workstreamID, bytesRead)
 			return
 		default:
 		}
@@ -349,14 +345,12 @@ func (p *PTYSession) StartReadLoop() {
 		p.mu.Lock()
 		if p.closed {
 			p.mu.Unlock()
-			LogDebug("PTY read loop exiting (closed) for %s, total bytes read: %d", p.workstreamID, bytesRead)
 			return
 		}
 		conn := p.conn
 		p.mu.Unlock()
 
 		if conn == nil {
-			LogDebug("PTY read loop exiting (conn nil) for %s, total bytes read: %d", p.workstreamID, bytesRead)
 			return
 		}
 
@@ -383,7 +377,6 @@ func (p *PTYSession) StartReadLoop() {
 			return
 		case result := <-readCh:
 			if result.err != nil {
-				LogDebug("PTY read error for %s: %v (total bytes: %d)", p.workstreamID, result.err, bytesRead)
 				// Check context before sending error message
 				// This prevents sending spurious error messages during shutdown
 				select {
@@ -405,12 +398,6 @@ func (p *PTYSession) StartReadLoop() {
 
 			if result.n > 0 {
 				bytesRead += result.n
-				// Log first read and periodically after that
-				if bytesRead == result.n {
-					LogDebug("PTY first data received for %s: %d bytes", p.workstreamID, result.n)
-				} else if bytesRead%(32*1024) < result.n {
-					LogDebug("PTY data progress for %s: %d total bytes", p.workstreamID, bytesRead)
-				}
 				// Accumulate output during startup period for pattern matching
 				needsAccumulation := (!bypassHandled && time.Since(startTime) < bypassTimeout) ||
 					(!sessionIDCaptured && time.Since(startTime) < sessionIDTimeout)
@@ -506,7 +493,6 @@ func (p *PTYSession) SendKey(key string) error {
 // Close closes the PTY session and releases all resources.
 // Thread-safe: can be called concurrently with StartReadLoop.
 func (p *PTYSession) Close() error {
-	LogDebug("PTY closing session for %s", p.workstreamID)
 	// Cancel context first to signal goroutines to exit.
 	// This must be done BEFORE acquiring the lock to avoid deadlock
 	// with StartReadLoop which holds a reference to conn.
@@ -518,7 +504,6 @@ func (p *PTYSession) Close() error {
 	defer p.mu.Unlock()
 
 	if p.closed {
-		LogDebug("PTY session already closed for %s", p.workstreamID)
 		return nil
 	}
 	p.closed = true
