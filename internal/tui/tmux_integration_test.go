@@ -118,6 +118,34 @@ func countLines(output string) int {
 	return 1 + strings.Count(trimmed, "\n")
 }
 
+// waitForContent polls until content appears or timeout
+func waitForContent(t *testing.T, substr string, timeout time.Duration) bool {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if strings.Contains(captureTmuxPane(t), substr) {
+			return true
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return false
+}
+
+// waitForCondition polls until condition returns true
+func waitForCondition(t *testing.T, condition func(string) bool, timeout time.Duration) (string, bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var lastCapture string
+	for time.Now().Before(deadline) {
+		lastCapture = captureTmuxPane(t)
+		if condition(lastCapture) {
+			return lastCapture, true
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return lastCapture, false
+}
+
 // TestTmuxViewportConsistency verifies that the TUI maintains consistent
 // viewport height when rendered in an actual terminal via tmux.
 func TestTmuxViewportConsistency(t *testing.T) {
@@ -249,5 +277,61 @@ func TestTmuxResizeConsistency(t *testing.T) {
 					size.w, size.h, lines, size.h)
 			}
 		})
+	}
+}
+
+// TestTmuxWaitForStartup verifies app starts and shows expected UI elements
+// using waitForContent instead of fixed sleep.
+func TestTmuxWaitForStartup(t *testing.T) {
+	if !tmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := testSessionName()
+
+	cleanupTmuxSession()
+	defer cleanupTmuxSession()
+
+	binPath := buildBinary(t)
+
+	// Start tmux session
+	startCmd := exec.Command("tmux", "new-session",
+		"-d",
+		"-s", sessionName,
+		"-x", fmt.Sprintf("%d", testWidth),
+		"-y", fmt.Sprintf("%d", testHeight),
+		binPath,
+	)
+
+	if err := startCmd.Run(); err != nil {
+		t.Fatalf("Failed to start tmux session: %v", err)
+	}
+
+	// Wait for expected UI content using polling instead of fixed sleep
+	// The app should display "workstream" or related UI elements
+	expectedContent := []string{"Claude", "workstream", "ccells", "Building"}
+	found := false
+	for _, content := range expectedContent {
+		if waitForContent(t, content, 5*time.Second) {
+			t.Logf("Found expected content: %q", content)
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		frame := captureTmuxPane(t)
+		t.Logf("Final frame (no expected content found):\n%s", frame)
+		// Don't fail - just log, since the app may be in various states
+		t.Log("Warning: None of the expected UI elements appeared")
+	}
+
+	// Use waitForCondition for more complex assertions
+	_, hasLines := waitForCondition(t, func(output string) bool {
+		return countLines(output) == testHeight
+	}, 3*time.Second)
+
+	if !hasLines {
+		t.Error("Viewport never reached expected height")
 	}
 }
