@@ -2,6 +2,17 @@
 
 Last updated: 2026-01-22
 
+## Quick Reference: Large Files
+
+| File | Lines | Notes |
+|------|-------|-------|
+| `tui/app.go` | 2000+ | Main event loop - acceptable |
+| `tui/pane.go` | 1701 | God object - candidate for split |
+| `tui/container.go` | 1653 | Business logic in TUI - extract to orchestrator |
+| `tui/dialog.go` | 1329 | Multiple dialog types - could split |
+| `git/branch.go` | 700+ | Acceptable |
+| `docker/container.go` | 600+ | Acceptable |
+
 ## Package Overview
 
 ```
@@ -424,3 +435,40 @@ internal/workstream
 internal/sync
     +-> internal/git (GitOperations interface)
 ```
+
+## Coupling Analysis
+
+### Strong Boundaries ✅
+
+1. **Docker Abstraction** - `DockerClient` interface hides SDK types from TUI
+2. **Git Abstraction** - `GitClient` interface with domain-specific errors
+3. **Workstream Domain** - Clean separation between `Workstream` (runtime) and `SavedWorkstream` (persistence)
+
+### Leaky Boundaries ⚠️
+
+1. **TUI → Docker Coupling** (`container.go`)
+   - 1653 lines of orchestration logic inside TUI package
+   - Returns `tea.Msg` types, tightly coupling to Bubble Tea
+
+2. **Global State in TUI**
+   ```go
+   var program *tea.Program       // pty.go
+   var containerTracker *...      // container.go
+   var credentialRefresher *...   // container.go
+   ```
+
+3. **PaneModel God Object** - Mixes rendering, PTY, scrolling, animations
+
+### No Circular Dependencies ✅
+
+Go's package system prevents import cycles. Well done!
+
+## Essential Reading Order
+
+1. `cmd/ccells/main.go` - Startup flow
+2. `internal/tui/app.go` - Main event loop
+3. `internal/workstream/workstream.go` - Core domain model
+4. `internal/workstream/persistent_manager.go` - Auto-saving state
+5. `internal/docker/interface.go` - Docker abstraction
+6. `internal/git/interface.go` - Git abstraction
+7. `internal/tui/container.go` - Container orchestration (⚠️ business logic in TUI)
