@@ -68,3 +68,48 @@ func TestCreateWorkstream_CreatesWorktree(t *testing.T) {
 		t.Errorf("expected ws.WorktreePath=%s, got %s", expectedPath, ws.WorktreePath)
 	}
 }
+
+func TestCreateWorkstream_CreatesContainer(t *testing.T) {
+	mockDocker := docker.NewMockClient()
+	mockGit := git.NewMockGitClient()
+	gitFactory := func(path string) git.GitClient {
+		return mockGit
+	}
+
+	orch := New(mockDocker, gitFactory, "/test/repo")
+
+	ws := &workstream.Workstream{
+		ID:         "test-id",
+		BranchName: "ccells/test-branch",
+	}
+
+	opts := CreateOptions{
+		RepoPath:  "/test/repo",
+		ImageName: "ccells-test:latest",
+	}
+
+	ctx := context.Background()
+	containerID, err := orch.CreateWorkstream(ctx, ws, opts)
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if containerID == "" {
+		t.Error("expected container ID to be returned")
+	}
+
+	// Verify container was created and started
+	state, err := mockDocker.GetContainerState(ctx, containerID)
+	if err != nil {
+		t.Fatalf("failed to get container state: %v", err)
+	}
+	if state != "running" {
+		t.Errorf("expected container state 'running', got '%s'", state)
+	}
+
+	// Verify workstream has container ID set
+	if ws.ContainerID != containerID {
+		t.Errorf("expected ws.ContainerID=%s, got %s", containerID, ws.ContainerID)
+	}
+}
