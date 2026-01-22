@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Last updated: 2026-01-22 (Updated: orchestrator extraction)
+Last updated: 2026-01-22 (Updated: global state thread-safety)
 
 ## Architecture Assessment: 7.5/10
 
@@ -337,16 +337,28 @@ Container orchestration logic has been extracted to `internal/orchestrator` pack
 
 **Recommendation:** Split PaneModel into PaneRenderer, ScrollController, AnimationController.
 
-### 3. Global Mutable State
+### 3. Global Mutable State (Improved)
+
+Package-level state now uses encapsulated structs with thread-safety:
 
 ```go
-var program *tea.Program           // pty.go:58
-var containerTracker *...          // container.go:23
-var credentialRefresher *...       // container.go:26
+// container.go:26-32 - Services struct (set once at startup)
+type containerServices struct {
+    tracker   *docker.ContainerTracker
+    refresher *docker.CredentialRefresher
+}
+var services containerServices
+
+// pty.go:60-65 - Mutex-protected program sender
+type programSender struct {
+    mu      sync.RWMutex
+    program *tea.Program
+}
+var sender programSender
 ```
 
-**Impact:** Breaks testability, risks data races.
-**Fix:** Pass as AppModel fields.
+**Current state:** Thread-safe (mutex protection, set-once patterns). Tests pass with `-race`.
+**Remaining improvement:** Could move to AppModel fields for true dependency injection, but current pattern is acceptable.
 
 ## Design Patterns
 
@@ -394,19 +406,30 @@ var credentialRefresher *...       // container.go:26
 
 ## Improvement Roadmap
 
-### High Priority
-1. **Extract Orchestration Layer** ✅ Completed (PR #8)
+### Completed
+1. **Extract Orchestration Layer** ✅ (PR #8)
    - `internal/orchestrator` package with full `WorkstreamOrchestrator` interface
    - Complete operations: `CreateWorkstream`, `PauseWorkstream`, `ResumeWorkstream`, `DestroyWorkstream`, `RebuildWorkstream`, `CheckBranchConflict`
    - Image resolution: auto-detect from devcontainer, build with devcontainer CLI, fallback to default
    - Container config: credentials, git identity, timezone, extra env vars
    - Worktree management: create, cleanup on error, branch sanitization
    - AppModel uses orchestrator via `Orchestrator()` getter
-   - **Next steps:** Move container tracking and credential refresh registration into orchestrator
 
-### Medium Priority
-2. **Refactor PaneModel** - Split into focused components
-3. **Eliminate Global State** - Pass dependencies via AppModel
+2. **Global State Thread-Safety** ✅
+   - `containerServices` struct encapsulates tracker/refresher (set-once pattern)
+   - `programSender` uses `sync.RWMutex` for concurrent PTY goroutine access
+   - All tests pass with `-race` detector
+
+### Medium Priority (Next)
+3. **Refactor PaneModel** - Split 1700-line god object into focused components:
+   - `PaneRenderer` - terminal rendering, ANSI handling
+   - `ScrollController` - scrollback buffer management
+   - `AnimationController` - spinner, fade effects
+
+4. **Move Global State to AppModel** (optional) - For true dependency injection:
+   - Pass `containerServices` via AppModel fields
+   - Pass `programSender` through PTYSession constructor
+   - Current encapsulated pattern is acceptable if this is deferred
 
 ### Future Vision
 ```
