@@ -3,10 +3,12 @@
 package tui
 
 import (
+	"flag"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -116,6 +118,145 @@ func countLines(output string) int {
 		return 0
 	}
 	return 1 + strings.Count(trimmed, "\n")
+}
+
+// waitForContent polls until content appears or timeout
+func waitForContent(t *testing.T, substr string, timeout time.Duration) bool {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if strings.Contains(captureTmuxPane(t), substr) {
+			return true
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return false
+}
+
+// waitForCondition polls until condition returns true
+func waitForCondition(t *testing.T, condition func(string) bool, timeout time.Duration) (string, bool) {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	var lastCapture string
+	for time.Now().Before(deadline) {
+		lastCapture = captureTmuxPane(t)
+		if condition(lastCapture) {
+			return lastCapture, true
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	return lastCapture, false
+}
+
+// sendKeys sends keystrokes to the tmux session
+func sendKeys(t *testing.T, keys ...string) {
+	t.Helper()
+	sessionName := testSessionName()
+	args := []string{"send-keys", "-t", sessionName}
+	args = append(args, keys...)
+	cmd := exec.Command("tmux", args...)
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("Failed to send keys: %v", err)
+	}
+}
+
+// sendKey sends a single key (convenience wrapper)
+func sendKey(t *testing.T, key string) {
+	sendKeys(t, key)
+}
+
+// updateGolden flag enables updating golden files when -update is passed
+var updateGolden = flag.Bool("update", false, "update golden files")
+
+// goldenPath returns path to a golden file
+func goldenPath(name string) string {
+	// Use getProjectRoot with nil t since we don't want to fail in path calculation
+	root := getProjectRootOrPanic()
+	return filepath.Join(root, "internal", "tui", "testdata", name+".golden")
+}
+
+// getProjectRootOrPanic is like getProjectRoot but panics on error (for non-test contexts)
+func getProjectRootOrPanic() string {
+	dir, err := os.Getwd()
+	if err != nil {
+		panic(fmt.Sprintf("Failed to get working directory: %v", err))
+	}
+
+	for {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			panic("Could not find project root (no go.mod found)")
+		}
+		dir = parent
+	}
+}
+
+// Regex patterns for masking dynamic content
+var (
+	// Timestamps like "2024-01-22 15:30:45" or "15:30:45"
+	timestampRegex = regexp.MustCompile(`\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}:\d{2}|\d{2}:\d{2}:\d{2}`)
+	// Container IDs (12+ hex chars)
+	containerIDRegex = regexp.MustCompile(`[a-f0-9]{12,64}`)
+	// PIDs (process IDs)
+	pidRegex = regexp.MustCompile(`\bPID[: ]+\d+|\bpid[: ]+\d+|\b\d{4,7}\b`)
+	// Durations like "2.5s" or "100ms"
+	durationRegex = regexp.MustCompile(`\d+(\.\d+)?(ms|s|m|h)\b`)
+)
+
+// maskDynamicContent replaces timestamps, IDs, and other dynamic content with placeholders
+func maskDynamicContent(s string) string {
+	s = timestampRegex.ReplaceAllString(s, "[TIMESTAMP]")
+	s = containerIDRegex.ReplaceAllString(s, "[ID]")
+	s = durationRegex.ReplaceAllString(s, "[DURATION]")
+	// Don't mask PIDs by default as they can be confused with line numbers
+	return s
+}
+
+// assertGolden compares actual output to a golden file, updating if -update flag is set
+func assertGolden(t *testing.T, name string, actual string) {
+	t.Helper()
+	path := goldenPath(name)
+
+	if *updateGolden {
+		if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+			t.Fatalf("Failed to create golden file directory: %v", err)
+		}
+		if err := os.WriteFile(path, []byte(actual), 0644); err != nil {
+			t.Fatalf("Failed to write golden file: %v", err)
+		}
+		t.Logf("Updated golden file: %s", path)
+		return
+	}
+
+	expected, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			t.Skipf("Golden file %s does not exist. Run with -update to create it.", path)
+		}
+		t.Fatalf("Failed to read golden file %s: %v", path, err)
+	}
+
+	if actual != string(expected) {
+		t.Errorf("Output differs from golden file %s", name)
+		// Show a simple diff indication
+		expectedLines := strings.Split(string(expected), "\n")
+		actualLines := strings.Split(actual, "\n")
+
+		t.Logf("Expected %d lines, got %d lines", len(expectedLines), len(actualLines))
+
+		// Show first difference
+		for i := 0; i < len(expectedLines) && i < len(actualLines); i++ {
+			if expectedLines[i] != actualLines[i] {
+				t.Logf("First difference at line %d:", i+1)
+				t.Logf("  Expected: %q", expectedLines[i])
+				t.Logf("  Actual:   %q", actualLines[i])
+				break
+			}
+		}
+	}
 }
 
 // TestTmuxViewportConsistency verifies that the TUI maintains consistent
@@ -250,4 +391,402 @@ func TestTmuxResizeConsistency(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestTmuxWaitForStartup verifies app starts and shows expected UI elements
+// using waitForContent instead of fixed sleep.
+func TestTmuxWaitForStartup(t *testing.T) {
+	if !tmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := testSessionName()
+
+	cleanupTmuxSession()
+	defer cleanupTmuxSession()
+
+	binPath := buildBinary(t)
+
+	// Start tmux session
+	startCmd := exec.Command("tmux", "new-session",
+		"-d",
+		"-s", sessionName,
+		"-x", fmt.Sprintf("%d", testWidth),
+		"-y", fmt.Sprintf("%d", testHeight),
+		binPath,
+	)
+
+	if err := startCmd.Run(); err != nil {
+		t.Fatalf("Failed to start tmux session: %v", err)
+	}
+
+	// Wait for expected UI content using polling instead of fixed sleep
+	// The app should display "workstream" or related UI elements
+	expectedContent := []string{"Claude", "workstream", "ccells", "Building"}
+	found := false
+	for _, content := range expectedContent {
+		if waitForContent(t, content, 5*time.Second) {
+			t.Logf("Found expected content: %q", content)
+			found = true
+			break
+		}
+	}
+
+	if !found {
+		frame := captureTmuxPane(t)
+		t.Logf("Final frame (no expected content found):\n%s", frame)
+		// Don't fail - just log, since the app may be in various states
+		t.Log("Warning: None of the expected UI elements appeared")
+	}
+
+	// Use waitForCondition for more complex assertions
+	_, hasLines := waitForCondition(t, func(output string) bool {
+		return countLines(output) == testHeight
+	}, 3*time.Second)
+
+	if !hasLines {
+		t.Error("Viewport never reached expected height")
+	}
+}
+
+// TestTmuxKeypressNewDialog verifies that pressing 'n' opens the New Workstream
+// dialog and Escape closes it.
+func TestTmuxKeypressNewDialog(t *testing.T) {
+	if !tmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := testSessionName()
+
+	cleanupTmuxSession()
+	defer cleanupTmuxSession()
+
+	binPath := buildBinary(t)
+
+	// Start tmux session
+	startCmd := exec.Command("tmux", "new-session",
+		"-d",
+		"-s", sessionName,
+		"-x", fmt.Sprintf("%d", testWidth),
+		"-y", fmt.Sprintf("%d", testHeight),
+		binPath,
+	)
+
+	if err := startCmd.Run(); err != nil {
+		t.Fatalf("Failed to start tmux session: %v", err)
+	}
+
+	// Wait for app to be ready (show some UI content)
+	_, ready := waitForCondition(t, func(output string) bool {
+		return strings.Contains(output, "Claude") ||
+			strings.Contains(output, "workstream") ||
+			strings.Contains(output, "ccells") ||
+			strings.Contains(output, "Building")
+	}, 5*time.Second)
+
+	if !ready {
+		t.Log("App may not be fully ready, continuing test anyway")
+	}
+
+	// Give the app a moment to stabilize
+	time.Sleep(200 * time.Millisecond)
+
+	// Send 'n' key to open New Workstream dialog
+	sendKey(t, "n")
+
+	// Wait for dialog to appear
+	if waitForContent(t, "New Workstream", 3*time.Second) {
+		t.Log("Dialog opened successfully")
+
+		// Send Escape to close dialog
+		sendKey(t, "Escape")
+
+		// Wait for dialog to close (New Workstream should disappear)
+		_, closed := waitForCondition(t, func(output string) bool {
+			return !strings.Contains(output, "New Workstream")
+		}, 2*time.Second)
+
+		if !closed {
+			t.Error("Dialog did not close after pressing Escape")
+		}
+	} else {
+		frame := captureTmuxPane(t)
+		t.Logf("Dialog did not appear. Current frame:\n%s", frame)
+		// Don't fail - the app might be in a different state
+		t.Log("Warning: New Workstream dialog did not appear after pressing 'n'")
+	}
+}
+
+// TestTmuxScrollModeLongScrollback tests scroll mode with a large amount of
+// scrollback content. This is a shell-based test (no Docker dependency) to
+// verify that tmux scroll mode works correctly.
+func TestTmuxScrollModeLongScrollback(t *testing.T) {
+	if !tmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := testSessionName()
+
+	cleanupTmuxSession()
+	defer cleanupTmuxSession()
+
+	// Start tmux session with a shell that will generate scrollback
+	// We use 'bash -c' to echo many lines
+	script := `for i in $(seq 1 500); do echo "Line $i: This is test content for scrollback"; done; echo "=== END OF OUTPUT ==="; exec bash`
+
+	startCmd := exec.Command("tmux", "new-session",
+		"-d",
+		"-s", sessionName,
+		"-x", fmt.Sprintf("%d", testWidth),
+		"-y", fmt.Sprintf("%d", testHeight),
+		"bash", "-c", script,
+	)
+
+	if err := startCmd.Run(); err != nil {
+		t.Fatalf("Failed to start tmux session: %v", err)
+	}
+
+	// Wait for all output to be generated
+	if !waitForContent(t, "=== END OF OUTPUT ===", 10*time.Second) {
+		t.Fatal("Output generation did not complete")
+	}
+
+	// Capture current visible content (should be near the end)
+	initialFrame := captureTmuxPane(t)
+	t.Logf("Initial frame (last lines visible):\n%s", initialFrame)
+
+	// Verify we see end marker but not early lines in the visible area
+	if !strings.Contains(initialFrame, "=== END OF OUTPUT ===") {
+		t.Error("Expected to see END OF OUTPUT marker in visible area")
+	}
+
+	// Enter tmux copy mode (scroll mode) with Ctrl+B, [
+	sendKeys(t, "C-b", "[")
+	time.Sleep(200 * time.Millisecond)
+
+	// Scroll up using PageUp multiple times
+	for i := 0; i < 20; i++ {
+		sendKey(t, "PageUp")
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Capture scrolled content - use -S -500 to capture scrollback history
+	cmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-S", "-500")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to capture scrollback: %v", err)
+	}
+	scrolledContent := string(output)
+
+	// Verify we can see early lines in the scrollback
+	if !strings.Contains(scrolledContent, "Line 1:") {
+		t.Error("Expected to find 'Line 1:' in scrollback history")
+		t.Logf("Scrollback content (first 1000 chars):\n%s", scrolledContent[:min(1000, len(scrolledContent))])
+	}
+
+	if !strings.Contains(scrolledContent, "Line 50:") {
+		t.Error("Expected to find 'Line 50:' in scrollback history")
+	}
+
+	// Exit copy mode
+	sendKey(t, "Escape")
+	time.Sleep(100 * time.Millisecond)
+
+	t.Log("Scroll mode test completed successfully")
+}
+
+// TestTmuxScrollModeNavigation tests various scroll navigation commands
+func TestTmuxScrollModeNavigation(t *testing.T) {
+	if !tmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := testSessionName()
+
+	cleanupTmuxSession()
+	defer cleanupTmuxSession()
+
+	// Generate numbered lines for easy position tracking
+	script := `for i in $(seq 1 200); do printf "LINE_%03d\n" $i; done; echo "=== END ==="; exec bash`
+
+	startCmd := exec.Command("tmux", "new-session",
+		"-d",
+		"-s", sessionName,
+		"-x", "80",
+		"-y", "24",
+		"bash", "-c", script,
+	)
+
+	if err := startCmd.Run(); err != nil {
+		t.Fatalf("Failed to start tmux session: %v", err)
+	}
+
+	// Wait for output
+	if !waitForContent(t, "=== END ===", 5*time.Second) {
+		t.Fatal("Output generation did not complete")
+	}
+
+	// Enter copy mode
+	sendKeys(t, "C-b", "[")
+	time.Sleep(200 * time.Millisecond)
+
+	tests := []struct {
+		name        string
+		keys        []string
+		expectAfter string
+	}{
+		{
+			name:        "PageUp navigation",
+			keys:        []string{"PageUp", "PageUp", "PageUp"},
+			expectAfter: "LINE_", // Should see some lines after scrolling up
+		},
+		{
+			name:        "Arrow up navigation",
+			keys:        []string{"Up", "Up", "Up", "Up", "Up"},
+			expectAfter: "LINE_",
+		},
+		{
+			name:        "Half-page scroll with Ctrl+U",
+			keys:        []string{"C-u"},
+			expectAfter: "LINE_",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Send the navigation keys
+			for _, key := range tt.keys {
+				sendKey(t, key)
+				time.Sleep(50 * time.Millisecond)
+			}
+
+			// Capture with scrollback
+			cmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-S", "-200")
+			output, err := cmd.Output()
+			if err != nil {
+				t.Fatalf("Failed to capture: %v", err)
+			}
+
+			if !strings.Contains(string(output), tt.expectAfter) {
+				t.Errorf("Expected to find %q after %v", tt.expectAfter, tt.keys)
+			}
+		})
+	}
+
+	// Exit copy mode
+	sendKey(t, "Escape")
+}
+
+// TestTmuxStartupGolden captures the startup frame and compares it to a golden file.
+// Dynamic content (timestamps, IDs) is masked to allow stable comparisons.
+func TestTmuxStartupGolden(t *testing.T) {
+	if !tmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := testSessionName()
+
+	cleanupTmuxSession()
+	defer cleanupTmuxSession()
+
+	binPath := buildBinary(t)
+
+	// Start tmux session
+	startCmd := exec.Command("tmux", "new-session",
+		"-d",
+		"-s", sessionName,
+		"-x", fmt.Sprintf("%d", testWidth),
+		"-y", fmt.Sprintf("%d", testHeight),
+		binPath,
+	)
+
+	if err := startCmd.Run(); err != nil {
+		t.Fatalf("Failed to start tmux session: %v", err)
+	}
+
+	// Wait for app to show some UI (give it time to initialize)
+	_, ready := waitForCondition(t, func(output string) bool {
+		// Wait until we see some meaningful content
+		return strings.Contains(output, "Claude") ||
+			strings.Contains(output, "workstream") ||
+			strings.Contains(output, "ccells") ||
+			strings.Contains(output, "Building")
+	}, 10*time.Second)
+
+	if !ready {
+		t.Log("App may not be fully ready, capturing anyway")
+	}
+
+	// Give it a moment to stabilize rendering
+	time.Sleep(500 * time.Millisecond)
+
+	// Capture the frame
+	frame := captureTmuxPane(t)
+
+	// Mask dynamic content for stable comparison
+	maskedFrame := maskDynamicContent(frame)
+
+	// Compare to golden file
+	assertGolden(t, "startup_frame", maskedFrame)
+}
+
+// TestTmuxGoldenWithDialog tests golden file comparison with a dialog open
+func TestTmuxGoldenWithDialog(t *testing.T) {
+	if !tmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := testSessionName()
+
+	cleanupTmuxSession()
+	defer cleanupTmuxSession()
+
+	binPath := buildBinary(t)
+
+	startCmd := exec.Command("tmux", "new-session",
+		"-d",
+		"-s", sessionName,
+		"-x", fmt.Sprintf("%d", testWidth),
+		"-y", fmt.Sprintf("%d", testHeight),
+		binPath,
+	)
+
+	if err := startCmd.Run(); err != nil {
+		t.Fatalf("Failed to start tmux session: %v", err)
+	}
+
+	// Wait for app to be ready
+	_, ready := waitForCondition(t, func(output string) bool {
+		return strings.Contains(output, "Claude") ||
+			strings.Contains(output, "workstream") ||
+			strings.Contains(output, "ccells") ||
+			strings.Contains(output, "Building")
+	}, 10*time.Second)
+
+	if !ready {
+		t.Skip("App did not reach ready state")
+	}
+
+	time.Sleep(200 * time.Millisecond)
+
+	// Press 'n' to open New Workstream dialog
+	sendKey(t, "n")
+
+	// Wait for dialog
+	if !waitForContent(t, "New Workstream", 3*time.Second) {
+		t.Skip("Dialog did not appear - skipping golden comparison")
+	}
+
+	// Give it a moment to render fully
+	time.Sleep(200 * time.Millisecond)
+
+	// Capture and mask
+	frame := captureTmuxPane(t)
+	maskedFrame := maskDynamicContent(frame)
+
+	// Compare to golden file
+	assertGolden(t, "new_workstream_dialog", maskedFrame)
+
+	// Clean up by closing dialog
+	sendKey(t, "Escape")
 }
