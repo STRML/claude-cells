@@ -6,16 +6,22 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
 const (
-	testSessionName = "ccells-test"
-	testWidth       = 120
-	testHeight      = 40
+	testWidth  = 120
+	testHeight = 40
 )
+
+// testSessionName returns a unique session name for this test process
+// to avoid clobbering other developer's tmux sessions
+func testSessionName() string {
+	return fmt.Sprintf("ccells-test-%d", os.Getpid())
+}
 
 // tmuxAvailable checks if tmux is installed
 func tmuxAvailable() bool {
@@ -23,11 +29,14 @@ func tmuxAvailable() bool {
 	return err == nil
 }
 
-// buildBinary builds the ccells binary for testing
+// buildBinary builds the ccells binary for testing in a temp directory
 func buildBinary(t *testing.T) string {
 	t.Helper()
 
-	binPath := "/tmp/claude/ccells-test"
+	// Use t.TempDir() to avoid assuming /tmp/claude exists
+	tempDir := t.TempDir()
+	binPath := filepath.Join(tempDir, "ccells-test")
+
 	cmd := exec.Command("go", "build", "-o", binPath, "./cmd/ccells")
 	cmd.Dir = getProjectRoot(t)
 
@@ -50,10 +59,10 @@ func getProjectRoot(t *testing.T) string {
 	}
 
 	for {
-		if _, err := os.Stat(dir + "/go.mod"); err == nil {
+		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
 			return dir
 		}
-		parent := dir[:strings.LastIndex(dir, "/")]
+		parent := filepath.Dir(dir)
 		if parent == dir {
 			t.Fatal("Could not find project root (no go.mod found)")
 		}
@@ -63,15 +72,30 @@ func getProjectRoot(t *testing.T) string {
 
 // cleanupTmuxSession kills the test session if it exists
 func cleanupTmuxSession() {
-	exec.Command("tmux", "kill-session", "-t", testSessionName).Run()
+	sessionName := testSessionName()
+	cmd := exec.Command("tmux", "kill-session", "-t", sessionName)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Ignore expected errors when session doesn't exist
+		outStr := string(output)
+		if strings.Contains(outStr, "no server") ||
+			strings.Contains(outStr, "session not found") ||
+			strings.Contains(outStr, "can't find session") {
+			return // Expected - session doesn't exist
+		}
+		// Log unexpected errors
+		fmt.Printf("Warning: cleanupTmuxSession(%s) unexpected error: %v, output: %s\n",
+			sessionName, err, outStr)
+	}
 }
 
 // captureTmuxPane captures the current pane content as text
 func captureTmuxPane(t *testing.T) string {
 	t.Helper()
 
-	// Use -p -e to preserve empty lines, -J to join wrapped lines
-	cmd := exec.Command("tmux", "capture-pane", "-t", testSessionName, "-p", "-e")
+	sessionName := testSessionName()
+	// Use -p -e to preserve empty lines
+	cmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-e")
 	output, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("Failed to capture tmux pane: %v", err)
@@ -80,14 +104,18 @@ func captureTmuxPane(t *testing.T) string {
 	return string(output)
 }
 
-// countLines counts lines in captured output, preserving empty lines
+// countLines counts lines in captured output, handling trailing newlines
 func countLines(output string) int {
-	// tmux capture-pane -p adds a trailing newline, so we count newlines
-	// An empty 40-line terminal would have 40 newlines
 	if output == "" {
 		return 0
 	}
-	return strings.Count(output, "\n")
+	// Trim trailing newline if present and count based on remaining newlines
+	// This is more resilient to tmux output variations
+	trimmed := strings.TrimSuffix(output, "\n")
+	if trimmed == "" {
+		return 0
+	}
+	return 1 + strings.Count(trimmed, "\n")
 }
 
 // TestTmuxViewportConsistency verifies that the TUI maintains consistent
@@ -97,18 +125,20 @@ func TestTmuxViewportConsistency(t *testing.T) {
 		t.Skip("tmux not available")
 	}
 
+	sessionName := testSessionName()
+
 	// Clean up any existing session
 	cleanupTmuxSession()
 	defer cleanupTmuxSession()
 
 	// Build the binary
 	binPath := buildBinary(t)
-	defer os.Remove(binPath)
+	// No need to defer os.Remove - t.TempDir() handles cleanup
 
 	// Start tmux session with fixed dimensions
 	startCmd := exec.Command("tmux", "new-session",
-		"-d",                  // detached
-		"-s", testSessionName, // session name
+		"-d",              // detached
+		"-s", sessionName, // session name
 		"-x", fmt.Sprintf("%d", testWidth), // width
 		"-y", fmt.Sprintf("%d", testHeight), // height
 		binPath, // command to run
@@ -164,16 +194,18 @@ func TestTmuxResizeConsistency(t *testing.T) {
 		t.Skip("tmux not available")
 	}
 
+	sessionName := testSessionName()
+
 	cleanupTmuxSession()
 	defer cleanupTmuxSession()
 
 	binPath := buildBinary(t)
-	defer os.Remove(binPath)
+	// No need to defer os.Remove - t.TempDir() handles cleanup
 
 	// Start with initial size
 	startCmd := exec.Command("tmux", "new-session",
 		"-d",
-		"-s", testSessionName,
+		"-s", sessionName,
 		"-x", "100",
 		"-y", "30",
 		binPath,
@@ -198,7 +230,7 @@ func TestTmuxResizeConsistency(t *testing.T) {
 		t.Run(fmt.Sprintf("%dx%d", size.w, size.h), func(t *testing.T) {
 			// Resize the tmux pane
 			resizeCmd := exec.Command("tmux", "resize-window",
-				"-t", testSessionName,
+				"-t", sessionName,
 				"-x", fmt.Sprintf("%d", size.w),
 				"-y", fmt.Sprintf("%d", size.h),
 			)
