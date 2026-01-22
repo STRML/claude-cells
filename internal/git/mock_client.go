@@ -42,6 +42,7 @@ type MockGitClient struct {
 	StashFn                      func(ctx context.Context) error
 	StashPopFn                   func(ctx context.Context) error
 	PushFn                       func(ctx context.Context, branch string) error
+	ForcePushFn                  func(ctx context.Context, branch string) error
 	FetchMainFn                  func(ctx context.Context) error
 	PullMainFn                   func(ctx context.Context) error
 	UpdateMainBranchFn           func(ctx context.Context) error
@@ -390,6 +391,17 @@ func (m *MockGitClient) Push(ctx context.Context, branch string) error {
 	}
 	if m.PushFn != nil {
 		return m.PushFn(ctx, branch)
+	}
+	// Default: succeed
+	return nil
+}
+
+func (m *MockGitClient) ForcePush(ctx context.Context, branch string) error {
+	if m.Err != nil {
+		return m.Err
+	}
+	if m.ForcePushFn != nil {
+		return m.ForcePushFn(ctx, branch)
 	}
 	// Default: succeed
 	return nil

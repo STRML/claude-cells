@@ -1324,6 +1324,7 @@ func ResumeContainerCmd(ws *workstream.Workstream, width, height int) tea.Cmd {
 type PushBranchResultMsg struct {
 	WorkstreamID string
 	Error        error
+	ForcePush    bool // True if this was a force push
 }
 
 // PushBranchCmd returns a command that pushes a branch to origin.
@@ -1344,6 +1345,27 @@ func PushBranchCmd(ws *workstream.Workstream) tea.Cmd {
 		}
 
 		return PushBranchResultMsg{WorkstreamID: ws.ID, Error: nil}
+	}
+}
+
+// ForcePushBranchCmd returns a command that force pushes a branch to origin using --force-with-lease.
+func ForcePushBranchCmd(ws *workstream.Workstream) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
+		// Use worktree path for git operations
+		worktreePath := resolveWorktreePath(ws)
+		if worktreePath == "" {
+			return PushBranchResultMsg{WorkstreamID: ws.ID, Error: fmt.Errorf("no worktree path for branch"), ForcePush: true}
+		}
+
+		gitRepo := GitClientFactory(worktreePath)
+		if err := gitRepo.ForcePush(ctx, ws.BranchName); err != nil {
+			return PushBranchResultMsg{WorkstreamID: ws.ID, Error: err, ForcePush: true}
+		}
+
+		return PushBranchResultMsg{WorkstreamID: ws.ID, Error: nil, ForcePush: true}
 	}
 }
 

@@ -1,6 +1,7 @@
 package docker
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -238,6 +239,12 @@ func CreateContainerConfig(containerName string) (*ConfigPaths, error) {
 	ccellsCommitPath := filepath.Join(commandsDir, "ccells-commit.md")
 	if err := os.WriteFile(ccellsCommitPath, []byte(CCellsCommitCommand), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write ccells-commit.md: %w", err)
+	}
+
+	// Add ccells-specific hooks to settings.json (e.g., block git commit --amend on pushed branches)
+	if err := addCCellsHooks(dstClaudeDir); err != nil {
+		// Log but don't fail - hooks are a nice-to-have
+		fmt.Fprintf(os.Stderr, "Warning: failed to add ccells hooks: %v\n", err)
 	}
 
 	// Only include GitConfig path if file was actually copied
@@ -576,6 +583,100 @@ func copyDir(src, dst string) error {
 				continue
 			}
 		}
+	}
+
+	return nil
+}
+
+// CCellsAmendBlockHook is a bash script that blocks git commit --amend on pushed branches.
+// It checks if the command is a git commit with --amend flag and if the branch has an upstream.
+const CCellsAmendBlockHook = `#!/bin/bash
+# ccells hook: Block git commit --amend on pushed branches
+# Input: JSON with tool_input.command from stdin
+
+# Read the command from stdin
+INPUT=$(cat)
+COMMAND=$(echo "$INPUT" | jq -r '.tool_input.command // empty')
+
+# Check if this is a git commit with --amend
+if echo "$COMMAND" | grep -qE 'git\s+commit.*--amend|git\s+commit\s+-[a-zA-Z]*a[a-zA-Z]*\s'; then
+    # Check if branch has an upstream (meaning it's been pushed)
+    if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
+        echo "ERROR: Cannot amend commits on a pushed branch." >&2
+        echo "" >&2
+        echo "Your branch has been pushed to remote. Using 'git commit --amend' will rewrite" >&2
+        echo "history and cause push failures. Instead, create a new commit with your changes." >&2
+        echo "" >&2
+        echo "If you really need to amend, use the Force Push option in the merge dialog (Esc Esc m)." >&2
+        exit 2
+    fi
+fi
+
+# Allow the command
+exit 0
+`
+
+// addCCellsHooks adds ccells-specific hooks to the settings.json file.
+// This includes a hook to block git commit --amend on pushed branches.
+func addCCellsHooks(claudeDir string) error {
+	settingsPath := filepath.Join(claudeDir, "settings.json")
+
+	// Read existing settings or start with empty object
+	var settings map[string]interface{}
+	data, err := os.ReadFile(settingsPath)
+	if err == nil {
+		if err := json.Unmarshal(data, &settings); err != nil {
+			settings = make(map[string]interface{})
+		}
+	} else {
+		settings = make(map[string]interface{})
+	}
+
+	// Write the hook script to a file
+	hooksDir := filepath.Join(claudeDir, "hooks")
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		return fmt.Errorf("failed to create hooks directory: %w", err)
+	}
+	hookScriptPath := filepath.Join(hooksDir, "block-amend-pushed.sh")
+	if err := os.WriteFile(hookScriptPath, []byte(CCellsAmendBlockHook), 0755); err != nil {
+		return fmt.Errorf("failed to write hook script: %w", err)
+	}
+
+	// Create the hooks structure
+	ccellsHook := map[string]interface{}{
+		"matcher": "Bash",
+		"hooks": []map[string]interface{}{
+			{
+				"type":    "command",
+				"command": hookScriptPath,
+			},
+		},
+	}
+
+	// Get or create the hooks object
+	hooks, ok := settings["hooks"].(map[string]interface{})
+	if !ok {
+		hooks = make(map[string]interface{})
+	}
+
+	// Get or create the PreToolUse array
+	preToolUse, ok := hooks["PreToolUse"].([]interface{})
+	if !ok {
+		preToolUse = []interface{}{}
+	}
+
+	// Add our hook (at the beginning so it runs first)
+	preToolUse = append([]interface{}{ccellsHook}, preToolUse...)
+	hooks["PreToolUse"] = preToolUse
+	settings["hooks"] = hooks
+
+	// Write back the settings
+	data, err = json.MarshalIndent(settings, "", "  ")
+	if err != nil {
+		return fmt.Errorf("failed to marshal settings: %w", err)
+	}
+	if err := os.WriteFile(settingsPath, data, 0644); err != nil {
+		return fmt.Errorf("failed to write settings.json: %w", err)
 	}
 
 	return nil

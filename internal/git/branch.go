@@ -94,6 +94,13 @@ func (g *Git) Push(ctx context.Context, branch string) error {
 	return err
 }
 
+// ForcePush force pushes a branch to origin using --force-with-lease for safety.
+// This is safer than --force as it will fail if the remote has commits we don't have.
+func (g *Git) ForcePush(ctx context.Context, branch string) error {
+	_, err := g.run(ctx, "push", "-u", "--force-with-lease", "origin", branch)
+	return err
+}
+
 // MergeConflictError represents a merge conflict that needs resolution
 type MergeConflictError struct {
 	Branch        string

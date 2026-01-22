@@ -32,6 +32,7 @@ const (
 	DialogFirstRunIntroduction // First-run introduction modal
 	DialogQuitConfirm          // Confirm quit with y/n
 	DialogCopyUntrackedFiles   // Prompt to copy untracked files to worktree
+	DialogForcePushConfirm     // Confirm force push by typing "force push"
 )
 
 // DialogModel represents a modal dialog
@@ -187,6 +188,7 @@ const (
 	MergeActionSquashMain MergeAction = "squash_main"
 	MergeActionCreatePR   MergeAction = "create_pr"
 	MergeActionPush       MergeAction = "push"
+	MergeActionForcePush  MergeAction = "force_push"
 	MergeActionCancel     MergeAction = "cancel"
 )
 
@@ -242,9 +244,13 @@ func NewBranchConflictDialog(branchName, workstreamID, branchInfo string) Dialog
 }
 
 // NewMergeDialog creates a merge/PR menu dialog
-func NewMergeDialog(branchName, workstreamID, branchInfo string) DialogModel {
+func NewMergeDialog(branchName, workstreamID, branchInfo string, hasBeenPushed bool, prURL string) DialogModel {
 	var body strings.Builder
 	body.WriteString(fmt.Sprintf("Branch: %s\n", branchName))
+
+	if prURL != "" {
+		body.WriteString(fmt.Sprintf("PR: %s\n", prURL))
+	}
 
 	if branchInfo != "" {
 		body.WriteString("\n")
@@ -252,18 +258,34 @@ func NewMergeDialog(branchName, workstreamID, branchInfo string) DialogModel {
 		body.WriteString("\n")
 	}
 
+	// Build menu items based on state
+	menuItems := []string{
+		"Merge into main (squash)",
+		"Merge into main (merge commit)",
+	}
+
+	if prURL != "" {
+		// PR already exists - grey it out with explanation
+		menuItems = append(menuItems, "Create Pull Request (already exists)")
+	} else {
+		menuItems = append(menuItems, "Create Pull Request")
+	}
+
+	menuItems = append(menuItems, "Push branch only")
+
+	// Show force push option if branch has been pushed (allows re-pushing after amend)
+	if hasBeenPushed {
+		menuItems = append(menuItems, "Force push (--force-with-lease)")
+	}
+
+	menuItems = append(menuItems, "Cancel")
+
 	return DialogModel{
-		Type:         DialogMerge,
-		Title:        "Merge / PR Options",
-		Body:         body.String(),
-		WorkstreamID: workstreamID,
-		MenuItems: []string{
-			"Merge into main (squash)",
-			"Merge into main (merge commit)",
-			"Create Pull Request",
-			"Push branch only",
-			"Cancel",
-		},
+		Type:          DialogMerge,
+		Title:         "Merge / PR Options",
+		Body:          body.String(),
+		WorkstreamID:  workstreamID,
+		MenuItems:     menuItems,
 		MenuSelection: 0,
 	}
 }
@@ -507,6 +529,50 @@ Type "destroy" to confirm:`
 	}
 }
 
+// NewForcePushConfirmDialog creates a confirmation dialog for force pushing
+func NewForcePushConfirmDialog(branchName, workstreamID string) DialogModel {
+	ti := textinput.New()
+	ti.Placeholder = "type 'force push' to confirm"
+	ti.SetWidth(40)
+	ti.Focus()
+	ti.CharLimit = 20
+
+	// Style the textinput
+	ti.Prompt = "› "
+	ti.SetStyles(textinput.Styles{
+		Focused: textinput.StyleState{
+			Prompt:      DialogInputPrompt,
+			Text:        DialogInputText,
+			Placeholder: DialogInputPlaceholder,
+		},
+		Blurred: textinput.StyleState{
+			Prompt:      DialogInputPrompt,
+			Text:        DialogInputText,
+			Placeholder: DialogInputPlaceholder,
+		},
+	})
+
+	body := fmt.Sprintf(`⚠️  Force Push Warning
+
+Branch: %s
+
+This will:
+  • Overwrite the remote branch history
+  • Use --force-with-lease for safety
+  • May cause issues for others using this branch
+
+Type "force push" to confirm:`, branchName)
+
+	return DialogModel{
+		Type:         DialogForcePushConfirm,
+		Title:        "Force Push?",
+		Body:         body,
+		Input:        ti,
+		ConfirmWord:  "force push",
+		WorkstreamID: workstreamID,
+	}
+}
+
 // NewResourceUsageDialog creates a resource usage dialog
 func NewResourceUsageDialog(isGlobal bool) DialogModel {
 	title := "Resource Usage (Project)"
@@ -703,16 +769,24 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 			}
 
 			if d.Type == DialogMerge {
+				// Menu has variable length, so check selected item text
+				selectedItem := ""
+				if d.MenuSelection >= 0 && d.MenuSelection < len(d.MenuItems) {
+					selectedItem = d.MenuItems[d.MenuSelection]
+				}
+
 				var action MergeAction
-				switch d.MenuSelection {
-				case 0:
+				switch {
+				case strings.HasPrefix(selectedItem, "Merge into main (squash)"):
 					action = MergeActionSquashMain
-				case 1:
+				case strings.HasPrefix(selectedItem, "Merge into main (merge commit)"):
 					action = MergeActionMergeMain
-				case 2:
+				case strings.HasPrefix(selectedItem, "Create Pull Request"):
 					action = MergeActionCreatePR
-				case 3:
+				case strings.HasPrefix(selectedItem, "Push branch only"):
 					action = MergeActionPush
+				case strings.HasPrefix(selectedItem, "Force push"):
+					action = MergeActionForcePush
 				default:
 					action = MergeActionCancel
 				}
@@ -820,7 +894,7 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 				}
 			}
 
-			if d.Type == DialogDestroy || d.Type == DialogPruneAllConfirm || d.Type == DialogPruneProjectConfirm {
+			if d.Type == DialogDestroy || d.Type == DialogPruneAllConfirm || d.Type == DialogPruneProjectConfirm || d.Type == DialogForcePushConfirm {
 				if strings.ToLower(d.Input.Value()) == d.ConfirmWord {
 					return d, func() tea.Msg {
 						return DialogConfirmMsg{

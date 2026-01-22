@@ -28,6 +28,7 @@ type GitClient interface {
 
 	// Remote operations
 	Push(ctx context.Context, branch string) error
+	ForcePush(ctx context.Context, branch string) error
 	FetchMain(ctx context.Context) error
 	PullMain(ctx context.Context) error
 	UpdateMainBranch(ctx context.Context) error

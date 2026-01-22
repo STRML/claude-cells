@@ -56,6 +56,9 @@ type Workstream struct {
 	PRNumber int    // GitHub PR number if created
 	PRURL    string // GitHub PR URL if created
 
+	// Push tracking
+	HasBeenPushed bool // True if the branch has been pushed to remote (warns against commit amends)
+
 	// Auto-continue support
 	WasInterrupted bool // True if Claude was actively working when session ended
 }
@@ -201,4 +204,34 @@ func (w *Workstream) String() string {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	return fmt.Sprintf("%s (%s)", w.BranchName, w.State)
+}
+
+// SetHasBeenPushed marks the branch as having been pushed to remote.
+// Once pushed, commit amends should be avoided as they will cause push failures.
+func (w *Workstream) SetHasBeenPushed(pushed bool) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.HasBeenPushed = pushed
+}
+
+// GetHasBeenPushed returns whether the branch has been pushed to remote (thread-safe).
+func (w *Workstream) GetHasBeenPushed() bool {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.HasBeenPushed
+}
+
+// SetPRInfo sets the PR number and URL after a PR is created.
+func (w *Workstream) SetPRInfo(prNumber int, prURL string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.PRNumber = prNumber
+	w.PRURL = prURL
+}
+
+// GetPRInfo returns the PR number and URL (thread-safe).
+func (w *Workstream) GetPRInfo() (int, string) {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.PRNumber, w.PRURL
 }

@@ -1205,6 +1205,19 @@ Scroll Mode:
 				m.toastExpiry = time.Now().Add(toastDuration)
 			}
 
+		case DialogForcePushConfirm:
+			// User typed "force push" - execute force push
+			for i := range m.panes {
+				if m.panes[i].Workstream().ID == msg.WorkstreamID {
+					m.panes[i].ClearInPaneDialog()
+					ws := m.panes[i].Workstream()
+					m.panes[i].AppendOutput("\nForce pushing branch to origin (--force-with-lease)...\n")
+					dialog := NewProgressDialog("Force Pushing Branch", fmt.Sprintf("Branch: %s\n\nForce pushing with --force-with-lease...", ws.BranchName), ws.ID)
+					m.panes[i].SetInPaneDialog(&dialog)
+					return m, ForcePushBranchCmd(ws)
+				}
+			}
+
 		case DialogQuitConfirm:
 			// User confirmed quit - pause containers and save state
 			if len(m.panes) > 0 {
@@ -1371,7 +1384,7 @@ Scroll Mode:
 				ws := m.panes[i].Workstream()
 				if msg.Error != nil {
 					// Error checking - just show merge dialog anyway
-					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo)
+					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo, ws.GetHasBeenPushed(), ws.PRURL)
 					m.panes[i].SetInPaneDialog(&dialog)
 				} else if msg.HasChanges {
 					// Has uncommitted changes - ask if user wants to commit first
@@ -1379,7 +1392,7 @@ Scroll Mode:
 					m.panes[i].SetInPaneDialog(&dialog)
 				} else {
 					// No uncommitted changes - show merge dialog directly
-					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo)
+					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo, ws.GetHasBeenPushed(), ws.PRURL)
 					m.panes[i].SetInPaneDialog(&dialog)
 				}
 				break
@@ -1406,7 +1419,7 @@ Scroll Mode:
 					// Don't show merge dialog yet - user can press 'm' again after commit
 				case CommitBeforeMergeNo:
 					// Continue to merge dialog without committing (in-pane)
-					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo)
+					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo, ws.GetHasBeenPushed(), ws.PRURL)
 					m.panes[i].SetInPaneDialog(&dialog)
 				}
 				break
@@ -1760,6 +1773,11 @@ Scroll Mode:
 					dialog := NewProgressDialog("Pushing Branch", fmt.Sprintf("Branch: %s\n\nPushing to origin...", ws.BranchName), ws.ID)
 					m.panes[i].SetInPaneDialog(&dialog)
 					return m, PushBranchCmd(ws)
+				case MergeActionForcePush:
+					// Show force push confirmation dialog (requires typing "force push")
+					dialog := NewForcePushConfirmDialog(ws.BranchName, ws.ID)
+					m.panes[i].SetInPaneDialog(&dialog)
+					return m, nil
 				}
 				break
 			}
@@ -1769,17 +1787,27 @@ Scroll Mode:
 	case PushBranchResultMsg:
 		for i := range m.panes {
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				ws := m.panes[i].Workstream()
+				pushType := "Push"
+				if msg.ForcePush {
+					pushType = "Force push"
+				}
 				if msg.Error != nil {
-					m.panes[i].AppendOutput(fmt.Sprintf("Push failed: %v\n", msg.Error))
+					m.panes[i].AppendOutput(fmt.Sprintf("%s failed: %v\n", pushType, msg.Error))
 					// Update in-pane progress dialog if open
 					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
-						dialog.SetComplete(fmt.Sprintf("Push Failed\n\n%v", msg.Error))
+						dialog.SetComplete(fmt.Sprintf("%s Failed\n\n%v", pushType, msg.Error))
 					}
 				} else {
-					m.panes[i].AppendOutput("Branch pushed successfully!\n")
+					m.panes[i].AppendOutput(fmt.Sprintf("%s successful!\n", pushType))
+					// Mark branch as pushed - this enables force push option in merge dialog
+					// and signals to Claude not to use commit amend
+					ws.SetHasBeenPushed(true)
+					// Notify Claude Code about the push (uses Kitty Enter)
+					_ = m.panes[i].SendToPTYWithEnter(fmt.Sprintf("[ccells] ✓ Branch '%s' pushed to remote (avoid using commit --amend)", ws.BranchName))
 					// Update in-pane progress dialog if open
 					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
-						dialog.SetComplete("Branch pushed successfully!\n\nPress Enter or Esc to close.")
+						dialog.SetComplete(fmt.Sprintf("%s successful!\n\nPress Enter or Esc to close.", pushType))
 					}
 				}
 				break
@@ -1790,6 +1818,7 @@ Scroll Mode:
 	case PRCreatedMsg:
 		for i := range m.panes {
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				ws := m.panes[i].Workstream()
 				if msg.Error != nil {
 					m.panes[i].AppendOutput(fmt.Sprintf("PR creation failed: %v\n", msg.Error))
 					// Update in-pane progress dialog if open
@@ -1798,8 +1827,11 @@ Scroll Mode:
 					}
 				} else {
 					m.panes[i].AppendOutput(fmt.Sprintf("PR created: %s\n", msg.PRURL))
+					// Store PR info and mark as pushed (PR creation pushes the branch)
+					ws.SetPRInfo(msg.PRNumber, msg.PRURL)
+					ws.SetHasBeenPushed(true)
 					// Notify Claude Code about the PR creation (uses Kitty Enter)
-					_ = m.panes[i].SendToPTYWithEnter(fmt.Sprintf("[ccells] ✓ PR #%d created: %s", msg.PRNumber, msg.PRURL))
+					_ = m.panes[i].SendToPTYWithEnter(fmt.Sprintf("[ccells] ✓ PR #%d created: %s (avoid using commit --amend)", msg.PRNumber, msg.PRURL))
 					// Update in-pane progress dialog if open
 					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
 						dialog.SetComplete(fmt.Sprintf("Pull Request Created!\n\nPR #%d: %s\n\nPress Enter or Esc to close.", msg.PRNumber, msg.PRURL))
@@ -2040,6 +2072,9 @@ Scroll Mode:
 			ws.Title = saved.Title                     // Restore generated title
 			ws.ClaudeSessionID = saved.ClaudeSessionID // Restore session ID for --resume
 			ws.WasInterrupted = saved.WasInterrupted   // Restore interrupted state for auto-continue
+			ws.HasBeenPushed = saved.HasBeenPushed     // Restore push status
+			ws.PRNumber = saved.PRNumber               // Restore PR number if created
+			ws.PRURL = saved.PRURL                     // Restore PR URL if created
 			if err := m.manager.Add(ws); err != nil {
 				// Skip workstreams that exceed the limit during restore
 				continue
