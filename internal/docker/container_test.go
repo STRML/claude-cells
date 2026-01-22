@@ -4,6 +4,7 @@ package docker
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -269,13 +270,18 @@ func TestContainer_CleanupOrphanedContainers(t *testing.T) {
 
 	testImage := getTestImage(t, client, ctx)
 
-	// Create two containers - one "known" and one "orphan"
+	// Use a unique project name to avoid conflicts with other tests
+	projectName := "cleanuptest"
+	timestamp := time.Now().Format("150405")
+
+	// Container names follow format: ccells-<projectName>-<branchName>-<timestamp>
+	// So for project "cleanuptest", containers should be "ccells-cleanuptest-*"
 	knownCfg := &ContainerConfig{
-		Name:  "ccells-known-test-" + time.Now().Format("150405"),
+		Name:  fmt.Sprintf("ccells-%s-known-%s", projectName, timestamp),
 		Image: testImage,
 	}
 	orphanCfg := &ContainerConfig{
-		Name:  "ccells-orphan-test-" + time.Now().Format("150405"),
+		Name:  fmt.Sprintf("ccells-%s-orphan-%s", projectName, timestamp),
 		Image: testImage,
 	}
 
@@ -304,8 +310,8 @@ func TestContainer_CleanupOrphanedContainers(t *testing.T) {
 		t.Fatalf("StartContainer(orphan) error = %v", err)
 	}
 
-	// Call cleanup with only knownID as known
-	removed, err := client.CleanupOrphanedContainers(ctx, "ccells", []string{knownID}, nil)
+	// Call cleanup with only knownID as known - orphan should be removed
+	removed, err := client.CleanupOrphanedContainers(ctx, projectName, []string{knownID}, nil)
 	if err != nil {
 		t.Fatalf("CleanupOrphanedContainers() error = %v", err)
 	}
