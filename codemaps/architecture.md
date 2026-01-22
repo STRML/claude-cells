@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Last updated: 2026-01-22
+Last updated: 2026-01-22 (Updated: orchestrator extraction)
 
 ## Architecture Assessment: 7.5/10
 
@@ -65,10 +65,37 @@ AppModel                    # Main application state, message routing
 - `app.go` - Central hub: state management, message routing, layout calculation
 - `pane.go` - Terminal emulation via vt10x, ANSI color handling, scrollback
 - `pty.go` - Docker exec PTY sessions, keyboard input, session ID capture
-- `container.go` - Container lifecycle commands (create, pause, resume, destroy)
+- `container.go` - Container lifecycle Bubble Tea commands (delegates to orchestrator)
 - `dialog.go` - Modal dialog system
 - `layout.go` - Multi-pane layout calculations
 - `styles.go` - Lipgloss-based styling and color utilities
+
+### Orchestration Layer (`internal/orchestrator/`) [NEW]
+
+Workstream lifecycle business logic extracted from TUI. Enables testable code without Bubble Tea dependencies, reusable for CLI tools or API servers.
+
+```
+WorkstreamOrchestrator interface
+  |-- CreateWorkstream()     - Full flow: worktree + image + config + container
+  |-- CheckBranchConflict()  - Detect existing branch/worktree conflicts
+  |-- PauseWorkstream()      - Pause container
+  |-- ResumeWorkstream()     - Resume container
+  |-- DestroyWorkstream()    - Remove container + worktree + optionally branch
+  |-- RebuildWorkstream()    - Destroy + recreate (keeps worktree)
+```
+
+**Key files:**
+- `orchestrator.go` - Interface, `Orchestrator` struct, options types (`CreateOptions`, `DestroyOptions`, `CreateResult`, `BranchConflict`)
+- `create.go` - Complete creation flow: worktree, image resolution, config building, container start
+- `lifecycle.go` - Pause, resume, destroy, rebuild operations
+
+**CreateWorkstream flow:**
+1. Update main branch (optional)
+2. Create git worktree (new or from existing branch)
+3. Copy untracked files (if requested)
+4. Resolve image (devcontainer auto-detect or default)
+5. Build container config (credentials, git identity, timezone, extra env)
+6. Create and start container
 
 ### Workstream Management (`internal/workstream/`)
 
@@ -274,21 +301,32 @@ Panes embed a virtual terminal emulator to properly handle:
 
 ## Architectural Smells
 
-### 1. Business Logic in TUI Layer (In Progress - Partially Resolved)
+### 1. Business Logic in TUI Layer (Significantly Improved)
 
-**File:** `internal/tui/container.go` (1653 lines)
+**File:** `internal/tui/container.go` (1356 lines, reduced from 1653)
 
-Container orchestration logic (git + docker operations) is embedded in `tea.Cmd` functions. This mixes UI concerns with business logic.
+Container orchestration logic has been extracted to `internal/orchestrator` package. The TUI layer now delegates to the orchestrator for core operations.
 
-**Progress:** The `internal/orchestrator` package has been created to address this:
+**Completed extraction (PR #8):**
 - `orchestrator.go` - `WorkstreamOrchestrator` interface and `Orchestrator` implementation
-- `create.go` - `CreateWorkstream()` with worktree and container creation
+- `create.go` - Complete workstream creation flow:
+  - `CreateWorkstream()` - Full orchestration of worktree + container + credentials
+  - `CheckBranchConflict()` - Branch/worktree conflict detection
+  - `resolveImage()` - Auto-detect image from devcontainer or use default
+  - `buildFullContainerConfig()` - Container config with credentials, git identity
+  - `copyUntrackedFiles()` - Copy untracked files to worktree
 - `lifecycle.go` - `PauseWorkstream()`, `ResumeWorkstream()`, `DestroyWorkstream()`, `RebuildWorkstream()`
-- AppModel now has an `orchestrator` field for clean delegation
+- AppModel has `orchestrator` field - accessed via `Orchestrator()` getter
+- `container.go` uses orchestrator for create/destroy operations
 
-**Remaining work:** `container.go` still contains additional complexity (image building, devcontainer support, credential management) that requires extending the orchestrator.
+**Remaining in `container.go`:**
+- Bubble Tea message types and command wrappers
+- PTY session management
+- Pairing mode integration
+- Title generation via Claude CLI
+- Container tracking/credential registration (global state)
 
-**Impact:** Can't reuse logic in CLI tools or API servers; hard to unit test.
+**Impact:** Core business logic is now testable without TUI. ~300 lines extracted.
 
 ### 2. God Objects
 
@@ -357,11 +395,14 @@ var credentialRefresher *...       // container.go:26
 ## Improvement Roadmap
 
 ### High Priority
-1. **Extract Orchestration Layer** ✅ In Progress
-   - `internal/orchestrator` package created with `WorkstreamOrchestrator` interface
-   - Basic CRUD operations: `CreateWorkstream`, `PauseWorkstream`, `ResumeWorkstream`, `DestroyWorkstream`, `RebuildWorkstream`
-   - AppModel wired to use orchestrator
-   - **Next steps:** Extend orchestrator to handle image building, devcontainer support, credential management
+1. **Extract Orchestration Layer** ✅ Completed (PR #8)
+   - `internal/orchestrator` package with full `WorkstreamOrchestrator` interface
+   - Complete operations: `CreateWorkstream`, `PauseWorkstream`, `ResumeWorkstream`, `DestroyWorkstream`, `RebuildWorkstream`, `CheckBranchConflict`
+   - Image resolution: auto-detect from devcontainer, build with devcontainer CLI, fallback to default
+   - Container config: credentials, git identity, timezone, extra env vars
+   - Worktree management: create, cleanup on error, branch sanitization
+   - AppModel uses orchestrator via `Orchestrator()` getter
+   - **Next steps:** Move container tracking and credential refresh registration into orchestrator
 
 ### Medium Priority
 2. **Refactor PaneModel** - Split into focused components

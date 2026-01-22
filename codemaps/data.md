@@ -1,6 +1,6 @@
 # Data Models and Schemas
 
-Last updated: 2026-01-22
+Last updated: 2026-01-22 (Updated: orchestrator types)
 
 ## Overview
 
@@ -159,6 +159,50 @@ Location: `~/.claude-cells/config.json`
 type GlobalConfig struct {
     Version           int  `json:"version"`
     IntroductionShown bool `json:"introduction_shown"`
+}
+```
+
+---
+
+## Orchestrator Types [NEW - PR #8]
+
+### Orchestration Options and Results
+
+```go
+// orchestrator/orchestrator.go
+
+// CreateOptions configures workstream creation.
+type CreateOptions struct {
+    RepoPath          string   // Repository path
+    CopyUntracked     bool     // Copy untracked files to worktree
+    UntrackedFiles    []string // List of untracked files to copy
+    ImageName         string   // Empty = auto-detect from devcontainer or default
+    IsResume          bool     // Resuming existing session (use --continue)
+    UseExistingBranch bool     // Use existing branch without creating new one
+    UpdateMain        bool     // Auto-pull main before creating branch
+}
+
+// CreateResult contains the result of workstream creation.
+type CreateResult struct {
+    ContainerID   string // Docker container ID
+    ContainerName string // Container name (ccells-<branch>)
+    ConfigDir     string // Container config directory for credential registration
+    WorktreePath  string // Git worktree path
+}
+
+// DestroyOptions configures workstream destruction.
+type DestroyOptions struct {
+    DeleteBranch bool // Delete the git branch
+    KeepWorktree bool // Keep worktree (for rebuild)
+    Force        bool // Force even if container is running
+}
+
+// BranchConflict contains information about an existing branch conflict.
+type BranchConflict struct {
+    BranchName   string // The conflicting branch name
+    HasWorktree  bool   // Whether an active worktree exists
+    WorktreePath string // Path to existing worktree (if any)
+    BranchInfo   string // Commit info for the branch
 }
 ```
 

@@ -1,15 +1,16 @@
 # Backend Structure
 
-Last updated: 2026-01-22
+Last updated: 2026-01-22 (Updated: orchestrator extraction)
 
 ## Quick Reference: Large Files
 
 | File | Lines | Notes |
 |------|-------|-------|
-| `tui/app.go` | 2000+ | Main event loop - acceptable |
-| `tui/pane.go` | 1701 | God object - candidate for split |
-| `tui/container.go` | 1653 | Business logic in TUI - extract to orchestrator |
-| `tui/dialog.go` | 1329 | Multiple dialog types - could split |
+| `tui/app.go` | 2722 | Main event loop - acceptable for Bubble Tea |
+| `tui/pane.go` | 1721 | God object - candidate for split |
+| `tui/container.go` | 1356 | **Reduced from 1653** - core logic extracted to orchestrator |
+| `tui/dialog.go` | 1332 | Multiple dialog types - could split |
+| `orchestrator/create.go` | 309 | NEW - Creation flow extracted from container.go |
 | `git/branch.go` | 700+ | Acceptable |
 | `docker/container.go` | 600+ | Acceptable |
 
@@ -99,11 +100,12 @@ The main application package implementing the Bubble Tea TUI.
 
 ---
 
-## `internal/orchestrator/`
+## `internal/orchestrator/` [EXPANDED - PR #8]
 
-Workstream lifecycle orchestration. This package extracts business logic from `tui/container.go` to enable:
-- Testable code without Bubble Tea dependencies
+Workstream lifecycle orchestration extracted from `tui/container.go`. Enables:
+- Testable business logic without Bubble Tea dependencies
 - Reusable logic for CLI tools or API servers
+- ~300 lines of core logic extracted from TUI
 
 ### Key Types
 
@@ -111,15 +113,22 @@ Workstream lifecycle orchestration. This package extracts business logic from `t
 |------|------|-------------|
 | `WorkstreamOrchestrator` | orchestrator.go | Interface for lifecycle operations |
 | `Orchestrator` | orchestrator.go | Implementation coordinating Docker + Git |
-| `CreateOptions` | orchestrator.go | Configuration for workstream creation |
-| `DestroyOptions` | orchestrator.go | Configuration for workstream destruction |
+| `CreateOptions` | orchestrator.go | Creation config: repo path, image, resume flags, untracked files |
+| `CreateResult` | orchestrator.go | Result: container ID, name, config dir, worktree path |
+| `DestroyOptions` | orchestrator.go | Destruction config: delete branch, keep worktree, force |
+| `BranchConflict` | orchestrator.go | Branch conflict info: name, worktree path, commit info |
 
 ### WorkstreamOrchestrator Interface
 
 ```go
 type WorkstreamOrchestrator interface {
     // CreateWorkstream creates a new workstream with container and worktree.
-    CreateWorkstream(ctx, ws, opts) (containerID string, error)
+    // Returns CreateResult with container info on success.
+    CreateWorkstream(ctx, ws, opts) (*CreateResult, error)
+
+    // CheckBranchConflict checks if a branch already exists.
+    // Returns nil if no conflict, or BranchConflict with details.
+    CheckBranchConflict(ctx, branchName) (*BranchConflict, error)
 
     // PauseWorkstream pauses a running workstream's container.
     PauseWorkstream(ctx, ws) error
@@ -131,7 +140,21 @@ type WorkstreamOrchestrator interface {
     DestroyWorkstream(ctx, ws, opts) error
 
     // RebuildWorkstream destroys and recreates the container.
-    RebuildWorkstream(ctx, ws, opts) (containerID string, error)
+    RebuildWorkstream(ctx, ws, opts) (*CreateResult, error)
+}
+```
+
+### CreateOptions Fields
+
+```go
+type CreateOptions struct {
+    RepoPath          string   // Repository path
+    CopyUntracked     bool     // Copy untracked files to worktree
+    UntrackedFiles    []string // List of untracked files to copy
+    ImageName         string   // Empty = auto-detect from devcontainer or default
+    IsResume          bool     // Resuming existing session (use --continue)
+    UseExistingBranch bool     // Use existing branch without creating new one
+    UpdateMain        bool     // Auto-pull main before creating branch
 }
 ```
 
@@ -141,39 +164,68 @@ type WorkstreamOrchestrator interface {
 - `New(dockerClient, gitFactory, repoPath)` - Create orchestrator instance
 
 **create.go:**
-- `CreateWorkstream()` - Create worktree + container + start
-- `createWorktree()` - Create isolated git worktree
-- `buildContainerConfig()` - Build Docker container config
-- `copyUntrackedFiles()` - Copy untracked files to worktree
+- `CreateWorkstream()` - Complete creation flow (see below)
+- `CheckBranchConflict()` - Check for existing branch/worktree conflicts
+- `createWorktree()` - Create isolated git worktree (sanitizes branch names)
+- `resolveImage()` - Auto-detect image, build with devcontainer CLI if needed
+- `buildFullContainerConfig()` - Build config with credentials, git identity, env
+- `createAndStartContainer()` - Create and start container (cleanup on failure)
+- `copyUntrackedFiles()` - Copy untracked files preserving permissions
+- `cleanupWorktree()` - Remove worktree on error
+- `sanitizeBranchName()` - Convert branch to safe filesystem path (e.g., `feature/foo` → `feature-foo`)
 
 **lifecycle.go:**
 - `PauseWorkstream()` - Pause container
-- `ResumeWorkstream()` - Resume container
+- `ResumeWorkstream()` - Resume container (unpause)
 - `DestroyWorkstream()` - Stop container, remove worktree, optionally delete branch
-- `RebuildWorkstream()` - Destroy and recreate container (keeps worktree)
+- `RebuildWorkstream()` - Destroy + recreate container (keeps worktree and branch)
 
-### Usage
+### CreateWorkstream Flow
+
+```
+1. Update main branch (optional, non-fatal)
+2. Create git worktree (new or from existing branch)
+   - Sanitize branch name for filesystem
+   - Clean up orphaned worktree directories
+3. Copy untracked files (if requested and not using existing branch)
+4. Resolve image:
+   - If ImageName provided, use it
+   - Else auto-detect from devcontainer.json
+   - Build with devcontainer CLI if available
+   - Fall back to simple docker build
+5. Build container config:
+   - Load devcontainer env vars
+   - Create per-container isolated config directory
+   - Set up credentials, git identity, timezone
+6. Create and start container
+   - Cleanup worktree and config on failure
+```
+
+### Usage in TUI
 
 ```go
-// In AppModel initialization
-dockerClient, _ := docker.NewClient()
-gitFactory := func(repoPath string) git.GitClient {
-    return git.New(repoPath)
+// AppModel stores orchestrator
+type AppModel struct {
+    orchestrator *orchestrator.Orchestrator
 }
-orch := orchestrator.New(dockerClient, gitFactory, cwd)
 
-// Create workstream
-containerID, err := orch.CreateWorkstream(ctx, ws, orchestrator.CreateOptions{
-    RepoPath:  "/path/to/repo",
-    ImageName: "ccells-project:latest",
+// Access via getter (returns nil if Docker unavailable)
+func (m *AppModel) Orchestrator() *orchestrator.Orchestrator {
+    return m.orchestrator
+}
+
+// container.go creates orchestrator per-command
+orch := orchestrator.New(dockerClient, gitFactory, repoPath)
+result, err := orch.CreateWorkstream(ctx, ws, orchestrator.CreateOptions{
+    RepoPath:      repoPath,
+    CopyUntracked: true,
+    UntrackedFiles: untrackedFiles,
 })
 
-// Lifecycle operations
-err = orch.PauseWorkstream(ctx, ws)
-err = orch.ResumeWorkstream(ctx, ws)
-err = orch.DestroyWorkstream(ctx, ws, orchestrator.DestroyOptions{
-    DeleteBranch: true,
-})
+// Use result
+ws.ContainerID = result.ContainerID
+ws.WorktreePath = result.WorktreePath
+registerContainerCredentials(result.ContainerID, result.ContainerName, result.ConfigDir)
 ```
 
 ---
@@ -495,6 +547,7 @@ cmd/ccells/main.go
     |
     +-> internal/tui (main app)
     |     |
+    |     +-> internal/orchestrator (workstream lifecycle) [NEW]
     |     +-> internal/workstream (state management)
     |     +-> internal/docker (container ops)
     |     +-> internal/git (git ops)
@@ -504,6 +557,11 @@ cmd/ccells/main.go
     +-> internal/docker (validation, tracking)
     +-> internal/git (repo ID)
     +-> internal/workstream (state loading)
+
+internal/orchestrator [NEW]
+    +-> internal/docker (DockerClient interface)
+    +-> internal/git (GitClient via factory)
+    +-> internal/workstream (Workstream type)
 
 internal/docker
     +-> configs (embedded Dockerfile)
@@ -524,11 +582,13 @@ internal/sync
 2. **Git Abstraction** - `GitClient` interface with domain-specific errors
 3. **Workstream Domain** - Clean separation between `Workstream` (runtime) and `SavedWorkstream` (persistence)
 
-### Leaky Boundaries ⚠️
+### Leaky Boundaries ⚠️ (Improving)
 
-1. **TUI → Docker Coupling** (`container.go`)
-   - 1653 lines of orchestration logic inside TUI package
-   - Returns `tea.Msg` types, tightly coupling to Bubble Tea
+1. **TUI → Docker Coupling** (`container.go`) - **Partially Fixed**
+   - Reduced from 1653 to 1356 lines
+   - Core orchestration extracted to `internal/orchestrator`
+   - Remaining: Bubble Tea commands, PTY management, pairing integration
+   - Returns `tea.Msg` types (acceptable for TUI layer)
 
 2. **Global State in TUI**
    ```go
@@ -536,6 +596,7 @@ internal/sync
    var containerTracker *...      // container.go
    var credentialRefresher *...   // container.go
    ```
+   - **Next step:** Move tracker/refresher registration into orchestrator
 
 3. **PaneModel God Object** - Mixes rendering, PTY, scrolling, animations
 
@@ -547,8 +608,10 @@ Go's package system prevents import cycles. Well done!
 
 1. `cmd/ccells/main.go` - Startup flow
 2. `internal/tui/app.go` - Main event loop
-3. `internal/workstream/workstream.go` - Core domain model
-4. `internal/workstream/persistent_manager.go` - Auto-saving state
-5. `internal/docker/interface.go` - Docker abstraction
-6. `internal/git/interface.go` - Git abstraction
-7. `internal/tui/container.go` - Container orchestration (⚠️ business logic in TUI)
+3. `internal/orchestrator/orchestrator.go` - Workstream lifecycle interface [NEW]
+4. `internal/orchestrator/create.go` - Creation flow (worktree + container) [NEW]
+5. `internal/workstream/workstream.go` - Core domain model
+6. `internal/workstream/persistent_manager.go` - Auto-saving state
+7. `internal/docker/interface.go` - Docker abstraction
+8. `internal/git/interface.go` - Git abstraction
+9. `internal/tui/container.go` - Bubble Tea commands (delegates to orchestrator)
