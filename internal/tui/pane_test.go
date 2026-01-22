@@ -1067,3 +1067,143 @@ func TestPaneModel_ViewportFillHeight(t *testing.T) {
 		t.Error("Viewport should have FillHeight=true to ensure consistent output height")
 	}
 }
+
+// TestPaneModel_CursorVisibleInInputMode verifies that the cursor is visible
+// when in input mode, regardless of the vterm's cursor visibility state.
+// This tests the fix for cursor visibility when Claude Code hides the cursor.
+func TestPaneModel_CursorVisibleInInputMode(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24)
+	pane.SetFocused(true)
+	pane.SetInputMode(true)
+
+	// Write some content to establish vterm state
+	pane.WritePTYOutput([]byte("Hello, World!\r\n"))
+	pane.WritePTYOutput([]byte("$ "))
+
+	// Get cursor position - should be visible even if vterm hides cursor
+	cursorPos := pane.GetCursorPosition()
+
+	if !cursorPos.Visible {
+		t.Error("Cursor should be visible when focused and in input mode")
+	}
+
+	// Cursor should be at a reasonable position (after "$ ")
+	// X position should be > 0 (after the prompt characters)
+	if cursorPos.X < 2 {
+		t.Errorf("Cursor X position seems wrong: got %d, expected >= 2 (after border+padding)", cursorPos.X)
+	}
+}
+
+// TestPaneModel_CursorHiddenWhenNotInInputMode verifies that the cursor
+// respects vterm visibility when NOT in input mode.
+func TestPaneModel_CursorHiddenWhenNotInInputMode(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24)
+	pane.SetFocused(true)
+	pane.SetInputMode(false) // Not in input mode
+
+	pane.WritePTYOutput([]byte("Hello\r\n"))
+
+	// GetCursorPosition requires inputMode to be true
+	cursorPos := pane.GetCursorPosition()
+
+	if cursorPos.Visible {
+		t.Error("Cursor should not be visible when not in input mode (GetCursorPosition)")
+	}
+}
+
+// TestPaneModel_CursorNotVisibleWhenUnfocused verifies the cursor is hidden
+// when the pane is not focused.
+func TestPaneModel_CursorNotVisibleWhenUnfocused(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24)
+	pane.SetFocused(false) // Not focused
+	pane.SetInputMode(true)
+
+	pane.WritePTYOutput([]byte("Hello\r\n"))
+
+	cursorPos := pane.GetCursorPosition()
+
+	if cursorPos.Visible {
+		t.Error("Cursor should not be visible when pane is not focused")
+	}
+}
+
+// TestPaneModel_SoftwareCursorInInputMode verifies that the software cursor
+// (inverse video) is rendered when focused and in input mode.
+func TestPaneModel_SoftwareCursorInInputMode(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24)
+	pane.SetFocused(true)
+	pane.SetInputMode(true)
+
+	// Write a simple prompt
+	pane.WritePTYOutput([]byte("$ "))
+
+	// Render the vterm content
+	vtermContent := pane.renderVTerm()
+
+	// Should contain inverse video escape sequence for cursor
+	// The cursor is at position (2, 0) - after "$ "
+	if !strings.Contains(vtermContent, "\x1b[7m") {
+		t.Error("renderVTerm should include inverse video escape (\\x1b[7m) for software cursor when in input mode")
+	}
+}
+
+// TestPaneModel_NoSoftwareCursorWhenNotFocused verifies that the software
+// cursor is not rendered when the pane is not focused.
+func TestPaneModel_NoSoftwareCursorWhenNotFocused(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24)
+	pane.SetFocused(false) // Not focused
+	pane.SetInputMode(true)
+
+	pane.WritePTYOutput([]byte("$ "))
+
+	vtermContent := pane.renderVTerm()
+
+	// Should NOT contain inverse video when not focused
+	if strings.Contains(vtermContent, "\x1b[7m") {
+		t.Error("renderVTerm should NOT include inverse video escape when pane is not focused")
+	}
+}
+
+// TestPaneModel_CursorVisibleAfterVtermHidesCursor verifies that entering
+// input mode shows the cursor even after the vterm received a hide cursor
+// escape sequence.
+func TestPaneModel_CursorVisibleAfterVtermHidesCursor(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24)
+	pane.SetFocused(true)
+
+	// Write some content then hide cursor (like Claude Code does while working)
+	pane.WritePTYOutput([]byte("Working...\r\n"))
+	pane.WritePTYOutput([]byte("\x1b[?25l")) // Hide cursor escape sequence
+
+	// Verify vterm thinks cursor is hidden
+	if pane.vterm.CursorVisible() {
+		t.Log("Note: vterm.CursorVisible() returned true after hide sequence - test may not be accurate")
+	}
+
+	// Now enter input mode
+	pane.SetInputMode(true)
+
+	// Software cursor should still show in renderVTerm
+	vtermContent := pane.renderVTerm()
+	if !strings.Contains(vtermContent, "\x1b[7m") {
+		t.Error("Software cursor should show when in input mode, even after vterm hides cursor")
+	}
+
+	// GetCursorPosition should also return visible
+	cursorPos := pane.GetCursorPosition()
+	if !cursorPos.Visible {
+		t.Error("GetCursorPosition should return Visible=true in input mode, even after vterm hides cursor")
+	}
+}
