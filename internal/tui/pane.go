@@ -1176,8 +1176,23 @@ func (p *PaneModel) renderVTerm() (result string) {
 	return result
 }
 
-// SetSize sets the pane dimensions
+// SetSize sets the pane dimensions.
+// This sends refresh signals (Ctrl+L, Ctrl+O) to the PTY when size changes.
+// For layout-induced resizes where refresh signals are not wanted, use SetSizeQuiet.
 func (p *PaneModel) SetSize(width, height int) {
+	p.setSizeInternal(width, height, true)
+}
+
+// SetSizeQuiet sets the pane dimensions without sending refresh signals to the PTY.
+// Use this for layout-induced resizes (pane count changes) to avoid sending
+// Ctrl+L/Ctrl+O which can interfere with Claude Code's input handling.
+func (p *PaneModel) SetSizeQuiet(width, height int) {
+	p.setSizeInternal(width, height, false)
+}
+
+// setSizeInternal is the internal implementation of SetSize/SetSizeQuiet.
+// If sendRefresh is true, sends Ctrl+L and Ctrl+O to the PTY to trigger redraw.
+func (p *PaneModel) setSizeInternal(width, height int, sendRefresh bool) {
 	// Track if size is actually changing (to trigger resize settling)
 	sizeChanged := p.width != width || p.height != height
 
@@ -1213,16 +1228,22 @@ func (p *PaneModel) SetSize(width, height int) {
 			p.resizeTime = time.Now()
 		}
 
-		// Always send Ctrl+L on resize to trigger a full redraw.
-		// This ensures the process redraws for the new size, preventing corruption
-		// from output generated for the old size.
-		_ = p.pty.Write([]byte{12}) // Ctrl+L (form feed) - triggers screen redraw
+		// Only send refresh signals if requested (i.e., for actual window resizes)
+		// Layout-induced resizes (pane count changes) should not send these as
+		// Ctrl+O can interfere with Claude Code's input handling, causing newlines
+		// to be inserted in the input area.
+		if sendRefresh {
+			// Always send Ctrl+L on resize to trigger a full redraw.
+			// This ensures the process redraws for the new size, preventing corruption
+			// from output generated for the old size.
+			_ = p.pty.Write([]byte{12}) // Ctrl+L (form feed) - triggers screen redraw
 
-		// Send Ctrl+O twice after resize to fix Claude Code display corruption.
-		// Empirically, this fixes issues where the text input floats to the top
-		// or other visual corruption occurs after resize.
-		_ = p.pty.Write([]byte{0x0F}) // Ctrl+O
-		_ = p.pty.Write([]byte{0x0F}) // Ctrl+O again
+			// Send Ctrl+O twice after resize to fix Claude Code display corruption.
+			// Empirically, this fixes issues where the text input floats to the top
+			// or other visual corruption occurs after resize.
+			_ = p.pty.Write([]byte{0x0F}) // Ctrl+O
+			_ = p.pty.Write([]byte{0x0F}) // Ctrl+O again
+		}
 	}
 
 	// Now resize the vterm. Creating a fresh vterm instead of resizing in-place

@@ -3246,3 +3246,124 @@ func TestPromptStartsWithContinue(t *testing.T) {
 		})
 	}
 }
+
+// TestNoNewlineInsertionOnWorkstreamCreation tests that creating a new workstream
+// does not insert newlines into existing workstreams' PTYs.
+// This is a regression test for the bug where "every other workstream's input box"
+// would get a newline inserted when creating a new workstream.
+func TestNoNewlineInsertionOnWorkstreamCreation(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 200
+	app.height = 80
+
+	// Create 3 workstreams first
+	for i := 1; i <= 3; i++ {
+		model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: fmt.Sprintf("workstream %d", i)})
+		app = model.(AppModel)
+	}
+
+	if len(app.panes) != 3 {
+		t.Fatalf("Expected 3 panes, got %d", len(app.panes))
+	}
+
+	// Attach mock PTYs to all existing panes to track writes
+	mockPTYs := make([]*mockWriteCloser, 3)
+	for i := 0; i < 3; i++ {
+		mockPTYs[i] = &mockWriteCloser{}
+		pty := &PTYSession{
+			workstreamID: app.panes[i].Workstream().ID,
+			closed:       false,
+			done:         make(chan struct{}),
+			stdin:        mockPTYs[i],
+		}
+		app.panes[i].SetPTY(pty)
+	}
+
+	// Now simulate creating a NEW workstream via the dialog flow
+	// 1. Open new workstream dialog (like pressing 'n')
+	model, _ := app.Update(keyPress('n'))
+	app = model.(AppModel)
+
+	if app.dialog == nil {
+		t.Fatal("Dialog should be open after pressing 'n'")
+	}
+	if app.dialog.Type != DialogNewWorkstream {
+		t.Fatalf("Expected DialogNewWorkstream, got %v", app.dialog.Type)
+	}
+
+	// 2. Type some text into the dialog textarea
+	for _, r := range "new task" {
+		newDialog, _ := app.dialog.Update(tea.KeyPressMsg{Code: r, Text: string(r)})
+		app.dialog = &newDialog
+	}
+
+	// 3. Submit the dialog with Enter key
+	// This simulates the actual key press that the user makes
+	newDialog, cmd := app.dialog.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	app.dialog = &newDialog
+
+	// Execute the command returned by the dialog
+	if cmd != nil {
+		msg := cmd()
+		model, _ := app.Update(msg)
+		app = model.(AppModel)
+	}
+
+	// Verify: No data should have been written to any of the existing PTYs
+	for i, mockPTY := range mockPTYs {
+		data := mockPTY.Bytes()
+		if len(data) > 0 {
+			t.Errorf("Pane %d PTY received unexpected data during workstream creation: %q", i+1, string(data))
+		}
+	}
+
+	// Also verify the new pane was created
+	if len(app.panes) != 4 {
+		t.Errorf("Expected 4 panes after creation, got %d", len(app.panes))
+	}
+}
+
+// TestNoNewlineOnKeyReleaseAfterDialogClose tests that KeyReleaseMsg after dialog close
+// doesn't write to PTYs
+func TestNoNewlineOnKeyReleaseAfterDialogClose(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 200
+	app.height = 80
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "existing"})
+	app = model.(AppModel)
+
+	// Attach a mock PTY
+	mockPTY := &mockWriteCloser{}
+	pty := &PTYSession{
+		workstreamID: app.panes[0].Workstream().ID,
+		closed:       false,
+		done:         make(chan struct{}),
+		stdin:        mockPTY,
+	}
+	app.panes[0].SetPTY(pty)
+
+	// Create another workstream
+	model, _ = app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "new one"})
+	app = model.(AppModel)
+
+	// Simulate a KeyReleaseMsg for Enter arriving after dialog is closed
+	// This could happen due to timing with the physical key release
+	// Note: In Bubble Tea v2, KeyReleaseMsg is a separate type
+	// Since we can't easily create KeyReleaseMsg, we'll test that KeyMsg
+	// for "enter" in nav mode with existing panes doesn't write to PTYs
+
+	// First, make sure we're in nav mode
+	app.inputMode = false
+
+	// Send an Enter key in nav mode (which should just set inputMode = true, not write to PTY)
+	model, _ = app.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	app = model.(AppModel)
+
+	// Verify the first pane's PTY received NO data
+	data := mockPTY.Bytes()
+	if len(data) > 0 {
+		t.Errorf("PTY received unexpected data on Enter in nav mode: %q", string(data))
+	}
+}

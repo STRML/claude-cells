@@ -262,3 +262,52 @@ func TestPaneModel_ResizeNoChange(t *testing.T) {
 		t.Error("Content should be preserved when size doesn't change")
 	}
 }
+
+// TestPaneModel_SetSizeQuiet_NoCtrlLOnResize verifies that SetSizeQuiet does NOT send
+// Ctrl+L or Ctrl+O when resizing, unlike SetSize.
+func TestPaneModel_SetSizeQuiet_NoCtrlLOnResize(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+
+	// Create a mock PTY
+	mockStdin := &mockWriteCloser{}
+	pty := &PTYSession{
+		workstreamID: "test",
+		closed:       false,
+		done:         make(chan struct{}),
+		stdin:        mockStdin,
+	}
+	pane.SetPTY(pty)
+
+	// Set initial size
+	pane.SetSizeQuiet(100, 50)
+
+	// Resize smaller using SetSizeQuiet - should NOT send Ctrl+L or Ctrl+O
+	mockStdin.buf.Reset()
+	pane.SetSizeQuiet(80, 50)
+
+	data := mockStdin.buf.Bytes()
+	for _, b := range data {
+		if b == 12 { // Ctrl+L
+			t.Error("SetSizeQuiet should NOT send Ctrl+L on resize")
+		}
+		if b == 0x0F { // Ctrl+O
+			t.Error("SetSizeQuiet should NOT send Ctrl+O on resize")
+		}
+	}
+
+	// Verify that regular SetSize DOES send Ctrl+L (sanity check)
+	mockStdin.buf.Reset()
+	pane.SetSize(60, 50) // Different size to trigger resize
+
+	foundCtrlL := false
+	for _, b := range mockStdin.buf.Bytes() {
+		if b == 12 {
+			foundCtrlL = true
+			break
+		}
+	}
+	if !foundCtrlL {
+		t.Error("SetSize (non-quiet) should send Ctrl+L on resize")
+	}
+}

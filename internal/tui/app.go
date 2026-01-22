@@ -1116,7 +1116,7 @@ Scroll Mode:
 			m.nextPaneIndex++
 			pane.SetSummarizing(true) // Start with summarizing animation
 			m.panes = append(m.panes, pane)
-			m.updateLayout()
+			m.updateLayoutQuiet() // Use quiet mode to avoid sending Ctrl+L/Ctrl+O to existing panes
 			// Focus the new pane
 			if m.focusedPane < len(m.panes)-1 && m.focusedPane < len(m.panes) {
 				m.panes[m.focusedPane].SetFocused(false)
@@ -2104,7 +2104,7 @@ Scroll Mode:
 
 		// Restore layout
 		m.setLayout(LayoutType(msg.State.Layout))
-		m.updateLayout()
+		m.updateLayoutQuiet() // Quiet mode - PTY sessions not created yet during state restore
 		m.toast = fmt.Sprintf("Resumed %d workstream(s)", len(msg.State.Workstreams))
 		m.toastExpiry = time.Now().Add(toastDuration)
 
@@ -2521,8 +2521,23 @@ func (m *AppModel) logPanelHeight() int {
 	return 0
 }
 
-// updateLayout recalculates pane sizes based on the current layout type
+// updateLayout recalculates pane sizes based on the current layout type.
+// This version sends PTY refresh signals (Ctrl+L, Ctrl+O) on size changes.
+// Use updateLayoutQuiet for layout-induced changes (pane count changes) to avoid
+// sending refresh signals that can interfere with Claude Code's input handling.
 func (m *AppModel) updateLayout() {
+	m.updateLayoutInternal(false)
+}
+
+// updateLayoutQuiet recalculates pane sizes without sending PTY refresh signals.
+// Use this when the layout change is due to pane count changes (add/remove panes)
+// to avoid sending Ctrl+L/Ctrl+O which can interfere with Claude Code's input handling.
+func (m *AppModel) updateLayoutQuiet() {
+	m.updateLayoutInternal(true)
+}
+
+// updateLayoutInternal is the internal implementation of updateLayout.
+func (m *AppModel) updateLayoutInternal(quiet bool) {
 	titleBarHeight := 1
 	statusBarHeight := 1
 	logPanelH := m.logPanelHeight()
@@ -2543,7 +2558,11 @@ func (m *AppModel) updateLayout() {
 	// Apply sizes to panes
 	for i := range m.panes {
 		if i < len(sizes) {
-			m.panes[i].SetSize(sizes[i].Width, sizes[i].Height)
+			if quiet {
+				m.panes[i].SetSizeQuiet(sizes[i].Width, sizes[i].Height)
+			} else {
+				m.panes[i].SetSize(sizes[i].Width, sizes[i].Height)
+			}
 		}
 	}
 }
@@ -2586,7 +2605,7 @@ func (m *AppModel) removePane(index int) *workstream.Workstream {
 		m.panes[m.focusedPane].SetFocused(true)
 	}
 	m.renumberPanes()
-	m.updateLayout()
+	m.updateLayoutQuiet() // Use quiet mode to avoid sending Ctrl+L/Ctrl+O to remaining panes
 	return ws
 }
 
@@ -2602,7 +2621,7 @@ func (m *AppModel) clearAllPanes() {
 	m.panes = nil
 	m.setFocusedPane(0)
 	m.renumberPanes()
-	m.updateLayout()
+	m.updateLayoutQuiet() // No panes left, but keep consistent
 }
 
 // getContainerIDs returns the container IDs for all current panes
