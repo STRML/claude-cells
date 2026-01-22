@@ -132,9 +132,11 @@ You are in an isolated container with a dedicated git worktree. **Commit your wo
 
 ## Constraints
 
-- **No pushing** - remote access is disabled; attempts will fail
+- **No remote access** - ` + "`git push`" + `, ` + "`git pull`" + `, and ` + "`git fetch`" + ` all fail; use local refs only
 - **No branch switching** - you're locked to this worktree's branch
 - **No merging** - the user handles integration across workstreams
+
+**Rebasing**: If asked to rebase on main, run ` + "`git rebase main`" + ` (local ref). Don't try to fetch first.
 
 ## When Done
 
