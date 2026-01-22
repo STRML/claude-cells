@@ -8,6 +8,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/STRML/claude-cells/internal/claude"
 )
 
 // GH wraps the GitHub CLI for PR operations.
@@ -125,4 +127,99 @@ func (g *GH) PRExists(ctx context.Context, repoPath string) (bool, *PRResponse, 
 		return false, nil, fmt.Errorf("failed to parse PR response: %w", err)
 	}
 	return true, &resp, nil
+}
+
+// prContentResponse is the expected JSON response from Claude for PR content generation.
+type prContentResponse struct {
+	Title string `json:"title"`
+	Body  string `json:"body"`
+}
+
+// GeneratePRContent uses Claude to generate a PR title and description based on
+// the branch commits and workstream context. Returns sensible defaults on failure.
+func GeneratePRContent(ctx context.Context, gitClient GitClient, branchName, workstreamPrompt string) (title, body string) {
+	// Default fallbacks
+	defaultTitle := branchNameToTitle(branchName)
+	defaultBody := fmt.Sprintf("## Summary\n\n%s\n\n## Changes\n\nCreated by [claude-cells](https://github.com/STRML/claude-cells).", workstreamPrompt)
+
+	// Get commit logs for context
+	commitLogs, err := gitClient.GetBranchCommitLogs(ctx, branchName)
+	if err != nil {
+		return defaultTitle, defaultBody
+	}
+
+	// Get diff stats for context
+	branchInfo, _ := gitClient.GetBranchInfo(ctx, branchName)
+
+	// Build the prompt
+	prompt := buildPRPrompt(branchName, workstreamPrompt, commitLogs, branchInfo)
+
+	// Query Claude
+	result, err := claude.Query(ctx, prompt, &claude.QueryOptions{
+		OutputFormat: "json",
+		Timeout:      claude.DefaultTimeout,
+	})
+	if err != nil {
+		return defaultTitle, defaultBody
+	}
+
+	// Parse the JSON response
+	var resp prContentResponse
+	if err := json.Unmarshal([]byte(result), &resp); err != nil {
+		return defaultTitle, defaultBody
+	}
+
+	// Validate response
+	if resp.Title == "" {
+		resp.Title = defaultTitle
+	}
+	if resp.Body == "" {
+		resp.Body = defaultBody
+	}
+
+	// Enforce title length limit
+	if len(resp.Title) > 72 {
+		resp.Title = resp.Title[:72]
+	}
+
+	return resp.Title, resp.Body
+}
+
+// buildPRPrompt constructs the prompt for PR content generation.
+func buildPRPrompt(branchName, workstreamPrompt, commitLogs, branchInfo string) string {
+	var sb strings.Builder
+
+	sb.WriteString(`Generate a GitHub PR title and description. Output valid JSON only.
+
+Format:
+{"title": "concise title under 72 chars", "body": "markdown description"}
+
+Rules for title:
+- Concise, imperative mood (e.g., "Add user authentication")
+- Under 72 characters
+- No period at the end
+
+Rules for body:
+- Start with "## Summary" section with 2-3 bullet points
+- Include "## Changes" section listing key modifications
+- Keep it scannable and concise
+- Use markdown formatting
+
+`)
+
+	sb.WriteString(fmt.Sprintf("Branch: %s\n\n", branchName))
+
+	if workstreamPrompt != "" {
+		sb.WriteString(fmt.Sprintf("Original task:\n%s\n\n", workstreamPrompt))
+	}
+
+	if commitLogs != "" {
+		sb.WriteString(fmt.Sprintf("Commits:\n%s\n\n", commitLogs))
+	}
+
+	if branchInfo != "" {
+		sb.WriteString(fmt.Sprintf("Stats:\n%s\n", branchInfo))
+	}
+
+	return sb.String()
 }
