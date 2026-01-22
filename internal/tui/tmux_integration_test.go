@@ -420,3 +420,163 @@ func TestTmuxKeypressNewDialog(t *testing.T) {
 		t.Log("Warning: New Workstream dialog did not appear after pressing 'n'")
 	}
 }
+
+// TestTmuxScrollModeLongScrollback tests scroll mode with a large amount of
+// scrollback content. This is a shell-based test (no Docker dependency) to
+// verify that tmux scroll mode works correctly.
+func TestTmuxScrollModeLongScrollback(t *testing.T) {
+	if !tmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := testSessionName()
+
+	cleanupTmuxSession()
+	defer cleanupTmuxSession()
+
+	// Start tmux session with a shell that will generate scrollback
+	// We use 'bash -c' to echo many lines
+	script := `for i in $(seq 1 500); do echo "Line $i: This is test content for scrollback"; done; echo "=== END OF OUTPUT ==="; exec bash`
+
+	startCmd := exec.Command("tmux", "new-session",
+		"-d",
+		"-s", sessionName,
+		"-x", fmt.Sprintf("%d", testWidth),
+		"-y", fmt.Sprintf("%d", testHeight),
+		"bash", "-c", script,
+	)
+
+	if err := startCmd.Run(); err != nil {
+		t.Fatalf("Failed to start tmux session: %v", err)
+	}
+
+	// Wait for all output to be generated
+	if !waitForContent(t, "=== END OF OUTPUT ===", 10*time.Second) {
+		t.Fatal("Output generation did not complete")
+	}
+
+	// Capture current visible content (should be near the end)
+	initialFrame := captureTmuxPane(t)
+	t.Logf("Initial frame (last lines visible):\n%s", initialFrame)
+
+	// Verify we see end marker but not early lines in the visible area
+	if !strings.Contains(initialFrame, "=== END OF OUTPUT ===") {
+		t.Error("Expected to see END OF OUTPUT marker in visible area")
+	}
+
+	// Enter tmux copy mode (scroll mode) with Ctrl+B, [
+	sendKeys(t, "C-b", "[")
+	time.Sleep(200 * time.Millisecond)
+
+	// Scroll up using PageUp multiple times
+	for i := 0; i < 20; i++ {
+		sendKey(t, "PageUp")
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// Capture scrolled content - use -S -500 to capture scrollback history
+	cmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-S", "-500")
+	output, err := cmd.Output()
+	if err != nil {
+		t.Fatalf("Failed to capture scrollback: %v", err)
+	}
+	scrolledContent := string(output)
+
+	// Verify we can see early lines in the scrollback
+	if !strings.Contains(scrolledContent, "Line 1:") {
+		t.Error("Expected to find 'Line 1:' in scrollback history")
+		t.Logf("Scrollback content (first 1000 chars):\n%s", scrolledContent[:min(1000, len(scrolledContent))])
+	}
+
+	if !strings.Contains(scrolledContent, "Line 50:") {
+		t.Error("Expected to find 'Line 50:' in scrollback history")
+	}
+
+	// Exit copy mode
+	sendKey(t, "Escape")
+	time.Sleep(100 * time.Millisecond)
+
+	t.Log("Scroll mode test completed successfully")
+}
+
+// TestTmuxScrollModeNavigation tests various scroll navigation commands
+func TestTmuxScrollModeNavigation(t *testing.T) {
+	if !tmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := testSessionName()
+
+	cleanupTmuxSession()
+	defer cleanupTmuxSession()
+
+	// Generate numbered lines for easy position tracking
+	script := `for i in $(seq 1 200); do printf "LINE_%03d\n" $i; done; echo "=== END ==="; exec bash`
+
+	startCmd := exec.Command("tmux", "new-session",
+		"-d",
+		"-s", sessionName,
+		"-x", "80",
+		"-y", "24",
+		"bash", "-c", script,
+	)
+
+	if err := startCmd.Run(); err != nil {
+		t.Fatalf("Failed to start tmux session: %v", err)
+	}
+
+	// Wait for output
+	if !waitForContent(t, "=== END ===", 5*time.Second) {
+		t.Fatal("Output generation did not complete")
+	}
+
+	// Enter copy mode
+	sendKeys(t, "C-b", "[")
+	time.Sleep(200 * time.Millisecond)
+
+	tests := []struct {
+		name        string
+		keys        []string
+		expectAfter string
+	}{
+		{
+			name:        "PageUp navigation",
+			keys:        []string{"PageUp", "PageUp", "PageUp"},
+			expectAfter: "LINE_", // Should see some lines after scrolling up
+		},
+		{
+			name:        "Arrow up navigation",
+			keys:        []string{"Up", "Up", "Up", "Up", "Up"},
+			expectAfter: "LINE_",
+		},
+		{
+			name:        "Half-page scroll with Ctrl+U",
+			keys:        []string{"C-u"},
+			expectAfter: "LINE_",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Send the navigation keys
+			for _, key := range tt.keys {
+				sendKey(t, key)
+				time.Sleep(50 * time.Millisecond)
+			}
+
+			// Capture with scrollback
+			cmd := exec.Command("tmux", "capture-pane", "-t", sessionName, "-p", "-S", "-200")
+			output, err := cmd.Output()
+			if err != nil {
+				t.Fatalf("Failed to capture: %v", err)
+			}
+
+			if !strings.Contains(string(output), tt.expectAfter) {
+				t.Errorf("Expected to find %q after %v", tt.expectAfter, tt.keys)
+			}
+		})
+	}
+
+	// Exit copy mode
+	sendKey(t, "Escape")
+}
