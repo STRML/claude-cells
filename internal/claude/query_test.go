@@ -66,6 +66,7 @@ func TestQuery_MutexPreventsConcurrency(t *testing.T) {
 	// The queryMutex is package-level and should be initialized
 	// Just verify we can reference it without panic
 	queryMutex.Lock()
+	_ = struct{}{} // Satisfy staticcheck SA2001 (non-empty critical section)
 	queryMutex.Unlock()
 }
 
