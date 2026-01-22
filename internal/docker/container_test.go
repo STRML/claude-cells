@@ -18,12 +18,20 @@ func getTestImage(t *testing.T, client *Client, ctx context.Context) string {
 	t.Helper()
 
 	// Prefer ccells-base (built by CI)
-	if exists, _ := client.ImageExists(ctx, RequiredImage); exists {
+	exists, err := client.ImageExists(ctx, RequiredImage)
+	if err != nil {
+		t.Logf("Warning: ImageExists(%s) error: %v", RequiredImage, err)
+	}
+	if exists {
 		return RequiredImage
 	}
 
 	// Fall back to alpine if available locally
-	if exists, _ := client.ImageExists(ctx, "alpine:latest"); exists {
+	exists, err = client.ImageExists(ctx, "alpine:latest")
+	if err != nil {
+		t.Logf("Warning: ImageExists(alpine:latest) error: %v", err)
+	}
+	if exists {
 		return "alpine:latest"
 	}
 

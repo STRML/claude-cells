@@ -73,7 +73,7 @@ func TestImageExists(t *testing.T) {
 		}
 	})
 
-	// Test required image (skip if not available)
+	// Test required image (skip if not available, log success if found)
 	t.Run("required image", func(t *testing.T) {
 		exists, err := client.ImageExists(ctx, RequiredImage)
 		if err != nil {
@@ -82,9 +82,10 @@ func TestImageExists(t *testing.T) {
 		if !exists {
 			t.Skipf("Required image %s not found, skipping", RequiredImage)
 		}
+		t.Logf("ImageExists(%s) = true (image found)", RequiredImage)
 	})
 
-	// Test alpine (skip if not available - may not be pulled in CI)
+	// Test alpine (skip if not available, log success if found)
 	t.Run("alpine", func(t *testing.T) {
 		exists, err := client.ImageExists(ctx, "alpine:latest")
 		if err != nil {
@@ -93,6 +94,7 @@ func TestImageExists(t *testing.T) {
 		if !exists {
 			t.Skip("alpine:latest not found, skipping")
 		}
+		t.Logf("ImageExists(alpine:latest) = true (image found)")
 	})
 }
 
