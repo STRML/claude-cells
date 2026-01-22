@@ -89,18 +89,22 @@ func TestCreateWorkstream_CreatesContainer(t *testing.T) {
 	}
 
 	ctx := context.Background()
-	containerID, err := orch.CreateWorkstream(ctx, ws, opts)
+	result, err := orch.CreateWorkstream(ctx, ws, opts)
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	if containerID == "" {
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	if result.ContainerID == "" {
 		t.Error("expected container ID to be returned")
 	}
 
 	// Verify container was created and started
-	state, err := mockDocker.GetContainerState(ctx, containerID)
+	state, err := mockDocker.GetContainerState(ctx, result.ContainerID)
 	if err != nil {
 		t.Fatalf("failed to get container state: %v", err)
 	}
@@ -109,8 +113,8 @@ func TestCreateWorkstream_CreatesContainer(t *testing.T) {
 	}
 
 	// Verify workstream has container ID set
-	if ws.ContainerID != containerID {
-		t.Errorf("expected ws.ContainerID=%s, got %s", containerID, ws.ContainerID)
+	if ws.ContainerID != result.ContainerID {
+		t.Errorf("expected ws.ContainerID=%s, got %s", result.ContainerID, ws.ContainerID)
 	}
 }
 
@@ -225,16 +229,16 @@ func TestRebuildWorkstream(t *testing.T) {
 		ImageName: "ccells-test:latest",
 	}
 
-	newContainerID, err := orch.RebuildWorkstream(ctx, ws, opts)
+	result, err := orch.RebuildWorkstream(ctx, ws, opts)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
 	// New container should exist and be running
-	if newContainerID == "" {
+	if result == nil || result.ContainerID == "" {
 		t.Error("expected new container ID")
 	}
-	state, err := mockDocker.GetContainerState(ctx, newContainerID)
+	state, err := mockDocker.GetContainerState(ctx, result.ContainerID)
 	if err != nil {
 		t.Fatalf("failed to get container state: %v", err)
 	}
@@ -249,7 +253,75 @@ func TestRebuildWorkstream(t *testing.T) {
 	}
 
 	// Workstream should have new container ID
-	if ws.ContainerID != newContainerID {
-		t.Errorf("expected ws.ContainerID=%s, got %s", newContainerID, ws.ContainerID)
+	if ws.ContainerID != result.ContainerID {
+		t.Errorf("expected ws.ContainerID=%s, got %s", result.ContainerID, ws.ContainerID)
+	}
+}
+
+func TestCheckBranchConflict_NoConflict(t *testing.T) {
+	mockGit := git.NewMockGitClient()
+	gitFactory := func(path string) git.GitClient {
+		return mockGit
+	}
+	orch := New(nil, gitFactory, "/test/repo")
+
+	ctx := context.Background()
+	conflict, err := orch.CheckBranchConflict(ctx, "ccells/new-branch")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if conflict != nil {
+		t.Errorf("expected no conflict, got %+v", conflict)
+	}
+}
+
+func TestCheckBranchConflict_BranchExists(t *testing.T) {
+	mockGit := git.NewMockGitClient()
+	mockGit.AddBranch("ccells/existing-branch")
+	gitFactory := func(path string) git.GitClient {
+		return mockGit
+	}
+	orch := New(nil, gitFactory, "/test/repo")
+
+	ctx := context.Background()
+	conflict, err := orch.CheckBranchConflict(ctx, "ccells/existing-branch")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if conflict == nil {
+		t.Fatal("expected conflict, got nil")
+	}
+	if conflict.HasWorktree {
+		t.Error("expected no worktree")
+	}
+	if conflict.BranchName != "ccells/existing-branch" {
+		t.Errorf("expected BranchName=ccells/existing-branch, got %s", conflict.BranchName)
+	}
+}
+
+func TestCheckBranchConflict_WorktreeExists(t *testing.T) {
+	mockGit := git.NewMockGitClient()
+	mockGit.AddWorktree("/tmp/ccells/worktrees/ccells/worktree-branch", "ccells/worktree-branch")
+	gitFactory := func(path string) git.GitClient {
+		return mockGit
+	}
+	orch := New(nil, gitFactory, "/test/repo")
+
+	ctx := context.Background()
+	conflict, err := orch.CheckBranchConflict(ctx, "ccells/worktree-branch")
+
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if conflict == nil {
+		t.Fatal("expected conflict, got nil")
+	}
+	if !conflict.HasWorktree {
+		t.Error("expected worktree")
+	}
+	if conflict.WorktreePath != "/tmp/ccells/worktrees/ccells/worktree-branch" {
+		t.Errorf("expected WorktreePath, got %s", conflict.WorktreePath)
 	}
 }

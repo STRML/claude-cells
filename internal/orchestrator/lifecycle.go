@@ -70,7 +70,7 @@ func (o *Orchestrator) DestroyWorkstream(ctx context.Context, ws *workstream.Wor
 }
 
 // RebuildWorkstream destroys and recreates the container with fresh state.
-func (o *Orchestrator) RebuildWorkstream(ctx context.Context, ws *workstream.Workstream, opts CreateOptions) (string, error) {
+func (o *Orchestrator) RebuildWorkstream(ctx context.Context, ws *workstream.Workstream, opts CreateOptions) (*CreateResult, error) {
 	// Save branch and worktree info
 	branchName := ws.BranchName
 	worktreePath := ws.WorktreePath
@@ -81,19 +81,15 @@ func (o *Orchestrator) RebuildWorkstream(ctx context.Context, ws *workstream.Wor
 		DeleteBranch: false,
 	}
 	if err := o.DestroyWorkstream(ctx, ws, destroyOpts); err != nil {
-		return "", fmt.Errorf("destroy for rebuild: %w", err)
+		return nil, fmt.Errorf("destroy for rebuild: %w", err)
 	}
 
 	// Recreate with existing worktree
 	ws.WorktreePath = worktreePath
 	ws.BranchName = branchName
 
-	cfg := o.buildContainerConfig(ws, worktreePath, opts)
-	containerID, err := o.createAndStartContainer(ctx, cfg)
-	if err != nil {
-		return "", fmt.Errorf("recreate container: %w", err)
-	}
+	// Use existing branch for rebuild
+	opts.UseExistingBranch = true
 
-	ws.ContainerID = containerID
-	return containerID, nil
+	return o.CreateWorkstream(ctx, ws, opts)
 }
