@@ -244,3 +244,5 @@ Contributions welcome! Please:
 2. Run linter: `go vet ./...`
 3. Format code: `gofmt -s -w .`
 4. Ensure tests cover your changes
+
+See **[docs/TESTING.md](docs/TESTING.md)** for the full testing guide, including integration tests and manual verification procedures.
