@@ -2201,9 +2201,27 @@ func (m AppModel) View() tea.View {
 	if m.mouseEnabled {
 		v.MouseMode = tea.MouseModeCellMotion
 	}
-	// Show cursor in input mode, hide in nav mode
-	if m.inputMode {
-		v.Cursor = &tea.Cursor{}
+	// Show cursor in input mode at the correct position in the focused pane
+	if m.inputMode && m.dialog == nil && len(m.panes) > 0 && m.focusedPane < len(m.panes) {
+		pane := m.panes[m.focusedPane]
+		cursorPos := pane.GetCursorPosition()
+		if cursorPos.Visible {
+			// Calculate pane bounds to get absolute screen position
+			titleBarHeight := 1
+			statusBarHeight := 1
+			logPanelH := m.logPanelHeight()
+			availableHeight := m.height - titleBarHeight - statusBarHeight - logPanelH
+			bounds := CalculatePaneBounds(m.layout, len(m.panes), m.width, availableHeight, titleBarHeight)
+
+			if m.focusedPane < len(bounds) {
+				paneBounds := bounds[m.focusedPane]
+				// Absolute cursor position = pane position + cursor offset within pane
+				v.Cursor = tea.NewCursor(
+					paneBounds.X+cursorPos.X,
+					paneBounds.Y+cursorPos.Y,
+				)
+			}
+		}
 	}
 	return v
 }

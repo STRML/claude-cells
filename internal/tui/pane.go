@@ -1644,6 +1644,54 @@ func (p *PaneModel) IsClaudeWorking() bool {
 	return false
 }
 
+// CursorPosition represents cursor position relative to pane content area
+type CursorPosition struct {
+	X       int  // X position relative to content area (0-based)
+	Y       int  // Y position relative to content area (0-based)
+	Visible bool // Whether cursor should be visible
+}
+
+// GetCursorPosition returns the cursor position relative to the pane's content area.
+// Returns position in the coordinate space inside the border and padding.
+// The caller needs to add the pane's screen position to get absolute coordinates.
+func (p *PaneModel) GetCursorPosition() CursorPosition {
+	// Only show cursor if focused, in input mode, and have a PTY with visible cursor
+	if !p.focused || !p.inputMode || p.vterm == nil {
+		return CursorPosition{Visible: false}
+	}
+
+	cursor := p.vterm.Cursor()
+	if !p.vterm.CursorVisible() {
+		return CursorPosition{Visible: false}
+	}
+
+	// Calculate cursor position in the full content (scrollback + vterm)
+	scrollbackLines := len(p.scrollback)
+	contentCursorY := scrollbackLines + cursor.Y
+
+	// Get the visible position relative to viewport
+	viewportYOffset := p.viewport.YOffset()
+	visibleY := contentCursorY - viewportYOffset
+
+	// Check if cursor is within visible viewport area
+	viewportHeight := p.viewport.Height()
+	if visibleY < 0 || visibleY >= viewportHeight {
+		return CursorPosition{Visible: false}
+	}
+
+	// Content area offset from pane edge:
+	// - Border: 1 char/line on each side
+	// - Padding: 1 char horizontal (from Padding(0, 1))
+	// - Header + empty line: 2 lines vertical (header + "\n\n")
+	// So cursor X is at: 1 (border) + 1 (padding) + cursor.X = 2 + cursor.X
+	// And cursor Y is at: 1 (border) + 2 (header+empty) + visibleY = 3 + visibleY
+	return CursorPosition{
+		X:       2 + cursor.X,
+		Y:       3 + visibleY,
+		Visible: true,
+	}
+}
+
 // PromptMsg is sent when user submits a prompt
 type PromptMsg struct {
 	WorkstreamID string
