@@ -13,6 +13,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/STRML/claude-cells/internal/config"
 	"github.com/STRML/claude-cells/internal/docker"
+	"github.com/STRML/claude-cells/internal/git"
+	"github.com/STRML/claude-cells/internal/orchestrator"
 	"github.com/STRML/claude-cells/internal/sync"
 	"github.com/STRML/claude-cells/internal/workstream"
 	"github.com/charmbracelet/x/ansi"
@@ -91,6 +93,8 @@ type AppModel struct {
 	logPanel *LogPanelModel
 	// Keyboard enhancement support (Kitty protocol)
 	keyboardEnhanced bool // True if terminal supports enhanced keyboard (shift+enter, etc.)
+	// Orchestrator for workstream lifecycle operations
+	orchestrator *orchestrator.Orchestrator
 }
 
 const tmuxPrefixTimeout = 2 * time.Second
@@ -140,6 +144,19 @@ func NewAppModel(ctx context.Context) AppModel {
 		manager.SetRepoInfo(repoInfo)
 	}
 
+	// Create orchestrator for workstream lifecycle operations
+	// Note: Docker client creation may fail if Docker isn't running - that's OK,
+	// the TUI will handle the error when operations are attempted
+	var orch *orchestrator.Orchestrator
+	dockerClient, err := docker.NewClient()
+	if err == nil {
+		// Git factory wraps the existing GitClientFactory
+		gitFactory := func(repoPath string) git.GitClient {
+			return GitClientFactory(repoPath)
+		}
+		orch = orchestrator.New(dockerClient, gitFactory, cwd)
+	}
+
 	return AppModel{
 		ctx:                 ctx,
 		manager:             manager,
@@ -151,6 +168,7 @@ func NewAppModel(ctx context.Context) AppModel {
 		mouseEnabled:        true, // Enable mouse click-to-focus by default
 		logPanel:            logPanel,
 		pairingOrchestrator: sync.NewPairing(gitOps, mutagenOps),
+		orchestrator:        orch,
 	}
 }
 
@@ -161,6 +179,12 @@ func (m *AppModel) projectName() string {
 		return "workspace"
 	}
 	return name
+}
+
+// Orchestrator returns the workstream orchestrator for lifecycle operations.
+// Returns nil if Docker is not available.
+func (m *AppModel) Orchestrator() *orchestrator.Orchestrator {
+	return m.orchestrator
 }
 
 // setFocusedPane updates the focused pane and syncs with persistent manager.
@@ -1116,7 +1140,7 @@ Scroll Mode:
 			m.nextPaneIndex++
 			pane.SetSummarizing(true) // Start with summarizing animation
 			m.panes = append(m.panes, pane)
-			m.updateLayout()
+			m.updateLayoutQuiet() // Use quiet mode to avoid sending Ctrl+L/Ctrl+O to existing panes
 			// Focus the new pane
 			if m.focusedPane < len(m.panes)-1 && m.focusedPane < len(m.panes) {
 				m.panes[m.focusedPane].SetFocused(false)
@@ -2104,7 +2128,7 @@ Scroll Mode:
 
 		// Restore layout
 		m.setLayout(LayoutType(msg.State.Layout))
-		m.updateLayout()
+		m.updateLayoutQuiet() // Quiet mode - PTY sessions not created yet during state restore
 		m.toast = fmt.Sprintf("Resumed %d workstream(s)", len(msg.State.Workstreams))
 		m.toastExpiry = time.Now().Add(toastDuration)
 
@@ -2521,8 +2545,23 @@ func (m *AppModel) logPanelHeight() int {
 	return 0
 }
 
-// updateLayout recalculates pane sizes based on the current layout type
+// updateLayout recalculates pane sizes based on the current layout type.
+// This version sends PTY refresh signals (Ctrl+L, Ctrl+O) on size changes.
+// Use updateLayoutQuiet for layout-induced changes (pane count changes) to avoid
+// sending refresh signals that can interfere with Claude Code's input handling.
 func (m *AppModel) updateLayout() {
+	m.updateLayoutInternal(false)
+}
+
+// updateLayoutQuiet recalculates pane sizes without sending PTY refresh signals.
+// Use this when the layout change is due to pane count changes (add/remove panes)
+// to avoid sending Ctrl+L/Ctrl+O which can interfere with Claude Code's input handling.
+func (m *AppModel) updateLayoutQuiet() {
+	m.updateLayoutInternal(true)
+}
+
+// updateLayoutInternal is the internal implementation of updateLayout.
+func (m *AppModel) updateLayoutInternal(quiet bool) {
 	titleBarHeight := 1
 	statusBarHeight := 1
 	logPanelH := m.logPanelHeight()
@@ -2543,7 +2582,11 @@ func (m *AppModel) updateLayout() {
 	// Apply sizes to panes
 	for i := range m.panes {
 		if i < len(sizes) {
-			m.panes[i].SetSize(sizes[i].Width, sizes[i].Height)
+			if quiet {
+				m.panes[i].SetSizeQuiet(sizes[i].Width, sizes[i].Height)
+			} else {
+				m.panes[i].SetSize(sizes[i].Width, sizes[i].Height)
+			}
 		}
 	}
 }
@@ -2586,7 +2629,7 @@ func (m *AppModel) removePane(index int) *workstream.Workstream {
 		m.panes[m.focusedPane].SetFocused(true)
 	}
 	m.renumberPanes()
-	m.updateLayout()
+	m.updateLayoutQuiet() // Use quiet mode to avoid sending Ctrl+L/Ctrl+O to remaining panes
 	return ws
 }
 
@@ -2602,7 +2645,7 @@ func (m *AppModel) clearAllPanes() {
 	m.panes = nil
 	m.setFocusedPane(0)
 	m.renumberPanes()
-	m.updateLayout()
+	m.updateLayoutQuiet() // No panes left, but keep consistent
 }
 
 // getContainerIDs returns the container IDs for all current panes

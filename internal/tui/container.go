@@ -13,6 +13,7 @@ import (
 	"github.com/STRML/claude-cells/internal/claude"
 	"github.com/STRML/claude-cells/internal/docker"
 	"github.com/STRML/claude-cells/internal/git"
+	"github.com/STRML/claude-cells/internal/orchestrator"
 	"github.com/STRML/claude-cells/internal/sync"
 	"github.com/STRML/claude-cells/internal/workstream"
 	"github.com/docker/docker/api/types/container"
@@ -351,34 +352,7 @@ func RebuildContainerCmd(ws *workstream.Workstream) tea.Cmd {
 			}
 		}
 
-		gitRepo := GitClientFactory(repoPath)
-
-		// Determine worktree path for this container
-		worktreePath := getWorktreePath(ws.BranchName)
-
-		// Ensure the worktrees directory exists
-		if err := os.MkdirAll("/tmp/ccells/worktrees", 0755); err != nil {
-			return ContainerErrorMsg{
-				WorkstreamID: ws.ID,
-				Error:        fmt.Errorf("failed to create worktrees directory: %w", err),
-			}
-		}
-
-		// Check if worktree exists, create if needed
-		if _, err := os.Stat(worktreePath); os.IsNotExist(err) {
-			// Worktree doesn't exist - create from existing branch
-			if err := gitRepo.CreateWorktreeFromExisting(ctx, worktreePath, ws.BranchName); err != nil {
-				return ContainerErrorMsg{
-					WorkstreamID: ws.ID,
-					Error:        fmt.Errorf("failed to create worktree for branch %s: %w", ws.BranchName, err),
-				}
-			}
-		}
-
-		// Store worktree path in workstream
-		ws.WorktreePath = worktreePath
-
-		// Create Docker client
+		// Create Docker client for orchestrator
 		dockerClient, err := docker.NewClient()
 		if err != nil {
 			return ContainerErrorMsg{
@@ -388,92 +362,19 @@ func RebuildContainerCmd(ws *workstream.Workstream) tea.Cmd {
 		}
 		defer dockerClient.Close()
 
-		// Create container config - mount the WORKTREE
-		cfg := docker.NewContainerConfig(ws.BranchName, worktreePath)
-		cfg.HostGitDir = repoPath + "/.git"
+		// Create orchestrator
+		gitFactory := func(path string) git.GitClient {
+			return GitClientFactory(path)
+		}
+		orch := orchestrator.New(dockerClient, gitFactory, repoPath)
 
-		// Load devcontainer config and determine image
-		devCfg, err := docker.LoadDevcontainerConfig(repoPath)
-		if err != nil {
-			return ContainerErrorMsg{
-				WorkstreamID: ws.ID,
-				Error:        fmt.Errorf("failed to load devcontainer config: %w", err),
-			}
+		// Use orchestrator to rebuild workstream
+		opts := orchestrator.CreateOptions{
+			RepoPath:          repoPath,
+			UseExistingBranch: true, // Rebuild uses existing branch
 		}
 
-		imageName, needsBuild, err := docker.GetProjectImage(repoPath)
-		if err != nil {
-			return ContainerErrorMsg{
-				WorkstreamID: ws.ID,
-				Error:        fmt.Errorf("failed to determine project image: %w", err),
-			}
-		}
-
-		imageExists, err := dockerClient.ImageExists(ctx, imageName)
-		if err != nil {
-			return ContainerErrorMsg{
-				WorkstreamID: ws.ID,
-				Error:        fmt.Errorf("failed to check image existence: %w", err),
-			}
-		}
-
-		// Build image if needed
-		if !imageExists && needsBuild && devCfg != nil {
-			buildCtx, buildCancel := context.WithTimeout(context.Background(), 10*time.Minute)
-			defer buildCancel()
-
-			cliStatus := docker.CheckDevcontainerCLI()
-			if cliStatus.Available {
-				baseImage, err := docker.BuildWithDevcontainerCLI(buildCtx, repoPath, io.Discard)
-				if err != nil {
-					return ContainerErrorMsg{
-						WorkstreamID: ws.ID,
-						Error:        fmt.Errorf("failed to build with devcontainer CLI: %w", err),
-					}
-				}
-				// Build enhanced image with Claude Code on top
-				if err := docker.BuildEnhancedImage(buildCtx, baseImage, imageName, io.Discard); err != nil {
-					return ContainerErrorMsg{
-						WorkstreamID: ws.ID,
-						Error:        fmt.Errorf("failed to build enhanced image: %w", err),
-					}
-				}
-			} else {
-				if err := docker.BuildProjectImage(buildCtx, repoPath, devCfg, io.Discard); err != nil {
-					return ContainerErrorMsg{
-						WorkstreamID: ws.ID,
-						Error:        fmt.Errorf("failed to build project image: %w", err),
-					}
-				}
-			}
-		} else if !imageExists && !needsBuild {
-			return ContainerErrorMsg{
-				WorkstreamID: ws.ID,
-				Error:        fmt.Errorf("image '%s' not found. Run: docker pull %s", imageName, imageName),
-			}
-		}
-
-		cfg.Image = imageName
-
-		if devCfg != nil && devCfg.ContainerEnv != nil {
-			cfg.ExtraEnv = devCfg.ContainerEnv
-		}
-
-		configPaths, err := docker.CreateContainerConfig(cfg.Name)
-		if err != nil {
-			return ContainerErrorMsg{
-				WorkstreamID: ws.ID,
-				Error:        fmt.Errorf("failed to create container config: %w", err),
-			}
-		}
-		cfg.ClaudeCfg = configPaths.ClaudeDir
-		cfg.ClaudeJSON = configPaths.ClaudeJSON
-		cfg.GitConfig = configPaths.GitConfig
-		cfg.GitIdentity = docker.GetGitIdentity()
-		cfg.Credentials = configPaths.Credentials
-		cfg.Timezone = docker.GetHostTimezone()
-
-		containerID, err := dockerClient.CreateContainer(ctx, cfg)
+		result, err := orch.RebuildWorkstream(ctx, ws, opts)
 		if err != nil {
 			return ContainerErrorMsg{
 				WorkstreamID: ws.ID,
@@ -481,24 +382,16 @@ func RebuildContainerCmd(ws *workstream.Workstream) tea.Cmd {
 			}
 		}
 
-		err = dockerClient.StartContainer(ctx, containerID)
-		if err != nil {
-			_ = dockerClient.RemoveContainer(ctx, containerID)
-			return ContainerErrorMsg{
-				WorkstreamID: ws.ID,
-				Error:        err,
-			}
-		}
+		// Track the container for crash recovery
+		trackContainer(result.ContainerID, ws.ID, ws.BranchName, result.WorktreePath)
 
-		trackContainer(containerID, ws.ID, ws.BranchName, worktreePath)
-
-		// Register for credential refresh - use parent of ClaudeDir as config dir
-		registerContainerCredentials(containerID, cfg.Name, filepath.Dir(configPaths.ClaudeDir))
+		// Register for credential refresh
+		registerContainerCredentials(result.ContainerID, result.ContainerName, result.ConfigDir)
 
 		// Return with IsResume=true so PTY uses --continue
 		return ContainerStartedMsg{
 			WorkstreamID: ws.ID,
-			ContainerID:  containerID,
+			ContainerID:  result.ContainerID,
 			IsResume:     true,
 		}
 	}
@@ -609,101 +502,9 @@ func startContainerWithFullOptions(ws *workstream.Workstream, useExistingBranch 
 			}
 		}
 
-		gitRepo := GitClientFactory(repoPath)
-
-		// Auto-pull main before creating branch to avoid stale base
-		// This updates local main to match origin/main without checking it out
-		// Errors are non-fatal (e.g., no network, no remote, local changes)
-		if !useExistingBranch {
-			_ = gitRepo.UpdateMainBranch(ctx)
-		}
-
-		// Determine worktree path for this container
-		worktreePath := getWorktreePath(ws.BranchName)
-
-		// Ensure the worktrees directory exists
-		if err := os.MkdirAll("/tmp/ccells/worktrees", 0755); err != nil {
-			return ContainerErrorMsg{
-				WorkstreamID: ws.ID,
-				Error:        fmt.Errorf("failed to create worktrees directory: %w", err),
-			}
-		}
-
-		// IMPORTANT: Check for existing worktree/branch BEFORE any cleanup.
-		// This prevents destroying worktree metadata for a running container.
-		if !useExistingBranch {
-			// Check if there's already an active worktree for this branch
-			existingPath, hasWorktree := gitRepo.WorktreeExistsForBranch(ctx, ws.BranchName)
-			if hasWorktree {
-				// A worktree exists for this branch - don't clean it up!
-				branchInfo, _ := gitRepo.GetBranchInfo(ctx, ws.BranchName)
-				return BranchConflictMsg{
-					WorkstreamID: ws.ID,
-					BranchName:   ws.BranchName,
-					RepoPath:     repoPath,
-					BranchInfo:   fmt.Sprintf("Active worktree at: %s\n%s", existingPath, branchInfo),
-				}
-			}
-
-			// Check if branch exists (even without a worktree)
-			exists, _ := gitRepo.BranchExists(ctx, ws.BranchName)
-			if exists {
-				// Get branch info (commits and diff stats)
-				branchInfo, _ := gitRepo.GetBranchInfo(ctx, ws.BranchName)
-
-				// Branch already exists - ask user what to do
-				return BranchConflictMsg{
-					WorkstreamID: ws.ID,
-					BranchName:   ws.BranchName,
-					RepoPath:     repoPath,
-					BranchInfo:   branchInfo,
-				}
-			}
-		}
-
-		// Only clean up if there's an orphaned worktree directory on disk
-		// (no active worktree according to git, but directory still exists)
-		if _, err := os.Stat(worktreePath); err == nil {
-			cleanupWorktree(ctx, gitRepo, ws.BranchName)
-		}
-
-		if useExistingBranch {
-			// Create worktree from existing branch (don't create new branch)
-			if err := gitRepo.CreateWorktreeFromExisting(ctx, worktreePath, ws.BranchName); err != nil {
-				return ContainerErrorMsg{
-					WorkstreamID: ws.ID,
-					Error:        fmt.Errorf("failed to create worktree for branch %s: %w", ws.BranchName, err),
-				}
-			}
-		} else {
-			// Create worktree with new branch (git worktree add -b <branch> <path>)
-			if err := gitRepo.CreateWorktree(ctx, worktreePath, ws.BranchName); err != nil {
-				return ContainerErrorMsg{
-					WorkstreamID: ws.ID,
-					Error:        fmt.Errorf("failed to create worktree for branch %s: %w", ws.BranchName, err),
-				}
-			}
-		}
-
-		// Store worktree path in workstream for later cleanup
-		ws.WorktreePath = worktreePath
-
-		// Copy untracked files to worktree if requested
-		if copyUntrackedFiles && !useExistingBranch {
-			untrackedFiles, err := gitRepo.GetUntrackedFiles(ctx)
-			if err == nil && len(untrackedFiles) > 0 {
-				if copyErr := copyUntrackedFilesToWorktree(repoPath, worktreePath, untrackedFiles); copyErr != nil {
-					// Log warning but don't fail - the container can still work
-					LogWarn("Failed to copy some untracked files: %v", copyErr)
-				}
-			}
-		}
-
-		// Create Docker client
+		// Create Docker client for orchestrator
 		dockerClient, err := docker.NewClient()
 		if err != nil {
-			// Clean up worktree on failure
-			cleanupWorktree(ctx, gitRepo, ws.BranchName)
 			return ContainerErrorMsg{
 				WorkstreamID: ws.ID,
 				Error:        err,
@@ -711,127 +512,55 @@ func startContainerWithFullOptions(ws *workstream.Workstream, useExistingBranch 
 		}
 		defer dockerClient.Close()
 
-		// Create container config - mount the WORKTREE, not the main repo
-		cfg := docker.NewContainerConfig(ws.BranchName, worktreePath)
-		// Mount host repo's .git directory so worktree references resolve correctly
-		cfg.HostGitDir = repoPath + "/.git"
-
-		// Load devcontainer config and determine image
-		devCfg, err := docker.LoadDevcontainerConfig(repoPath)
-		if err != nil {
-			cleanupWorktree(ctx, gitRepo, ws.BranchName)
-			return ContainerErrorMsg{
-				WorkstreamID: ws.ID,
-				Error:        fmt.Errorf("failed to load devcontainer config: %w", err),
-			}
+		// Create orchestrator
+		gitFactory := func(path string) git.GitClient {
+			return GitClientFactory(path)
 		}
+		orch := orchestrator.New(dockerClient, gitFactory, repoPath)
 
-		// Get the image to use
-		imageName, needsBuild, err := docker.GetProjectImage(repoPath)
-		if err != nil {
-			cleanupWorktree(ctx, gitRepo, ws.BranchName)
-			return ContainerErrorMsg{
-				WorkstreamID: ws.ID,
-				Error:        fmt.Errorf("failed to determine project image: %w", err),
-			}
-		}
-
-		// Check if image exists
-		imageExists, err := dockerClient.ImageExists(ctx, imageName)
-		if err != nil {
-			cleanupWorktree(ctx, gitRepo, ws.BranchName)
-			return ContainerErrorMsg{
-				WorkstreamID: ws.ID,
-				Error:        fmt.Errorf("failed to check image existence: %w", err),
-			}
-		}
-
-		// Build image if needed
-		if !imageExists && needsBuild && devCfg != nil {
-			// Use a longer timeout for build
-			buildCtx, buildCancel := context.WithTimeout(context.Background(), 10*time.Minute)
-			defer buildCancel()
-
-			// Use devcontainer CLI if available for proper feature support
-			cliStatus := docker.CheckDevcontainerCLI()
-			if cliStatus.Available {
-				baseImage, err := docker.BuildWithDevcontainerCLI(buildCtx, repoPath, io.Discard)
-				if err != nil {
-					cleanupWorktree(ctx, gitRepo, ws.BranchName)
-					return ContainerErrorMsg{
-						WorkstreamID: ws.ID,
-						Error:        fmt.Errorf("failed to build with devcontainer CLI: %w", err),
-					}
+		// Check for branch conflict before creating (if not using existing branch)
+		if !useExistingBranch {
+			conflict, err := orch.CheckBranchConflict(ctx, ws.BranchName)
+			if err != nil {
+				return ContainerErrorMsg{
+					WorkstreamID: ws.ID,
+					Error:        err,
 				}
-				// Build enhanced image with Claude Code on top
-				if err := docker.BuildEnhancedImage(buildCtx, baseImage, imageName, io.Discard); err != nil {
-					cleanupWorktree(ctx, gitRepo, ws.BranchName)
-					return ContainerErrorMsg{
-						WorkstreamID: ws.ID,
-						Error:        fmt.Errorf("failed to build enhanced image: %w", err),
-					}
+			}
+			if conflict != nil {
+				return BranchConflictMsg{
+					WorkstreamID: ws.ID,
+					BranchName:   conflict.BranchName,
+					RepoPath:     repoPath,
+					BranchInfo:   conflict.BranchInfo,
 				}
+			}
+		}
+
+		// Get untracked files if needed
+		var untrackedFiles []string
+		if copyUntrackedFiles && !useExistingBranch {
+			gitRepo := GitClientFactory(repoPath)
+			files, err := gitRepo.GetUntrackedFiles(ctx)
+			if err != nil {
+				LogWarn("Failed to get untracked files: %v", err)
+				// Continue without copying untracked files rather than failing
 			} else {
-				// Fall back to simple docker build (handles both Dockerfile and image-only configs)
-				if err := docker.BuildProjectImage(buildCtx, repoPath, devCfg, io.Discard); err != nil {
-					cleanupWorktree(ctx, gitRepo, ws.BranchName)
-					return ContainerErrorMsg{
-						WorkstreamID: ws.ID,
-						Error:        fmt.Errorf("failed to build project image: %w", err),
-					}
-				}
-			}
-		} else if !imageExists && !needsBuild {
-			// Image doesn't exist and doesn't need building - should pull
-			cleanupWorktree(ctx, gitRepo, ws.BranchName)
-			return ContainerErrorMsg{
-				WorkstreamID: ws.ID,
-				Error:        fmt.Errorf("image '%s' not found. Run: docker pull %s", imageName, imageName),
+				untrackedFiles = files
 			}
 		}
 
-		cfg.Image = imageName
-
-		// Apply containerEnv from devcontainer.json
-		if devCfg != nil && devCfg.ContainerEnv != nil {
-			cfg.ExtraEnv = devCfg.ContainerEnv
+		// Create workstream using orchestrator
+		opts := orchestrator.CreateOptions{
+			RepoPath:          repoPath,
+			UseExistingBranch: useExistingBranch,
+			UpdateMain:        !useExistingBranch, // Auto-pull main for new branches
+			CopyUntracked:     copyUntrackedFiles,
+			UntrackedFiles:    untrackedFiles,
 		}
 
-		// Create per-container isolated config directory
-		// This prevents race conditions when multiple containers modify credentials
-		configPaths, err := docker.CreateContainerConfig(cfg.Name)
+		result, err := orch.CreateWorkstream(ctx, ws, opts)
 		if err != nil {
-			// Clean up worktree on failure
-			cleanupWorktree(ctx, gitRepo, ws.BranchName)
-			return ContainerErrorMsg{
-				WorkstreamID: ws.ID,
-				Error:        fmt.Errorf("failed to create container config: %w", err),
-			}
-		}
-		cfg.ClaudeCfg = configPaths.ClaudeDir
-		cfg.ClaudeJSON = configPaths.ClaudeJSON
-		cfg.GitConfig = configPaths.GitConfig
-		cfg.GitIdentity = docker.GetGitIdentity()
-		cfg.Credentials = configPaths.Credentials
-		cfg.Timezone = docker.GetHostTimezone()
-
-		// Create container
-		containerID, err := dockerClient.CreateContainer(ctx, cfg)
-		if err != nil {
-			// Clean up worktree on failure
-			cleanupWorktree(ctx, gitRepo, ws.BranchName)
-			return ContainerErrorMsg{
-				WorkstreamID: ws.ID,
-				Error:        err,
-			}
-		}
-
-		// Start container
-		err = dockerClient.StartContainer(ctx, containerID)
-		if err != nil {
-			// Clean up created container and worktree on start failure
-			_ = dockerClient.RemoveContainer(ctx, containerID)
-			cleanupWorktree(ctx, gitRepo, ws.BranchName)
 			return ContainerErrorMsg{
 				WorkstreamID: ws.ID,
 				Error:        err,
@@ -839,14 +568,14 @@ func startContainerWithFullOptions(ws *workstream.Workstream, useExistingBranch 
 		}
 
 		// Track the container for crash recovery
-		trackContainer(containerID, ws.ID, ws.BranchName, worktreePath)
+		trackContainer(result.ContainerID, ws.ID, ws.BranchName, result.WorktreePath)
 
-		// Register for credential refresh - use parent of ClaudeDir as config dir
-		registerContainerCredentials(containerID, cfg.Name, filepath.Dir(configPaths.ClaudeDir))
+		// Register for credential refresh
+		registerContainerCredentials(result.ContainerID, result.ContainerName, result.ConfigDir)
 
 		return ContainerStartedMsg{
 			WorkstreamID: ws.ID,
-			ContainerID:  containerID,
+			ContainerID:  result.ContainerID,
 		}
 	}
 }
@@ -918,76 +647,51 @@ func StopContainerCmd(ws *workstream.Workstream) tea.Cmd {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		defer cancel()
 
-		// Stop and remove container if it exists
-		if ws.ContainerID != "" {
-			containerShort := ws.ContainerID
-			if len(containerShort) > 12 {
-				containerShort = containerShort[:12]
-			}
-			LogDebug("Stopping container %s", containerShort)
-			client, err := docker.NewClient()
-			if err == nil {
-				_ = client.StopContainer(ctx, ws.ContainerID)
-				LogDebug("Container stopped, removing with config cleanup")
-				_ = client.RemoveContainerAndConfig(ctx, ws.ContainerID)
-				LogDebug("Container and config removed")
-				client.Close()
-			}
-			// Untrack the container since it's been removed
-			untrackContainer(ws.ContainerID)
-			// Unregister from credential refresh
-			unregisterContainerCredentials(ws.ContainerID)
-		}
-		LogDebug("Container cleanup done")
-
-		// Clean up the worktree
-		worktreePath := resolveWorktreePath(ws)
-		LogDebug("Worktree path: %s", worktreePath)
-
-		// Get repo path once for all git operations
 		repoPath, err := os.Getwd()
 		if err != nil {
 			LogWarn("Failed to get cwd: %v", err)
 			return ContainerStoppedMsg{WorkstreamID: ws.ID}
 		}
-		LogDebug("Repo path: %s", repoPath)
 
-		if worktreePath != "" {
-			gitRepo := GitClientFactory(repoPath)
-
-			LogDebug("Removing worktree")
-			// Remove worktree from git
-			if err := gitRepo.RemoveWorktree(ctx, worktreePath); err != nil {
-				LogWarn("RemoveWorktree error (continuing): %v", err)
-			}
-			LogDebug("Worktree removed from git")
-
-			// Remove the directory (git worktree remove doesn't always delete the dir)
-			LogDebug("Removing directory %s", worktreePath)
-			if err := os.RemoveAll(worktreePath); err != nil {
-				LogWarn("RemoveAll error for %s: %v", worktreePath, err)
-			}
-			LogDebug("Directory removed")
+		// Create Docker client for orchestrator
+		dockerClient, err := docker.NewClient()
+		if err != nil {
+			LogWarn("Failed to create docker client: %v", err)
+			return ContainerStoppedMsg{WorkstreamID: ws.ID}
 		}
+		defer dockerClient.Close()
 
-		// Delete branch if it has no commits or is merged
+		// Create orchestrator
+		gitFactory := func(path string) git.GitClient {
+			return GitClientFactory(path)
+		}
+		orch := orchestrator.New(dockerClient, gitFactory, repoPath)
+
+		// Check if we should delete the branch (only if it has no commits)
+		deleteBranch := false
 		if ws.BranchName != "" {
 			gitRepo := GitClientFactory(repoPath)
-			LogDebug("Checking if branch has commits")
-			// Check if branch has commits
 			hasCommits, err := gitRepo.BranchHasCommits(ctx, ws.BranchName)
 			if err != nil {
 				LogWarn("BranchHasCommits error: %v", err)
-				return ContainerStoppedMsg{WorkstreamID: ws.ID}
+			} else {
+				deleteBranch = !hasCommits
 			}
-			LogDebug("Branch hasCommits=%v", hasCommits)
-			if !hasCommits {
-				LogDebug("Deleting empty branch")
-				if err := gitRepo.DeleteBranch(ctx, ws.BranchName); err != nil {
-					LogWarn("DeleteBranch error for %s: %v", ws.BranchName, err)
-				}
-				LogDebug("Branch deleted")
-			}
+		}
+
+		// Use orchestrator to destroy workstream
+		destroyOpts := orchestrator.DestroyOptions{
+			DeleteBranch: deleteBranch,
+			KeepWorktree: false,
+		}
+		if err := orch.DestroyWorkstream(ctx, ws, destroyOpts); err != nil {
+			LogWarn("DestroyWorkstream error: %v", err)
+		}
+
+		// Untrack the container (TUI-layer concern)
+		if ws.ContainerID != "" {
+			untrackContainer(ws.ContainerID)
+			unregisterContainerCredentials(ws.ContainerID)
 		}
 
 		LogDebug("StopContainerCmd completed for %s", ws.BranchName)
