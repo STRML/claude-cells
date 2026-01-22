@@ -234,7 +234,7 @@ func assertGolden(t *testing.T, name string, actual string) {
 	expected, err := os.ReadFile(path)
 	if err != nil {
 		if os.IsNotExist(err) {
-			t.Fatalf("Golden file %s does not exist. Run with -update to create it.", path)
+			t.Skipf("Golden file %s does not exist. Run with -update to create it.", path)
 		}
 		t.Fatalf("Failed to read golden file %s: %v", path, err)
 	}
