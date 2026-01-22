@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"strings"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/STRML/claude-cells/internal/claude"
 	"github.com/STRML/claude-cells/internal/docker"
 	"github.com/STRML/claude-cells/internal/git"
 	"github.com/STRML/claude-cells/internal/sync"
@@ -177,26 +177,19 @@ func CheckUncommittedChangesCmd(ws *workstream.Workstream) tea.Cmd {
 // using the Claude CLI. This runs asynchronously while the container starts.
 func GenerateTitleCmd(ws *workstream.Workstream) tea.Cmd {
 	return func() tea.Msg {
-		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer cancel()
-
 		// Build the prompt for Claude CLI
 		prompt := fmt.Sprintf(`Generate a 3-5 word title summarizing this task. Output ONLY the title text, no quotes or explanation.
 
 Task: %s`, ws.Prompt)
 
-		// Run claude CLI with -p flag for non-interactive mode
-		cmd := exec.CommandContext(ctx, "claude", "-p", prompt)
-		output, err := cmd.Output()
+		// Use ephemeral query to avoid polluting the resume log
+		title, err := claude.QueryWithTimeout(prompt, claude.DefaultTimeout)
 		if err != nil {
 			return TitleGeneratedMsg{
 				WorkstreamID: ws.ID,
 				Error:        err,
 			}
 		}
-
-		// Clean up the output - trim whitespace
-		title := strings.TrimSpace(string(output))
 
 		// Limit title length to prevent UI issues
 		if len(title) > 80 {

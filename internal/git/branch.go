@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
-	"time"
+
+	"github.com/STRML/claude-cells/internal/claude"
 )
 
 // Git provides git operations for a repository.
@@ -136,9 +137,6 @@ func branchNameToTitle(branch string) string {
 // Returns empty string if generation fails (caller should fall back to branchNameToTitle).
 // See: https://www.conventionalcommits.org/en/v1.0.0/
 func generateConventionalTitle(branch, commitLogs string) string {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
 	prompt := fmt.Sprintf(`Generate a conventional commit title for a squash merge. Follow https://www.conventionalcommits.org/en/v1.0.0/
 
 Format: <type>: <description>
@@ -155,13 +153,11 @@ Branch: %s
 Commits being squashed:
 %s`, branch, commitLogs)
 
-	cmd := exec.CommandContext(ctx, "claude", "-p", prompt)
-	output, err := cmd.Output()
+	// Use ephemeral query to avoid polluting the resume log
+	title, err := claude.QueryWithTimeout(prompt, claude.DefaultTimeout)
 	if err != nil {
 		return ""
 	}
-
-	title := strings.TrimSpace(string(output))
 
 	// Basic validation - should start with a conventional type
 	validPrefixes := []string{"feat:", "fix:", "docs:", "style:", "refactor:", "perf:", "test:", "build:", "ci:", "chore:"}
