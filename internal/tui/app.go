@@ -13,6 +13,8 @@ import (
 	"charm.land/lipgloss/v2"
 	"github.com/STRML/claude-cells/internal/config"
 	"github.com/STRML/claude-cells/internal/docker"
+	"github.com/STRML/claude-cells/internal/git"
+	"github.com/STRML/claude-cells/internal/orchestrator"
 	"github.com/STRML/claude-cells/internal/sync"
 	"github.com/STRML/claude-cells/internal/workstream"
 	"github.com/charmbracelet/x/ansi"
@@ -91,6 +93,8 @@ type AppModel struct {
 	logPanel *LogPanelModel
 	// Keyboard enhancement support (Kitty protocol)
 	keyboardEnhanced bool // True if terminal supports enhanced keyboard (shift+enter, etc.)
+	// Orchestrator for workstream lifecycle operations
+	orchestrator *orchestrator.Orchestrator
 }
 
 const tmuxPrefixTimeout = 2 * time.Second
@@ -140,6 +144,19 @@ func NewAppModel(ctx context.Context) AppModel {
 		manager.SetRepoInfo(repoInfo)
 	}
 
+	// Create orchestrator for workstream lifecycle operations
+	// Note: Docker client creation may fail if Docker isn't running - that's OK,
+	// the TUI will handle the error when operations are attempted
+	var orch *orchestrator.Orchestrator
+	dockerClient, err := docker.NewClient()
+	if err == nil {
+		// Git factory wraps the existing GitClientFactory
+		gitFactory := func(repoPath string) git.GitClient {
+			return GitClientFactory(repoPath)
+		}
+		orch = orchestrator.New(dockerClient, gitFactory, cwd)
+	}
+
 	return AppModel{
 		ctx:                 ctx,
 		manager:             manager,
@@ -151,6 +168,7 @@ func NewAppModel(ctx context.Context) AppModel {
 		mouseEnabled:        true, // Enable mouse click-to-focus by default
 		logPanel:            logPanel,
 		pairingOrchestrator: sync.NewPairing(gitOps, mutagenOps),
+		orchestrator:        orch,
 	}
 }
 
@@ -161,6 +179,12 @@ func (m *AppModel) projectName() string {
 		return "workspace"
 	}
 	return name
+}
+
+// Orchestrator returns the workstream orchestrator for lifecycle operations.
+// Returns nil if Docker is not available.
+func (m *AppModel) Orchestrator() *orchestrator.Orchestrator {
+	return m.orchestrator
 }
 
 // setFocusedPane updates the focused pane and syncs with persistent manager.
