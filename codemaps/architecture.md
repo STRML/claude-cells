@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Last updated: 2026-01-22 (Updated: global state thread-safety)
+Last updated: 2026-01-22 (Updated: PaneModel refactoring)
 
 ## Architecture Assessment: 7.5/10
 
@@ -328,14 +328,18 @@ Container orchestration logic has been extracted to `internal/orchestrator` pack
 
 **Impact:** Core business logic is now testable without TUI. ~300 lines extracted.
 
-### 2. God Objects
+### 2. God Objects (Improved)
 
 | Object | File | Lines | Fields | Issue |
 |--------|------|-------|--------|-------|
 | AppModel | app.go | 2000+ | 94 | Main event loop - acceptable for Bubble Tea |
-| PaneModel | pane.go | 1701 | 40+ | Mixes rendering, PTY, scrolling, animations |
+| PaneModel | pane.go | 1321 | 40+ | Core pane logic (reduced from 1701 lines) |
 
-**Recommendation:** Split PaneModel into PaneRenderer, ScrollController, AnimationController.
+**PaneModel refactoring completed:** Split into focused files:
+- `pane.go` (1321 lines) - Core struct, View, Update, vterm rendering
+- `pane_colors.go` (164 lines) - ANSI color utilities (`muteANSI`, `stripANSI`, `color256ToRGB`)
+- `pane_scroll.go` (77 lines) - Scroll methods (`ScrollPageUp`, `ScrollToBottom`, etc.)
+- `pane_animation.go` (172 lines) - Animation state (`SummarizePhase`, fade/init methods)
 
 ### 3. Global Mutable State (Improved)
 
@@ -371,7 +375,6 @@ var sender programSender
 
 ### Anti-Patterns Present
 - **Anemic Domain Model** - Workstream is mostly getters/setters
-- **God Object** - PaneModel handles too many concerns
 
 ## Layer Boundaries
 
@@ -420,13 +423,15 @@ var sender programSender
    - `programSender` uses `sync.RWMutex` for concurrent PTY goroutine access
    - All tests pass with `-race` detector
 
-### Medium Priority (Next)
-3. **Refactor PaneModel** - Split 1700-line god object into focused components:
-   - `PaneRenderer` - terminal rendering, ANSI handling
-   - `ScrollController` - scrollback buffer management
-   - `AnimationController` - spinner, fade effects
+3. **Refactor PaneModel** ✅
+   - Split 1700-line file into focused components:
+   - `pane_colors.go` (164 lines) - ANSI color utilities
+   - `pane_scroll.go` (77 lines) - Scroll methods
+   - `pane_animation.go` (172 lines) - Animation state/methods
+   - Core `pane.go` reduced to 1321 lines
 
-4. **Move Global State to AppModel** (optional) - For true dependency injection:
+### Low Priority (Optional)
+4. **Move Global State to AppModel** - For true dependency injection:
    - Pass `containerServices` via AppModel fields
    - Pass `programSender` through PTYSession constructor
    - Current encapsulated pattern is acceptable if this is deferred
