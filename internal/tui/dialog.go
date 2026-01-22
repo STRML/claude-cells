@@ -1030,7 +1030,7 @@ func (d DialogModel) View() string {
 		if d.inProgress {
 			content.WriteString(KeyHintStyle.Render("Working..."))
 		} else {
-			content.WriteString(KeyHint("Enter", " close") + "  " + KeyHintStyle.Render("[Esc] Cancel"))
+			content.WriteString(KeyHint("Enter/Esc", " close"))
 		}
 		return DialogBox.Width(d.width).Render(content.String())
 	}
@@ -1159,7 +1159,7 @@ func (d DialogModel) ViewInPane() string {
 		if d.inProgress {
 			content.WriteString(KeyHintStyle.Render("Working..."))
 		} else {
-			content.WriteString(KeyHint("Enter", " close") + "  " + KeyHintStyle.Render("[Esc] Cancel"))
+			content.WriteString(KeyHint("Enter/Esc", " close"))
 		}
 	} else if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogQuitConfirm || d.Type == DialogCopyUntrackedFiles {
 		// Menu items (for menu-style dialogs like merge) - same styling as View()
