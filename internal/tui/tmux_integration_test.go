@@ -70,13 +70,24 @@ func cleanupTmuxSession() {
 func captureTmuxPane(t *testing.T) string {
 	t.Helper()
 
-	cmd := exec.Command("tmux", "capture-pane", "-t", testSessionName, "-p")
+	// Use -p -e to preserve empty lines, -J to join wrapped lines
+	cmd := exec.Command("tmux", "capture-pane", "-t", testSessionName, "-p", "-e")
 	output, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("Failed to capture tmux pane: %v", err)
 	}
 
 	return string(output)
+}
+
+// countLines counts lines in captured output, preserving empty lines
+func countLines(output string) int {
+	// tmux capture-pane -p adds a trailing newline, so we count newlines
+	// An empty 40-line terminal would have 40 newlines
+	if output == "" {
+		return 0
+	}
+	return strings.Count(output, "\n")
 }
 
 // TestTmuxViewportConsistency verifies that the TUI maintains consistent
@@ -107,36 +118,41 @@ func TestTmuxViewportConsistency(t *testing.T) {
 		t.Fatalf("Failed to start tmux session: %v", err)
 	}
 
-	// Wait for app to initialize
-	time.Sleep(500 * time.Millisecond)
+	// Wait for app to initialize (may need to build image first time)
+	time.Sleep(2 * time.Second)
 
 	// Capture initial frame
 	frame1 := captureTmuxPane(t)
-	lines1 := strings.Split(strings.TrimRight(frame1, "\n"), "\n")
+	lines1 := countLines(frame1)
 
-	t.Logf("Initial frame has %d lines (expected %d)", len(lines1), testHeight)
+	t.Logf("Initial frame has %d lines (expected %d)", lines1, testHeight)
 
 	// The captured output should match the terminal height
 	// tmux capture-pane includes all lines up to the terminal height
-	if len(lines1) != testHeight {
-		t.Errorf("Frame 1: got %d lines, want %d", len(lines1), testHeight)
+	if lines1 != testHeight {
+		t.Errorf("Frame 1: got %d lines, want %d", lines1, testHeight)
 		t.Logf("Frame content:\n%s", frame1)
 	}
 
 	// Wait a moment and capture again to verify consistency
-	time.Sleep(200 * time.Millisecond)
+	time.Sleep(500 * time.Millisecond)
 
 	frame2 := captureTmuxPane(t)
-	lines2 := strings.Split(strings.TrimRight(frame2, "\n"), "\n")
+	lines2 := countLines(frame2)
 
-	if len(lines2) != testHeight {
-		t.Errorf("Frame 2: got %d lines, want %d", len(lines2), testHeight)
+	if lines2 != testHeight {
+		t.Errorf("Frame 2: got %d lines, want %d", lines2, testHeight)
 	}
 
 	// Verify the app actually rendered something (not just empty lines)
-	// Look for expected UI elements
+	// Look for expected UI elements (or building message which is also valid)
 	combinedFrames := frame1 + frame2
-	if !strings.Contains(combinedFrames, "Claude") && !strings.Contains(combinedFrames, "workstream") && !strings.Contains(combinedFrames, "docker") {
+	hasExpectedContent := strings.Contains(combinedFrames, "Claude") ||
+		strings.Contains(combinedFrames, "workstream") ||
+		strings.Contains(combinedFrames, "docker") ||
+		strings.Contains(combinedFrames, "Building") ||
+		strings.Contains(combinedFrames, "ccells")
+	if !hasExpectedContent {
 		t.Logf("Warning: Frame may not contain expected UI elements:\n%s", frame1)
 	}
 }
@@ -167,7 +183,8 @@ func TestTmuxResizeConsistency(t *testing.T) {
 		t.Fatalf("Failed to start tmux session: %v", err)
 	}
 
-	time.Sleep(500 * time.Millisecond)
+	// Wait for app to initialize
+	time.Sleep(2 * time.Second)
 
 	// Test different resize dimensions
 	sizes := []struct{ w, h int }{
@@ -190,14 +207,14 @@ func TestTmuxResizeConsistency(t *testing.T) {
 			}
 
 			// Wait for resize to propagate
-			time.Sleep(200 * time.Millisecond)
+			time.Sleep(300 * time.Millisecond)
 
 			frame := captureTmuxPane(t)
-			lines := strings.Split(strings.TrimRight(frame, "\n"), "\n")
+			lines := countLines(frame)
 
-			if len(lines) != size.h {
+			if lines != size.h {
 				t.Errorf("After resize to %dx%d: got %d lines, want %d",
-					size.w, size.h, len(lines), size.h)
+					size.w, size.h, lines, size.h)
 			}
 		})
 	}

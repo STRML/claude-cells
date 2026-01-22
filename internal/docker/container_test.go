@@ -12,6 +12,24 @@ import (
 // These tests require Docker and are only run with: go test -tags=integration
 // Unit tests (like TestContainerConfig) are in config_test.go
 
+// getTestImage returns an available image for testing, or skips the test
+func getTestImage(t *testing.T, client *Client, ctx context.Context) string {
+	t.Helper()
+
+	// Prefer ccells-base (built by CI)
+	if exists, _ := client.ImageExists(ctx, RequiredImage); exists {
+		return RequiredImage
+	}
+
+	// Fall back to alpine if available locally
+	if exists, _ := client.ImageExists(ctx, "alpine:latest"); exists {
+		return "alpine:latest"
+	}
+
+	t.Skip("No test image available (need ccells-base or alpine:latest)")
+	return ""
+}
+
 // Integration test - requires Docker
 func TestContainer_Lifecycle(t *testing.T) {
 	if testing.Short() {
@@ -25,10 +43,11 @@ func TestContainer_Lifecycle(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	// Use alpine for fast testing
+	testImage := getTestImage(t, client, ctx)
+
 	cfg := &ContainerConfig{
 		Name:      "ccells-test-" + time.Now().Format("150405"),
-		Image:     "alpine:latest",
+		Image:     testImage,
 		RepoPath:  "/tmp",
 		ClaudeCfg: "/tmp",
 	}
@@ -101,10 +120,11 @@ func TestContainer_SignalProcess(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
-	// Use alpine for testing
+	testImage := getTestImage(t, client, ctx)
+
 	cfg := &ContainerConfig{
 		Name:  "ccells-signal-test-" + time.Now().Format("150405"),
-		Image: "alpine:latest",
+		Image: testImage,
 	}
 
 	// Create and start container
@@ -156,9 +176,11 @@ func TestContainer_PauseUnpause(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
+	testImage := getTestImage(t, client, ctx)
+
 	cfg := &ContainerConfig{
 		Name:  "ccells-pause-test-" + time.Now().Format("150405"),
-		Image: "alpine:latest",
+		Image: testImage,
 	}
 
 	containerID, err := client.CreateContainer(ctx, cfg)
@@ -209,14 +231,23 @@ func TestContainer_PauseUnpause(t *testing.T) {
 
 // TestContainer_PersistSessions verifies PersistSessions is a no-op
 // (sessions are now written directly to the mounted ~/.claude directory)
+// Note: More comprehensive test exists in mock_client_test.go
 func TestContainer_PersistSessions(t *testing.T) {
 	t.Parallel()
 
 	client := NewMockClient()
 	ctx := context.Background()
 
-	// PersistSessions should be a no-op and return nil
-	err := client.PersistSessions(ctx, "any-container-id")
+	// Create a container first - PersistSessions requires container to exist
+	cfg := &ContainerConfig{Name: "persist-test", Image: "test"}
+	id, err := client.CreateContainer(ctx, cfg)
+	if err != nil {
+		t.Fatalf("CreateContainer() error = %v", err)
+	}
+	_ = client.StartContainer(ctx, id)
+
+	// PersistSessions should be a no-op and return nil for existing container
+	err = client.PersistSessions(ctx, id)
 	if err != nil {
 		t.Errorf("PersistSessions() error = %v, want nil", err)
 	}
@@ -236,14 +267,16 @@ func TestContainer_CleanupOrphanedContainers(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
+	testImage := getTestImage(t, client, ctx)
+
 	// Create two containers - one "known" and one "orphan"
 	knownCfg := &ContainerConfig{
 		Name:  "ccells-known-test-" + time.Now().Format("150405"),
-		Image: "alpine:latest",
+		Image: testImage,
 	}
 	orphanCfg := &ContainerConfig{
 		Name:  "ccells-orphan-test-" + time.Now().Format("150405"),
-		Image: "alpine:latest",
+		Image: testImage,
 	}
 
 	knownID, err := client.CreateContainer(ctx, knownCfg)
