@@ -219,10 +219,10 @@ func TestCredentialRefresherForceRefreshOnStartup(t *testing.T) {
 			t.Errorf("ForceRefresh should update 1 container, got %d", updated)
 		}
 
-		// Verify credentials were written
-		rootCredsPath := filepath.Join(tempDir, ".credentials.json")
-		if _, err := os.Stat(rootCredsPath); os.IsNotExist(err) {
-			t.Error("Root .credentials.json should exist after ForceRefresh")
+		// Verify credentials were written to .claude/.credentials.json
+		credsPath := filepath.Join(tempDir, ".claude", ".credentials.json")
+		if _, err := os.Stat(credsPath); os.IsNotExist(err) {
+			t.Error(".claude/.credentials.json should exist after ForceRefresh")
 		}
 	} else {
 		t.Log("No keychain credentials available, skipping verification")
