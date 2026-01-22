@@ -18,6 +18,7 @@ Last updated: 2026-01-22
 ```
 internal/
   tui/          # Terminal UI (Bubble Tea) - main application logic
+  orchestrator/ # Workstream lifecycle orchestration (NEW)
   workstream/   # Workstream state and lifecycle management
   docker/       # Docker SDK wrapper and container management
   git/          # Git CLI wrapper and worktree operations
@@ -95,6 +96,85 @@ The main application package implementing the Bubble Tea TUI.
 | `containerTracker` | Crash recovery tracking |
 | `credentialRefresher` | OAuth token sync service |
 | `versionInfo, commitHash` | Version display in help dialog |
+
+---
+
+## `internal/orchestrator/`
+
+Workstream lifecycle orchestration. This package extracts business logic from `tui/container.go` to enable:
+- Testable code without Bubble Tea dependencies
+- Reusable logic for CLI tools or API servers
+
+### Key Types
+
+| Type | File | Description |
+|------|------|-------------|
+| `WorkstreamOrchestrator` | orchestrator.go | Interface for lifecycle operations |
+| `Orchestrator` | orchestrator.go | Implementation coordinating Docker + Git |
+| `CreateOptions` | orchestrator.go | Configuration for workstream creation |
+| `DestroyOptions` | orchestrator.go | Configuration for workstream destruction |
+
+### WorkstreamOrchestrator Interface
+
+```go
+type WorkstreamOrchestrator interface {
+    // CreateWorkstream creates a new workstream with container and worktree.
+    CreateWorkstream(ctx, ws, opts) (containerID string, error)
+
+    // PauseWorkstream pauses a running workstream's container.
+    PauseWorkstream(ctx, ws) error
+
+    // ResumeWorkstream resumes a paused workstream's container.
+    ResumeWorkstream(ctx, ws) error
+
+    // DestroyWorkstream removes container, worktree, and cleans up state.
+    DestroyWorkstream(ctx, ws, opts) error
+
+    // RebuildWorkstream destroys and recreates the container.
+    RebuildWorkstream(ctx, ws, opts) (containerID string, error)
+}
+```
+
+### Key Functions
+
+**orchestrator.go:**
+- `New(dockerClient, gitFactory, repoPath)` - Create orchestrator instance
+
+**create.go:**
+- `CreateWorkstream()` - Create worktree + container + start
+- `createWorktree()` - Create isolated git worktree
+- `buildContainerConfig()` - Build Docker container config
+- `copyUntrackedFiles()` - Copy untracked files to worktree
+
+**lifecycle.go:**
+- `PauseWorkstream()` - Pause container
+- `ResumeWorkstream()` - Resume container
+- `DestroyWorkstream()` - Stop container, remove worktree, optionally delete branch
+- `RebuildWorkstream()` - Destroy and recreate container (keeps worktree)
+
+### Usage
+
+```go
+// In AppModel initialization
+dockerClient, _ := docker.NewClient()
+gitFactory := func(repoPath string) git.GitClient {
+    return git.New(repoPath)
+}
+orch := orchestrator.New(dockerClient, gitFactory, cwd)
+
+// Create workstream
+containerID, err := orch.CreateWorkstream(ctx, ws, orchestrator.CreateOptions{
+    RepoPath:  "/path/to/repo",
+    ImageName: "ccells-project:latest",
+})
+
+// Lifecycle operations
+err = orch.PauseWorkstream(ctx, ws)
+err = orch.ResumeWorkstream(ctx, ws)
+err = orch.DestroyWorkstream(ctx, ws, orchestrator.DestroyOptions{
+    DeleteBranch: true,
+})
+```
 
 ---
 

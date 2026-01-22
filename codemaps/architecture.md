@@ -274,20 +274,19 @@ Panes embed a virtual terminal emulator to properly handle:
 
 ## Architectural Smells
 
-### 1. Business Logic in TUI Layer (Critical)
+### 1. Business Logic in TUI Layer (In Progress - Partially Resolved)
 
 **File:** `internal/tui/container.go` (1653 lines)
 
 Container orchestration logic (git + docker operations) is embedded in `tea.Cmd` functions. This mixes UI concerns with business logic.
 
-```
-// Current: Logic embedded in TUI
-tui/container.go:startContainerWithFullOptions() -> 254 lines of git+docker ops
+**Progress:** The `internal/orchestrator` package has been created to address this:
+- `orchestrator.go` - `WorkstreamOrchestrator` interface and `Orchestrator` implementation
+- `create.go` - `CreateWorkstream()` with worktree and container creation
+- `lifecycle.go` - `PauseWorkstream()`, `ResumeWorkstream()`, `DestroyWorkstream()`, `RebuildWorkstream()`
+- AppModel now has an `orchestrator` field for clean delegation
 
-// Better: Extract to orchestration layer
-internal/orchestrator/workstream.go -> pure business logic
-tui/container.go -> thin wrapper returning tea.Cmd
-```
+**Remaining work:** `container.go` still contains additional complexity (image building, devcontainer support, credential management) that requires extending the orchestrator.
 
 **Impact:** Can't reuse logic in CLI tools or API servers; hard to unit test.
 
@@ -339,6 +338,12 @@ var credentialRefresher *...       // container.go:26
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
+│ Orchestration Layer (internal/orchestrator)         [NEW]  │
+│ - WorkstreamOrchestrator: create, pause, resume, destroy   │
+│ - Pure business logic, no TUI dependencies                 │
+└─────────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────────┐
 │ Domain Layer (internal/workstream)                         │
 │ - Manager, PersistentManager, Workstream                   │
 └─────────────────────────────────────────────────────────────┘
@@ -352,9 +357,11 @@ var credentialRefresher *...       // container.go:26
 ## Improvement Roadmap
 
 ### High Priority
-1. **Extract Orchestration Layer** - Move `container.go` logic to `internal/orchestrator`
-   - Makes business logic testable without Bubble Tea
-   - Enables CLI tools, API servers to reuse logic
+1. **Extract Orchestration Layer** ✅ In Progress
+   - `internal/orchestrator` package created with `WorkstreamOrchestrator` interface
+   - Basic CRUD operations: `CreateWorkstream`, `PauseWorkstream`, `ResumeWorkstream`, `DestroyWorkstream`, `RebuildWorkstream`
+   - AppModel wired to use orchestrator
+   - **Next steps:** Extend orchestrator to handle image building, devcontainer support, credential management
 
 ### Medium Priority
 2. **Refactor PaneModel** - Split into focused components
@@ -365,7 +372,7 @@ var credentialRefresher *...       // container.go:26
 ┌────────────────────────────────────────┐
 │ TUI (Bubble Tea)                       │  ← Presentation only
 ├────────────────────────────────────────┤
-│ Orchestrator API                       │  ← Business logic
+│ Orchestrator API                       │  ← Business logic ✅ Created
 ├────────────────────────────────────────┤
 │ Docker / Git / Sync                    │  ← Infrastructure
 └────────────────────────────────────────┘

@@ -26,6 +26,10 @@ internal/
     pty.go                 # Docker exec PTY session management
     dialog.go              # Modal dialogs
     container.go           # Container lifecycle & git worktree management
+  orchestrator/            # Workstream lifecycle orchestration (extracted from TUI)
+    orchestrator.go        # WorkstreamOrchestrator interface & implementation
+    create.go              # CreateWorkstream - worktree + container creation
+    lifecycle.go           # Pause, Resume, Destroy, Rebuild operations
   workstream/              # Workstream state & lifecycle
     manager.go             # In-memory workstream tracking
     persistent_manager.go  # Auto-persisting state manager (wraps Manager)
