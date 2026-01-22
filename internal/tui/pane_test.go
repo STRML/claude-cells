@@ -1005,3 +1005,65 @@ func TestPaneModel_EnterKey_SendsKittyProtocol(t *testing.T) {
 		t.Errorf("Enter key should send Kitty protocol sequence %q, got %q", expected, string(written))
 	}
 }
+
+// TestPaneModel_View_ConsistentHeight verifies that the pane view has consistent
+// height regardless of vterm content. This tests the fix for the issue where
+// extra newlines in Claude Code's prompt caused scrollback display issues.
+// The root cause was that renderVTerm() trims trailing empty lines, and without
+// FillHeight=true on the viewport, the output height would vary.
+func TestPaneModel_View_ConsistentHeight(t *testing.T) {
+	ws := workstream.New("test prompt")
+	ws.SetState(workstream.StateRunning)
+	pane := NewPaneModel(ws)
+
+	// Set a fixed size
+	paneWidth := 80
+	paneHeight := 30
+	pane.SetSize(paneWidth, paneHeight)
+	pane.SetFocused(true)
+
+	// Helper to count lines in view
+	countLines := func(view string) int {
+		return strings.Count(view, "\n") + 1
+	}
+
+	// Test 1: Empty vterm - should have consistent height
+	view1 := pane.View()
+	lines1 := countLines(view1)
+
+	// Test 2: Vterm with some content at top only (simulating Claude Code
+	// with a large prompt area, leaving empty space)
+	pane.WritePTYOutput([]byte("Line 1\r\n"))
+	pane.WritePTYOutput([]byte("Line 2\r\n"))
+	view2 := pane.View()
+	lines2 := countLines(view2)
+
+	// Test 3: Vterm with more content (simulating Claude Code with smaller prompt)
+	for i := 3; i <= 10; i++ {
+		pane.WritePTYOutput([]byte(fmt.Sprintf("Line %d\r\n", i)))
+	}
+	view3 := pane.View()
+	lines3 := countLines(view3)
+
+	// All views should have the same height (paneHeight)
+	// The view includes the border, so it should be exactly paneHeight lines
+	if lines1 != lines2 {
+		t.Errorf("View height changed with content: empty=%d, few lines=%d", lines1, lines2)
+	}
+	if lines2 != lines3 {
+		t.Errorf("View height changed with more content: few lines=%d, many lines=%d", lines2, lines3)
+	}
+	if lines1 != paneHeight {
+		t.Errorf("View height should match pane height: got %d, want %d", lines1, paneHeight)
+	}
+}
+
+// TestPaneModel_ViewportFillHeight verifies that the viewport has FillHeight enabled
+func TestPaneModel_ViewportFillHeight(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+
+	if !pane.viewport.FillHeight {
+		t.Error("Viewport should have FillHeight=true to ensure consistent output height")
+	}
+}

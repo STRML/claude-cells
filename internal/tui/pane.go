@@ -247,6 +247,7 @@ func NewPaneModel(ws *workstream.Workstream) PaneModel {
 	ti.CharLimit = 500
 
 	vp := viewport.New()
+	vp.FillHeight = true // Ensure consistent height regardless of content
 
 	// Create virtual terminal with default size (will be resized later)
 	vterm := vt10x.New(vt10x.WithSize(80, 24))
