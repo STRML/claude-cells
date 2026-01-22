@@ -305,8 +305,21 @@ func CleanupOrphanedContainerConfigs(existingContainerNames map[string]bool) (in
 	return count, nil
 }
 
+// testCellsDir allows tests to override the cells directory.
+// Only set this in tests, never in production code.
+var testCellsDir string
+
+// SetTestCellsDir sets a custom cells directory for testing.
+// Pass empty string to restore default behavior.
+func SetTestCellsDir(dir string) {
+	testCellsDir = dir
+}
+
 // GetCellsDir returns the path to the ccells data directory
 func GetCellsDir() (string, error) {
+	if testCellsDir != "" {
+		return testCellsDir, nil
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("failed to get home directory: %w", err)

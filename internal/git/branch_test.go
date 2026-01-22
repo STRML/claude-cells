@@ -3,7 +3,6 @@ package git
 import (
 	"context"
 	"errors"
-	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -547,12 +546,11 @@ func TestGit_RemoveWorktree_SymlinkPath(t *testing.T) {
 	g := New(dir)
 	ctx := context.Background()
 
-	// Use /tmp which is symlinked to /private/tmp on macOS
-	// This mimics the actual path used in production: /tmp/ccells/worktrees/<branch>
-	worktreePath := "/tmp/ccells-test-worktree-" + filepath.Base(dir)
-	defer os.RemoveAll(worktreePath)
+	// Use t.TempDir() for test isolation
+	tempDir := t.TempDir()
+	worktreePath := filepath.Join(tempDir, "symlink-test-worktree")
 
-	// Create worktree using the /tmp path (not resolved)
+	// Create worktree
 	err := g.CreateWorktree(ctx, worktreePath, "symlink-test-branch")
 	if err != nil {
 		t.Fatalf("CreateWorktree() error = %v", err)
@@ -563,8 +561,7 @@ func TestGit_RemoveWorktree_SymlinkPath(t *testing.T) {
 		t.Fatal("Worktree was not created")
 	}
 
-	// Now try to remove using the same /tmp path
-	// This is what StopContainerCmd does
+	// Now try to remove
 	err = g.RemoveWorktree(ctx, worktreePath)
 	if err != nil {
 		t.Fatalf("RemoveWorktree() error = %v", err)
@@ -583,16 +580,13 @@ func TestGit_RemoveWorktree_SymlinkPath(t *testing.T) {
 			t.Errorf("Worktree still in git list after removal: %s", wt)
 		}
 	}
-
-	// Clean up directory
-	_ = os.RemoveAll(worktreePath)
 }
 
 // getWorktreePathForTest mimics the getWorktreePath function from tui/container.go
-func getWorktreePathForTest(branchName string) string {
+func getWorktreePathForTest(baseDir, branchName string) string {
 	safeName := strings.ReplaceAll(branchName, "/", "-")
 	safeName = strings.ReplaceAll(safeName, " ", "-")
-	return fmt.Sprintf("/tmp/ccells/worktrees/%s", safeName)
+	return filepath.Join(baseDir, safeName)
 }
 
 func TestGit_CleanupFlow_MimicsStopContainerCmd(t *testing.T) {
@@ -606,14 +600,15 @@ func TestGit_CleanupFlow_MimicsStopContainerCmd(t *testing.T) {
 
 	branchName := "ccells/test-cleanup-branch"
 
-	// Ensure worktrees directory exists (as done in startContainerWithOptions)
-	if err := os.MkdirAll("/tmp/ccells/worktrees", 0755); err != nil {
+	// Use t.TempDir() for test isolation
+	tempDir := t.TempDir()
+	worktreesDir := filepath.Join(tempDir, "worktrees")
+	if err := os.MkdirAll(worktreesDir, 0755); err != nil {
 		t.Fatalf("Failed to create worktrees directory: %v", err)
 	}
 
 	// Compute worktree path the same way the TUI does
-	worktreePath := getWorktreePathForTest(branchName)
-	defer os.RemoveAll(worktreePath)
+	worktreePath := getWorktreePathForTest(worktreesDir, branchName)
 
 	t.Logf("Creating worktree at: %s", worktreePath)
 
@@ -638,7 +633,7 @@ func TestGit_CleanupFlow_MimicsStopContainerCmd(t *testing.T) {
 
 	// Now simulate StopContainerCmd cleanup:
 	// 1. Compute path from branch name (as if WorktreePath was empty)
-	cleanupPath := getWorktreePathForTest(branchName)
+	cleanupPath := getWorktreePathForTest(worktreesDir, branchName)
 	t.Logf("Computed cleanup path: %s", cleanupPath)
 
 	// 2. Remove worktree from git

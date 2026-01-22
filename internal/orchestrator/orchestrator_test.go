@@ -2,12 +2,37 @@ package orchestrator
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/STRML/claude-cells/internal/docker"
 	"github.com/STRML/claude-cells/internal/git"
 	"github.com/STRML/claude-cells/internal/workstream"
 )
+
+// setupTestDirs creates temp directories for tests and returns a cleanup function.
+// Sets both orchestrator worktree base dir and docker cells dir to temp locations.
+func setupTestDirs(t *testing.T, orch *Orchestrator) func() {
+	t.Helper()
+
+	// Create temp directories
+	tempDir := t.TempDir()
+	worktreeDir := filepath.Join(tempDir, "worktrees")
+	cellsDir := filepath.Join(tempDir, "claude-cells")
+
+	// Set orchestrator to use temp worktree dir
+	if orch != nil {
+		orch.SetWorktreeBaseDir(worktreeDir)
+	}
+
+	// Set docker to use temp cells dir
+	docker.SetTestCellsDir(cellsDir)
+
+	// Return cleanup function
+	return func() {
+		docker.SetTestCellsDir("")
+	}
+}
 
 func TestSanitizeBranchName(t *testing.T) {
 	tests := []struct {
@@ -68,6 +93,8 @@ func TestCreateWorkstream_CreatesWorktree(t *testing.T) {
 	}
 
 	orch := New(mockDocker, gitFactory, "/test/repo")
+	cleanup := setupTestDirs(t, orch)
+	defer cleanup()
 
 	ws := &workstream.Workstream{
 		ID:         "test-id",
@@ -87,14 +114,21 @@ func TestCreateWorkstream_CreatesWorktree(t *testing.T) {
 
 	// Verify worktree was created (path uses sanitized branch name)
 	worktrees := mockGit.GetWorktrees()
-	expectedPath := "/tmp/ccells/worktrees/ccells-test-branch"
-	if _, ok := worktrees[expectedPath]; !ok {
-		t.Errorf("expected worktree at %s, got worktrees: %v", expectedPath, worktrees)
+	expectedSuffix := "ccells-test-branch"
+	found := false
+	for path := range worktrees {
+		if filepath.Base(path) == expectedSuffix {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("expected worktree ending with %s, got worktrees: %v", expectedSuffix, worktrees)
 	}
 
 	// Verify the workstream has the worktree path set
-	if ws.WorktreePath != expectedPath {
-		t.Errorf("expected ws.WorktreePath=%s, got %s", expectedPath, ws.WorktreePath)
+	if filepath.Base(ws.WorktreePath) != expectedSuffix {
+		t.Errorf("expected ws.WorktreePath to end with %s, got %s", expectedSuffix, ws.WorktreePath)
 	}
 }
 
@@ -106,6 +140,8 @@ func TestCreateWorkstream_CreatesContainer(t *testing.T) {
 	}
 
 	orch := New(mockDocker, gitFactory, "/test/repo")
+	cleanup := setupTestDirs(t, orch)
+	defer cleanup()
 
 	ws := &workstream.Workstream{
 		ID:         "test-id",
@@ -206,6 +242,8 @@ func TestDestroyWorkstream(t *testing.T) {
 		return mockGit
 	}
 	orch := New(mockDocker, gitFactory, "/test/repo")
+	cleanup := setupTestDirs(t, orch)
+	defer cleanup()
 
 	ctx := context.Background()
 	cfg := &docker.ContainerConfig{Name: "test", Image: "test:latest"}
@@ -215,7 +253,7 @@ func TestDestroyWorkstream(t *testing.T) {
 		ID:           "test-id",
 		ContainerID:  containerID,
 		BranchName:   "ccells/test",
-		WorktreePath: "/tmp/ccells/worktrees/ccells-test", // sanitized path
+		WorktreePath: filepath.Join(orch.getWorktreeBaseDir(), "ccells-test"),
 	}
 
 	err := orch.DestroyWorkstream(ctx, ws, DestroyOptions{})
@@ -237,6 +275,8 @@ func TestRebuildWorkstream(t *testing.T) {
 		return mockGit
 	}
 	orch := New(mockDocker, gitFactory, "/test/repo")
+	cleanup := setupTestDirs(t, orch)
+	defer cleanup()
 
 	ctx := context.Background()
 	cfg := &docker.ContainerConfig{Name: "test", Image: "test:latest"}
@@ -244,13 +284,14 @@ func TestRebuildWorkstream(t *testing.T) {
 	_ = mockDocker.StartContainer(ctx, oldContainerID)
 
 	// Pre-create the worktree in the mock (simulating existing worktree with sanitized path)
-	mockGit.AddWorktree("/tmp/ccells/worktrees/ccells-test", "ccells/test")
+	worktreePath := filepath.Join(orch.getWorktreeBaseDir(), "ccells-test")
+	mockGit.AddWorktree(worktreePath, "ccells/test")
 
 	ws := &workstream.Workstream{
 		ID:           "test-id",
 		ContainerID:  oldContainerID,
 		BranchName:   "ccells/test",
-		WorktreePath: "/tmp/ccells/worktrees/ccells-test", // sanitized path
+		WorktreePath: worktreePath,
 	}
 
 	opts := CreateOptions{
@@ -332,9 +373,12 @@ func TestCheckBranchConflict_BranchExists(t *testing.T) {
 
 func TestCheckBranchConflict_WorktreeExists(t *testing.T) {
 	mockGit := git.NewMockGitClient()
+	// Use a temp dir path for the test
+	tempDir := t.TempDir()
+	worktreePath := filepath.Join(tempDir, "worktrees", "ccells-worktree-branch")
 	// Note: The worktree path is returned by git, not constructed by orchestrator
 	// So the mock stores the actual path that git would return
-	mockGit.AddWorktree("/tmp/ccells/worktrees/ccells-worktree-branch", "ccells/worktree-branch")
+	mockGit.AddWorktree(worktreePath, "ccells/worktree-branch")
 	gitFactory := func(path string) git.GitClient {
 		return mockGit
 	}
@@ -352,8 +396,8 @@ func TestCheckBranchConflict_WorktreeExists(t *testing.T) {
 	if !conflict.HasWorktree {
 		t.Error("expected worktree")
 	}
-	if conflict.WorktreePath != "/tmp/ccells/worktrees/ccells-worktree-branch" {
-		t.Errorf("expected WorktreePath, got %s", conflict.WorktreePath)
+	if conflict.WorktreePath != worktreePath {
+		t.Errorf("expected WorktreePath %s, got %s", worktreePath, conflict.WorktreePath)
 	}
 }
 
@@ -407,6 +451,8 @@ func TestCreateWorkstream_WorktreeCreationError(t *testing.T) {
 	}
 
 	orch := New(mockDocker, gitFactory, "/test/repo")
+	cleanup := setupTestDirs(t, orch)
+	defer cleanup()
 
 	ws := &workstream.Workstream{
 		ID:         "test-id",
@@ -450,6 +496,8 @@ func TestCreateWorkstream_ContainerCreationError(t *testing.T) {
 	}
 
 	orch := New(mockDocker, gitFactory, "/test/repo")
+	cleanup := setupTestDirs(t, orch)
+	defer cleanup()
 
 	ws := &workstream.Workstream{
 		ID:         "test-id",
@@ -513,6 +561,8 @@ func TestDestroyWorkstream_RemoveWorktreeError(t *testing.T) {
 		return mockGit
 	}
 	orch := New(mockDocker, gitFactory, "/test/repo")
+	cleanup := setupTestDirs(t, orch)
+	defer cleanup()
 
 	ctx := context.Background()
 	cfg := &docker.ContainerConfig{Name: "test", Image: "test:latest"}
@@ -522,7 +572,7 @@ func TestDestroyWorkstream_RemoveWorktreeError(t *testing.T) {
 		ID:           "test-id",
 		ContainerID:  containerID,
 		BranchName:   "ccells/test",
-		WorktreePath: "/tmp/ccells/worktrees/ccells-test",
+		WorktreePath: filepath.Join(orch.getWorktreeBaseDir(), "ccells-test"),
 	}
 
 	err := orch.DestroyWorkstream(ctx, ws, DestroyOptions{})
@@ -545,6 +595,8 @@ func TestRebuildWorkstream_DestroyError(t *testing.T) {
 		return mockGit
 	}
 	orch := New(mockDocker, gitFactory, "/test/repo")
+	cleanup := setupTestDirs(t, orch)
+	defer cleanup()
 
 	ctx := context.Background()
 
@@ -553,7 +605,7 @@ func TestRebuildWorkstream_DestroyError(t *testing.T) {
 		ID:           "test-id",
 		ContainerID:  "non-existent-container",
 		BranchName:   "ccells/test",
-		WorktreePath: "/tmp/ccells/worktrees/ccells-test",
+		WorktreePath: filepath.Join(orch.getWorktreeBaseDir(), "ccells-test"),
 	}
 
 	opts := CreateOptions{

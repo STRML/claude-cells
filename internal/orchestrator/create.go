@@ -12,7 +12,9 @@ import (
 	"github.com/STRML/claude-cells/internal/workstream"
 )
 
-const worktreeBaseDir = "/tmp/ccells/worktrees"
+// DefaultWorktreeBaseDir is the default directory for git worktrees.
+// Can be overridden via Orchestrator.WorktreeBaseDir for testing.
+const DefaultWorktreeBaseDir = "/tmp/ccells/worktrees"
 
 // sanitizeBranchName converts a branch name to a safe filesystem path component.
 // It replaces path separators and spaces with dashes to prevent nested directories.
@@ -132,14 +134,16 @@ func (o *Orchestrator) CheckBranchConflict(ctx context.Context, branchName strin
 }
 
 func (o *Orchestrator) createWorktree(ctx context.Context, branchName string, useExisting bool) (string, error) {
+	baseDir := o.getWorktreeBaseDir()
+
 	// Ensure base directory exists
-	if err := os.MkdirAll(worktreeBaseDir, 0755); err != nil {
+	if err := os.MkdirAll(baseDir, 0755); err != nil {
 		return "", fmt.Errorf("create worktree base dir: %w", err)
 	}
 
 	// Sanitize branch name for filesystem path (e.g., "feature/foo" -> "feature-foo")
 	safeName := sanitizeBranchName(branchName)
-	worktreePath := filepath.Join(worktreeBaseDir, safeName)
+	worktreePath := filepath.Join(baseDir, safeName)
 
 	// Clean up orphaned worktree directory if it exists but git doesn't know about it
 	gitClient := o.gitFactory(o.repoPath)
@@ -171,7 +175,7 @@ func (o *Orchestrator) createWorktree(ctx context.Context, branchName string, us
 // cleanupWorktree removes a worktree on error.
 func (o *Orchestrator) cleanupWorktree(ctx context.Context, branchName string) {
 	safeName := sanitizeBranchName(branchName)
-	worktreePath := filepath.Join(worktreeBaseDir, safeName)
+	worktreePath := filepath.Join(o.getWorktreeBaseDir(), safeName)
 	gitClient := o.gitFactory(o.repoPath)
 	_ = gitClient.RemoveWorktree(ctx, worktreePath)
 	_ = os.RemoveAll(worktreePath)
