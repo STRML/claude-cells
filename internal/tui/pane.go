@@ -1083,8 +1083,11 @@ func (p *PaneModel) renderVTerm() (result string) {
 	}
 
 	// Get cursor position and visibility
+	// Show cursor when focused AND either:
+	// - in input mode (user wants to type, so always show cursor)
+	// - vterm says cursor is visible (application explicitly showing cursor)
 	cursor := p.vterm.Cursor()
-	showCursor := p.focused && p.vterm.CursorVisible()
+	showCursor := p.focused && (p.inputMode || p.vterm.CursorVisible())
 
 	var lines []string
 	for row := 0; row < rows; row++ {
@@ -1677,15 +1680,16 @@ type CursorPosition struct {
 // Returns position in the coordinate space inside the border and padding.
 // The caller needs to add the pane's screen position to get absolute coordinates.
 func (p *PaneModel) GetCursorPosition() CursorPosition {
-	// Only show cursor if focused, in input mode, and have a PTY with visible cursor
+	// Only show cursor if focused, in input mode, and have a PTY
+	// Note: We don't check vterm.CursorVisible() because when in input mode,
+	// we always want to show the cursor regardless of the vterm's cursor state.
+	// Claude Code hides the cursor while working, but we want to show it when
+	// the user enters input mode.
 	if !p.focused || !p.inputMode || p.vterm == nil {
 		return CursorPosition{Visible: false}
 	}
 
 	cursor := p.vterm.Cursor()
-	if !p.vterm.CursorVisible() {
-		return CursorPosition{Visible: false}
-	}
 
 	// Calculate cursor position in the full content (scrollback + vterm)
 	scrollbackLines := len(p.scrollback)
