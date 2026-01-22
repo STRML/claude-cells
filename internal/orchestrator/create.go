@@ -6,12 +6,30 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/STRML/claude-cells/internal/docker"
 	"github.com/STRML/claude-cells/internal/workstream"
 )
 
 const worktreeBaseDir = "/tmp/ccells/worktrees"
+
+// sanitizeBranchName converts a branch name to a safe filesystem path component.
+// It replaces path separators and spaces with dashes to prevent nested directories.
+// Example: "feature/foo" -> "feature-foo", "my branch" -> "my-branch"
+func sanitizeBranchName(branchName string) string {
+	safe := branchName
+	safe = strings.ReplaceAll(safe, "/", "-")
+	safe = strings.ReplaceAll(safe, "\\", "-")
+	safe = strings.ReplaceAll(safe, " ", "-")
+	// Trim leading/trailing dashes that might result from edge cases
+	safe = strings.Trim(safe, "-")
+	// Fallback if the result is empty
+	if safe == "" {
+		safe = "unnamed"
+	}
+	return safe
+}
 
 // CreateWorkstream creates a new workstream with container and worktree.
 // This is the complete flow including:
@@ -119,7 +137,9 @@ func (o *Orchestrator) createWorktree(ctx context.Context, branchName string, us
 		return "", fmt.Errorf("create worktree base dir: %w", err)
 	}
 
-	worktreePath := filepath.Join(worktreeBaseDir, branchName)
+	// Sanitize branch name for filesystem path (e.g., "feature/foo" -> "feature-foo")
+	safeName := sanitizeBranchName(branchName)
+	worktreePath := filepath.Join(worktreeBaseDir, safeName)
 
 	// Clean up orphaned worktree directory if it exists but git doesn't know about it
 	gitClient := o.gitFactory(o.repoPath)
@@ -150,7 +170,8 @@ func (o *Orchestrator) createWorktree(ctx context.Context, branchName string, us
 
 // cleanupWorktree removes a worktree on error.
 func (o *Orchestrator) cleanupWorktree(ctx context.Context, branchName string) {
-	worktreePath := filepath.Join(worktreeBaseDir, branchName)
+	safeName := sanitizeBranchName(branchName)
+	worktreePath := filepath.Join(worktreeBaseDir, safeName)
 	gitClient := o.gitFactory(o.repoPath)
 	_ = gitClient.RemoveWorktree(ctx, worktreePath)
 	_ = os.RemoveAll(worktreePath)
@@ -214,7 +235,10 @@ func (o *Orchestrator) buildFullContainerConfig(ws *workstream.Workstream, workt
 	cfg.Image = imageName
 
 	// Load devcontainer config for extra env vars
-	devCfg, _ := docker.LoadDevcontainerConfig(o.repoPath)
+	devCfg, err := docker.LoadDevcontainerConfig(o.repoPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("load devcontainer config: %w", err)
+	}
 	if devCfg != nil && devCfg.ContainerEnv != nil {
 		cfg.ExtraEnv = devCfg.ContainerEnv
 	}
@@ -263,12 +287,20 @@ func (o *Orchestrator) copyUntrackedFiles(srcRepo, dstWorktree string, files []s
 			return err
 		}
 
-		// Copy file
+		// Get source file info to preserve permissions
+		srcInfo, err := os.Stat(src)
+		if err != nil {
+			return err
+		}
+
+		// Copy file content
 		data, err := os.ReadFile(src)
 		if err != nil {
 			return err
 		}
-		if err := os.WriteFile(dst, data, 0644); err != nil {
+
+		// Write with same permissions as source file
+		if err := os.WriteFile(dst, data, srcInfo.Mode().Perm()); err != nil {
 			return err
 		}
 	}

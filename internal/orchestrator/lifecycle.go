@@ -40,7 +40,8 @@ func (o *Orchestrator) DestroyWorkstream(ctx context.Context, ws *workstream.Wor
 	// Step 1: Stop and remove container
 	if ws.ContainerID != "" {
 		if err := o.dockerClient.StopContainer(ctx, ws.ContainerID); err != nil {
-			// Container might already be stopped, continue
+			// Record the error but continue to try removing the container
+			errs = append(errs, fmt.Errorf("stop container: %w", err))
 		}
 		if err := o.dockerClient.RemoveContainer(ctx, ws.ContainerID); err != nil {
 			errs = append(errs, fmt.Errorf("remove container: %w", err))

@@ -541,7 +541,13 @@ func startContainerWithFullOptions(ws *workstream.Workstream, useExistingBranch 
 		var untrackedFiles []string
 		if copyUntrackedFiles && !useExistingBranch {
 			gitRepo := GitClientFactory(repoPath)
-			untrackedFiles, _ = gitRepo.GetUntrackedFiles(ctx)
+			files, err := gitRepo.GetUntrackedFiles(ctx)
+			if err != nil {
+				LogWarn("Failed to get untracked files: %v", err)
+				// Continue without copying untracked files rather than failing
+			} else {
+				untrackedFiles = files
+			}
 		}
 
 		// Create workstream using orchestrator
