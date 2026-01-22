@@ -72,7 +72,21 @@ func getProjectRoot(t *testing.T) string {
 
 // cleanupTmuxSession kills the test session if it exists
 func cleanupTmuxSession() {
-	exec.Command("tmux", "kill-session", "-t", testSessionName()).Run()
+	sessionName := testSessionName()
+	cmd := exec.Command("tmux", "kill-session", "-t", sessionName)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		// Ignore expected errors when session doesn't exist
+		outStr := string(output)
+		if strings.Contains(outStr, "no server") ||
+			strings.Contains(outStr, "session not found") ||
+			strings.Contains(outStr, "can't find session") {
+			return // Expected - session doesn't exist
+		}
+		// Log unexpected errors
+		fmt.Printf("Warning: cleanupTmuxSession(%s) unexpected error: %v, output: %s\n",
+			sessionName, err, outStr)
+	}
 }
 
 // captureTmuxPane captures the current pane content as text
