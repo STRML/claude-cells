@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -226,6 +227,10 @@ func TestBaseDockerfileHash(t *testing.T) {
 }
 
 func TestGetBaseImageName(t *testing.T) {
+	// Use isolated HOME to ensure no config.yaml affects the test
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
 	name := GetBaseImageName()
 
 	// Name should start with "ccells-base:"
@@ -251,10 +256,53 @@ func TestGetBaseImageName(t *testing.T) {
 		t.Errorf("GetBaseImageName() not deterministic: %s != %s", name, name2)
 	}
 
-	// Name should match configs.BaseDockerfileHash()
+	// With no config.yaml, hash should match configs.BaseDockerfileHash()
 	expectedHash := configs.BaseDockerfileHash()
 	if hashPart != expectedHash {
 		t.Errorf("GetBaseImageName() hash = %q, want %q from configs.BaseDockerfileHash()", hashPart, expectedHash)
+	}
+}
+
+func TestGetBaseImageNameWithInjections(t *testing.T) {
+	// Use isolated HOME with config.yaml
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	// Create config with injections
+	configDir := filepath.Join(tmpHome, ".claude-cells")
+	if err := os.MkdirAll(configDir, 0755); err != nil {
+		t.Fatalf("Failed to create config dir: %v", err)
+	}
+	configContent := `dockerfile:
+  inject:
+    - "apt-get install -y vim"
+`
+	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), []byte(configContent), 0644); err != nil {
+		t.Fatalf("Failed to write config: %v", err)
+	}
+
+	name := GetBaseImageName()
+
+	// Name should start with "ccells-base:"
+	if len(name) < 13 || name[:12] != "ccells-base:" {
+		t.Errorf("GetBaseImageName() = %q, want prefix 'ccells-base:'", name)
+	}
+
+	hashPart := name[12:]
+	if len(hashPart) != 12 {
+		t.Errorf("GetBaseImageName() hash part length = %d, want 12", len(hashPart))
+	}
+
+	// Hash should be different from base hash when injections are present
+	baseHash := configs.BaseDockerfileHash()
+	if hashPart == baseHash {
+		t.Errorf("GetBaseImageName() hash should differ from base hash when injections are present")
+	}
+
+	// Hash should be deterministic
+	name2 := GetBaseImageName()
+	if name != name2 {
+		t.Errorf("GetBaseImageName() not deterministic: %s != %s", name, name2)
 	}
 }
 

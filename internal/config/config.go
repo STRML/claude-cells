@@ -11,12 +11,13 @@ import (
 var configMu sync.Mutex
 
 const (
-	configDir  = ".claude-cells"
-	configFile = "config.json"
+	configDir    = ".claude-cells"
+	appStateFile = "app-state.json"
+	legacyConfig = "config.json" // Deprecated: migrated to app-state.json
 )
 
-// GlobalConfig represents the global ccells configuration
-// stored in ~/.claude-cells/config.json
+// GlobalConfig represents the global ccells application state
+// stored in ~/.claude-cells/app-state.json (internal, not user-editable)
 type GlobalConfig struct {
 	Version           int  `json:"version"`
 	IntroductionShown bool `json:"introduction_shown"`
@@ -31,17 +32,27 @@ func ConfigDir() (string, error) {
 	return filepath.Join(home, configDir), nil
 }
 
-// ConfigPath returns the full path to the config file
+// ConfigPath returns the full path to the app state file
 func ConfigPath() (string, error) {
 	dir, err := ConfigDir()
 	if err != nil {
 		return "", err
 	}
-	return filepath.Join(dir, configFile), nil
+	return filepath.Join(dir, appStateFile), nil
 }
 
-// Load loads the global configuration from disk
+// legacyConfigPath returns the path to the deprecated config.json
+func legacyConfigPath() (string, error) {
+	dir, err := ConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, legacyConfig), nil
+}
+
+// Load loads the global application state from disk
 // Returns a default config if the file doesn't exist
+// Automatically migrates from legacy config.json if needed
 func Load() (*GlobalConfig, error) {
 	configMu.Lock()
 	defer configMu.Unlock()
@@ -53,6 +64,23 @@ func Load() (*GlobalConfig, error) {
 
 	data, err := os.ReadFile(path)
 	if os.IsNotExist(err) {
+		// Check for legacy config.json and migrate if found
+		legacyPath, legacyErr := legacyConfigPath()
+		if legacyErr == nil {
+			legacyData, legacyReadErr := os.ReadFile(legacyPath)
+			if legacyReadErr == nil {
+				// Migrate legacy config
+				var cfg GlobalConfig
+				if jsonErr := json.Unmarshal(legacyData, &cfg); jsonErr == nil {
+					// Write to new location (ignore save error, will retry on next save)
+					saveData, _ := json.MarshalIndent(&cfg, "", "  ")
+					_ = os.WriteFile(path, saveData, 0644)
+					// Remove legacy file
+					_ = os.Remove(legacyPath)
+					return &cfg, nil
+				}
+			}
+		}
 		// Return default config for first run
 		return &GlobalConfig{Version: 1}, nil
 	}
@@ -83,7 +111,7 @@ func Save(cfg *GlobalConfig) error {
 		return err
 	}
 
-	path := filepath.Join(dir, configFile)
+	path := filepath.Join(dir, appStateFile)
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {

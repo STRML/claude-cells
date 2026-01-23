@@ -224,12 +224,12 @@ Customize what gets installed in container images via `~/.claude-cells/config.ya
 ```yaml
 dockerfile:
   inject:
-    - "npm install -g ccstatusline"      # Installed by default
     - "apt-get update && apt-get install -y vim"
     - "pip install ipython"
 ```
 
-Project-specific `.claude-cells/config.yaml` with `dockerfile.inject` replaces (not merges with) the global inject list.
+- Project-specific `.claude-cells/config.yaml` with `dockerfile.inject` replaces (not merges with) the global inject list
+- Changing injections triggers an automatic image rebuild
 
 ## Troubleshooting
 

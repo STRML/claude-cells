@@ -39,7 +39,7 @@ func TestSaveAndLoad(t *testing.T) {
 	}
 
 	// Verify file was created
-	path := filepath.Join(tmpHome, configDir, configFile)
+	path := filepath.Join(tmpHome, configDir, appStateFile)
 	if _, err := os.Stat(path); os.IsNotExist(err) {
 		t.Fatal("Config file was not created")
 	}
@@ -94,6 +94,45 @@ func TestMarkIntroductionShown(t *testing.T) {
 
 	if !cfg.IntroductionShown {
 		t.Error("cfg.IntroductionShown = false after MarkIntroductionShown()")
+	}
+}
+
+func TestMigrateFromLegacyConfig(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	// Create legacy config.json
+	configDirPath := filepath.Join(tmpHome, configDir)
+	if err := os.MkdirAll(configDirPath, 0755); err != nil {
+		t.Fatalf("Failed to create config dir: %v", err)
+	}
+
+	legacyPath := filepath.Join(configDirPath, legacyConfig)
+	legacyData := []byte(`{"version":1,"introduction_shown":true}`)
+	if err := os.WriteFile(legacyPath, legacyData, 0644); err != nil {
+		t.Fatalf("Failed to write legacy config: %v", err)
+	}
+
+	// Load should migrate the config
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	// Verify data was migrated
+	if !cfg.IntroductionShown {
+		t.Error("IntroductionShown should be true from migrated config")
+	}
+
+	// Verify new file exists
+	newPath := filepath.Join(configDirPath, appStateFile)
+	if _, err := os.Stat(newPath); os.IsNotExist(err) {
+		t.Error("New app-state.json was not created")
+	}
+
+	// Verify legacy file was removed
+	if _, err := os.Stat(legacyPath); !os.IsNotExist(err) {
+		t.Error("Legacy config.json should have been removed")
 	}
 }
 

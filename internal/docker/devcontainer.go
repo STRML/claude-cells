@@ -239,9 +239,10 @@ func GetBaseImage(projectPath string) (string, error) {
 	return cfg.Image, nil
 }
 
-// computeConfigHash computes a hash of the devcontainer.json content and any
-// referenced Dockerfile. This is used to detect when the config has changed
-// and the image needs rebuilding. Returns empty string if no devcontainer.json exists.
+// computeConfigHash computes a hash of the devcontainer.json content, any
+// referenced Dockerfile, and the dockerfile injection config. This is used to
+// detect when the config has changed and the image needs rebuilding.
+// Returns empty string if no devcontainer.json exists.
 func computeConfigHash(projectPath string) string {
 	candidates := []string{
 		filepath.Join(projectPath, ".devcontainer", "devcontainer.json"),
@@ -295,6 +296,12 @@ func computeConfigHash(projectPath string) string {
 				hashInput = append(hashInput, dockerfileContent...)
 			}
 		}
+	}
+
+	// Include dockerfile injection config so changes trigger rebuilds
+	dfCfg := LoadDockerfileConfig(projectPath)
+	for _, cmd := range dfCfg.Inject {
+		hashInput = append(hashInput, []byte(cmd)...)
 	}
 
 	hash := sha256.Sum256(hashInput)
