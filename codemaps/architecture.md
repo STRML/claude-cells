@@ -430,11 +430,53 @@ var sender programSender
    - `pane_animation.go` (172 lines) - Animation state/methods
    - Core `pane.go` reduced to 1321 lines
 
-### Low Priority (Optional)
-4. **Move Global State to AppModel** - For true dependency injection:
+## Next Steps (Prioritized)
+
+### High Priority
+
+4. **Reduce AppModel Field Count**
+   - **Problem:** AppModel has ~94 fields, making it hard to reason about state
+   - **Fix:** Group related fields into sub-structs:
+     - `LayoutState` - width, height, layout mode, pane dimensions
+     - `FocusState` - focused pane index, input mode, scroll mode
+     - `DialogState` - current dialog, dialog history
+   - **Acceptance:** AppModel has <50 direct fields; related state is co-located
+   - **Dependencies:** None - can start immediately
+
+5. **Extract TUI Business Logic from container.go**
+   - **Problem:** `container.go` still contains ~1356 lines mixing TUI commands with business logic
+   - **Fix:** Move to orchestrator or new packages:
+     - PTY session management → `internal/tui/pty_manager.go` or orchestrator
+     - Pairing mode integration → `internal/sync/`
+     - Container tracking/credential registration → orchestrator
+   - **Acceptance:** `container.go` contains only Bubble Tea message types and thin command wrappers (<500 lines)
+   - **Dependencies:** Builds on orchestrator extraction (completed)
+
+### Medium Priority
+
+6. **Further Refactor PaneModel**
+   - **Problem:** `pane.go` still has 1321 lines and 40+ fields
+   - **Fix:**
+     - Extract `PaneRenderer` - View() logic, border/header rendering
+     - Group fields into sub-structs: `VTermState`, `DialogState`
+   - **Acceptance:** `pane.go` <800 lines; PaneModel has <25 direct fields
+   - **Dependencies:** None, but lower impact than AppModel refactoring
+
+7. **Add Observability**
+   - **Problem:** No metrics or tracing for debugging production issues
+   - **Fix:**
+     - Add structured logging with levels (debug/info/warn/error)
+     - Add timing metrics for container operations
+     - Consider OpenTelemetry spans for distributed tracing
+   - **Acceptance:** Can diagnose slow container starts and credential refresh issues from logs
+   - **Dependencies:** None
+
+### Low Priority (Deferred)
+
+8. **Move Global State to AppModel Fields**
    - Pass `containerServices` via AppModel fields
    - Pass `programSender` through PTYSession constructor
-   - Current encapsulated pattern is acceptable if this is deferred
+   - **Note:** Current encapsulated pattern is thread-safe and acceptable; defer unless causing test issues
 
 ### Future Vision
 ```
