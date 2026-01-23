@@ -37,12 +37,13 @@ func InjectProxyConfig(claudeDir string) error {
 	bashHooks := getOrCreateSlice(hooks, "Bash")
 
 	// Add our git/gh intercepting hooks
+	// Note: The command must pass "git" or "gh" as first arg so build_operation() works
 	bashHooks = appendHookIfNotExists(bashHooks, map[string]interface{}{
 		"matcher": "^git\\s+(fetch|pull|push)",
 		"hooks": []interface{}{
 			map[string]interface{}{
 				"type":    "command",
-				"command": "/root/.claude/bin/ccells-git-proxy \"$@\"",
+				"command": "/root/.claude/bin/ccells-git-proxy git \"$@\"",
 			},
 		},
 	})
@@ -62,7 +63,7 @@ func InjectProxyConfig(claudeDir string) error {
 		"hooks": []interface{}{
 			map[string]interface{}{
 				"type":    "command",
-				"command": "/root/.claude/bin/ccells-git-proxy \"$@\"",
+				"command": "/root/.claude/bin/ccells-git-proxy gh \"$@\"",
 			},
 		},
 	})
@@ -72,7 +73,7 @@ func InjectProxyConfig(claudeDir string) error {
 		"hooks": []interface{}{
 			map[string]interface{}{
 				"type":    "command",
-				"command": "/root/.claude/bin/ccells-git-proxy \"$@\"",
+				"command": "/root/.claude/bin/ccells-git-proxy gh \"$@\"",
 			},
 		},
 	})
@@ -102,13 +103,16 @@ func getOrCreateMap(parent map[string]interface{}, key string) map[string]interf
 }
 
 // getOrCreateSlice gets a slice from a map, creating it if it doesn't exist.
+// If the key doesn't exist or isn't a slice, creates a new slice and stores it.
 func getOrCreateSlice(parent map[string]interface{}, key string) []interface{} {
 	if v, ok := parent[key]; ok {
 		if s, ok := v.([]interface{}); ok {
 			return s
 		}
 	}
-	return []interface{}{}
+	s := []interface{}{}
+	parent[key] = s
+	return s
 }
 
 // appendHookIfNotExists adds a hook to the slice if a hook with the same matcher doesn't exist.

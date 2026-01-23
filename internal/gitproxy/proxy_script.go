@@ -135,24 +135,29 @@ if command -v jq &> /dev/null; then
     ERROR=$(echo "$RESPONSE" | jq -r '.error // ""')
 elif command -v python3 &> /dev/null; then
     # Use python for robust JSON parsing when jq is not available
+    # Output is NUL-delimited to handle multiline values correctly
     PARSED=$(echo "$RESPONSE" | python3 -c '
 import sys, json
 try:
     r = json.loads(sys.stdin.read())
-    print(r.get("exit_code", 1))
-    print(r.get("stdout", ""))
-    print(r.get("stderr", ""))
-    print(r.get("error", ""))
+    sys.stdout.write(str(r.get("exit_code", 1)))
+    sys.stdout.write("\0")
+    sys.stdout.write(r.get("stdout", "") or "")
+    sys.stdout.write("\0")
+    sys.stdout.write(r.get("stderr", "") or "")
+    sys.stdout.write("\0")
+    sys.stdout.write(r.get("error", "") or "")
 except:
-    print("1")
-    print("")
-    print("")
-    print("Failed to parse response")
+    sys.stdout.write("1\0\0\0Failed to parse response")
 ')
-    EXIT_CODE=$(echo "$PARSED" | sed -n '1p')
-    STDOUT=$(echo "$PARSED" | sed -n '2p')
-    STDERR=$(echo "$PARSED" | sed -n '3p')
-    ERROR=$(echo "$PARSED" | sed -n '4p')
+    # Read NUL-delimited fields
+    IFS= read -r -d '' EXIT_CODE <<< "$PARSED" || true
+    PARSED="${PARSED#*$'\0'}"
+    IFS= read -r -d '' STDOUT <<< "$PARSED" || true
+    PARSED="${PARSED#*$'\0'}"
+    IFS= read -r -d '' STDERR <<< "$PARSED" || true
+    PARSED="${PARSED#*$'\0'}"
+    ERROR="$PARSED"
 else
     # Last resort: basic extraction (may fail on escaped quotes)
     EXIT_CODE=$(echo "$RESPONSE" | grep -o '"exit_code":[0-9]*' | cut -d: -f2)

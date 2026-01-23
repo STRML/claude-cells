@@ -74,30 +74,143 @@ func (e *Executor) Execute(ctx context.Context, op Operation, args []string, ws 
 	return resp, prResult
 }
 
+// dangerousGitFlags are flags that could be used for command injection or arbitrary code execution.
+var dangerousGitFlags = []string{
+	"--upload-pack",
+	"--receive-pack",
+	"--exec",
+	"-u", // short for --upload-pack in some contexts
+}
+
+// allowedGHFlags is a whitelist of safe gh CLI flags.
+var allowedGHFlags = map[string]bool{
+	// Common flags
+	"--repo": true, "-R": true,
+	"--json": true, "--jq": true, "--template": true,
+	// PR flags
+	"--title": true, "-t": true,
+	"--body": true, "-b": true,
+	"--head": true, "-H": true,
+	"--base": true, "-B": true,
+	"--assignee": true, "-a": true,
+	"--label": true, "-l": true,
+	"--milestone": true, "-m": true,
+	"--project": true, "-p": true,
+	"--reviewer": true, "-r": true,
+	"--draft": true, "-d": true,
+	"--fill": true, "-f": true,
+	"--web": true, "-w": true,
+	// Merge flags
+	"--merge": true, "--squash": true, "--rebase": true,
+	"--delete-branch": true, "--auto": true,
+	"--admin": true, // needed for some merge operations
+	// View/list flags
+	"--comments": true, "-c": true,
+	"--state": true, "-s": true,
+	"--limit": true, "-L": true,
+	"--author": true, "-A": true,
+	"--search": true, "-S": true,
+	// Issue flags
+	"--body-file": true, "-F": true,
+	// Output format
+	"--color": true,
+}
+
+// validateGitArgs checks git arguments for dangerous flags.
+// Returns an error if a dangerous flag is found.
+func validateGitArgs(args []string) error {
+	for _, arg := range args {
+		argLower := strings.ToLower(arg)
+		for _, dangerous := range dangerousGitFlags {
+			if arg == dangerous || strings.HasPrefix(argLower, dangerous+"=") {
+				return fmt.Errorf("dangerous flag not allowed: %s", arg)
+			}
+		}
+	}
+	return nil
+}
+
+// validateGHArgs checks gh arguments against the whitelist.
+// Returns an error if an unknown flag is found.
+func validateGHArgs(args []string) error {
+	for _, arg := range args {
+		// Skip non-flag arguments (positional args like PR numbers, URLs)
+		if !strings.HasPrefix(arg, "-") {
+			continue
+		}
+
+		// Check if it's a known flag
+		// Handle --flag=value format
+		flagName := arg
+		if idx := strings.Index(arg, "="); idx != -1 {
+			flagName = arg[:idx]
+		}
+
+		if !allowedGHFlags[flagName] {
+			return fmt.Errorf("flag not allowed: %s", arg)
+		}
+	}
+	return nil
+}
+
 // buildCommand constructs the command to execute.
+// Returns nil if validation fails.
 func (e *Executor) buildCommand(op Operation, args []string) []string {
 	switch op {
 	case OpGitFetch:
+		if err := validateGitArgs(args); err != nil {
+			return nil
+		}
 		return append([]string{"git", "fetch"}, args...)
 	case OpGitPull:
+		if err := validateGitArgs(args); err != nil {
+			return nil
+		}
 		return append([]string{"git", "pull"}, args...)
 	case OpGitPush:
+		if err := validateGitArgs(args); err != nil {
+			return nil
+		}
 		return append([]string{"git", "push"}, args...)
 	case OpGHPRView:
+		if err := validateGHArgs(args); err != nil {
+			return nil
+		}
 		return append([]string{"gh", "pr", "view"}, args...)
 	case OpGHPRChecks:
+		if err := validateGHArgs(args); err != nil {
+			return nil
+		}
 		return append([]string{"gh", "pr", "checks"}, args...)
 	case OpGHPRDiff:
+		if err := validateGHArgs(args); err != nil {
+			return nil
+		}
 		return append([]string{"gh", "pr", "diff"}, args...)
 	case OpGHPRList:
+		if err := validateGHArgs(args); err != nil {
+			return nil
+		}
 		return append([]string{"gh", "pr", "list"}, args...)
 	case OpGHPRCreate:
+		if err := validateGHArgs(args); err != nil {
+			return nil
+		}
 		return append([]string{"gh", "pr", "create"}, args...)
 	case OpGHPRMerge:
+		if err := validateGHArgs(args); err != nil {
+			return nil
+		}
 		return append([]string{"gh", "pr", "merge"}, args...)
 	case OpGHIssueView:
+		if err := validateGHArgs(args); err != nil {
+			return nil
+		}
 		return append([]string{"gh", "issue", "view"}, args...)
 	case OpGHIssueList:
+		if err := validateGHArgs(args); err != nil {
+			return nil
+		}
 		return append([]string{"gh", "issue", "list"}, args...)
 	default:
 		return nil
