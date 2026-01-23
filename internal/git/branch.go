@@ -221,7 +221,7 @@ func (g *Git) MergeBranch(ctx context.Context, branch string) error {
 // Returns DirtyWorktreeError if there are uncommitted changes.
 func (g *Git) MergeBranchWithOptions(ctx context.Context, branch string, squash bool) error {
 	// Validate branch name to prevent command injection
-	if !isValidBranchName(branch) {
+	if !IsValidBranchName(branch) {
 		return fmt.Errorf("invalid branch name: %q", branch)
 	}
 
