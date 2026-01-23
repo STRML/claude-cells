@@ -1440,10 +1440,9 @@ func TestPaneModel_CursorPositionNotAtBottom(t *testing.T) {
 	// Call View() to establish viewport state at bottom
 	_ = pane.View()
 
-	// Enter scroll mode (simulates user scrolling up)
-	pane.scrollMode = true
-	// Set viewport to top (not at bottom)
-	pane.viewport.SetYOffset(0)
+	// Enter scroll mode and scroll to top using public APIs
+	pane.EnterScrollMode()
+	pane.viewport.GotoTop()
 
 	// Enter input mode
 	pane.SetInputMode(true)
@@ -1491,8 +1490,10 @@ func TestPaneModel_CursorPositionSmallContent(t *testing.T) {
 	scrollbackLines := len(pane.scrollback)
 	totalContentLines := scrollbackLines + vtermRows
 
-	// Now enlarge just the viewport (not the vterm) by setting height directly
-	// This simulates a viewport larger than content
+	// Direct viewport manipulation is necessary here because SetSize() keeps
+	// vterm and viewport in sync, making it impossible to test the edge case
+	// where viewport is larger than content through public APIs alone.
+	// This exercises the viewportYOffset < 0 guard in GetCursorPosition.
 	pane.viewport.SetHeight(totalContentLines + 10)
 	viewportHeight := pane.viewport.Height()
 
@@ -1555,8 +1556,9 @@ func TestPaneModel_CursorPositionAfterSettlingExpires(t *testing.T) {
 	// Simulate resize
 	pane.SetSize(80, 20)
 
-	// Manually set resizeTime to the past (simulating 500ms+ elapsed)
-	pane.resizeTime = time.Now().Add(-600 * time.Millisecond)
+	// Manually set resizeTime to the past (settling period + buffer has elapsed)
+	// Use resizeSettleTime constant to stay aligned if the value changes
+	pane.resizeTime = time.Now().Add(-(resizeSettleTime + 100*time.Millisecond))
 
 	// Enter input mode
 	pane.SetInputMode(true)
