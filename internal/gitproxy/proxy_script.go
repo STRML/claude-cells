@@ -187,13 +187,14 @@ exit $EXIT_CODE
 // It receives JSON on stdin with the bash command, checks if it matches git/gh patterns,
 // and either:
 // - Runs the command through the proxy and exits 2 (for proxied commands)
-// - Exits 2 with an error message (for blocked commands like git remote)
+// - Exits 2 with an error message (for blocked commands like git remote, git commit --amend on pushed branches)
 // - Exits 0 to allow the command (for non-git/gh commands)
 const GitHookScript = `#!/bin/bash
 # ccells-git-hook: PreToolUse hook for intercepting git/gh commands
 # Receives JSON on stdin, extracts the bash command, and decides:
 # - git fetch/pull/push: run through proxy, output result, exit 2 (block original)
 # - git remote: block with error message
+# - git commit --amend on pushed branch: block with error message
 # - gh pr/issue: run through proxy, output result, exit 2 (block original)
 # - other commands: exit 0 (allow)
 
@@ -212,6 +213,20 @@ fi
 if echo "$command" | grep -qE '^git\s+remote(\s|$)'; then
     echo "git remote commands are blocked in ccells containers" >&2
     exit 2
+fi
+
+# Check for git commit --amend on pushed branches
+if echo "$command" | grep -qE 'git\s+commit.*--amend|git\s+commit\s+-[a-zA-Z]*a[a-zA-Z]*\s'; then
+    # Check if branch has an upstream (meaning it's been pushed)
+    if git rev-parse --abbrev-ref --symbolic-full-name @{u} >/dev/null 2>&1; then
+        echo "ERROR: Cannot amend commits on a pushed branch." >&2
+        echo "" >&2
+        echo "Your branch has been pushed to remote. Using 'git commit --amend' will rewrite" >&2
+        echo "history and cause push failures. Instead, create a new commit with your changes." >&2
+        echo "" >&2
+        echo "If you really need to amend, use the Force Push option in the merge dialog (Shift+Esc, then m)." >&2
+        exit 2
+    fi
 fi
 
 # Check for git fetch/pull/push commands (proxy)

@@ -43,17 +43,9 @@ func InjectProxyConfig(claudeDir string) error {
 	hooks := getOrCreateMap(settings, "hooks")
 	preToolUseHooks := getOrCreateSlice(hooks, "PreToolUse")
 
-	// Add a single hook that intercepts all Bash commands and filters git/gh
-	// The hook script parses the command from JSON stdin and decides what to do
-	preToolUseHooks = appendHookIfMatcherNotExists(preToolUseHooks, "Bash", map[string]interface{}{
-		"matcher": "Bash",
-		"hooks": []interface{}{
-			map[string]interface{}{
-				"type":    "command",
-				"command": "/root/.claude/bin/ccells-git-hook",
-			},
-		},
-	})
+	// Add our git proxy hook to the "Bash" matcher's hooks list
+	// This merges with any existing hooks (like block-amend-pushed.sh)
+	preToolUseHooks = appendOrMergeHook(preToolUseHooks, "Bash", "/root/.claude/bin/ccells-git-hook")
 
 	hooks["PreToolUse"] = preToolUseHooks
 
@@ -96,16 +88,43 @@ func getOrCreateSlice(parent map[string]interface{}, key string) []interface{} {
 	return s
 }
 
-// appendHookIfMatcherNotExists adds a hook to the slice if a hook with the specified matcher doesn't exist.
-func appendHookIfMatcherNotExists(hooks []interface{}, matcherToFind string, newHook map[string]interface{}) []interface{} {
-	for _, h := range hooks {
+// appendOrMergeHook adds a hook command to an existing matcher's hooks list, or creates a new matcher entry.
+// This ensures our git proxy hook is always added, even when other "Bash" matcher hooks exist.
+func appendOrMergeHook(hooks []interface{}, matcherToFind string, commandToAdd string) []interface{} {
+	for i, h := range hooks {
 		if m, ok := h.(map[string]interface{}); ok {
 			if matcher, ok := m["matcher"].(string); ok && matcher == matcherToFind {
-				// Hook with same matcher already exists, skip
-				return hooks
+				// Found existing matcher - append our command to its hooks list
+				if existingHooks, ok := m["hooks"].([]interface{}); ok {
+					// Check if our command already exists
+					for _, eh := range existingHooks {
+						if ehMap, ok := eh.(map[string]interface{}); ok {
+							if cmd, ok := ehMap["command"].(string); ok && cmd == commandToAdd {
+								// Already exists, no change needed
+								return hooks
+							}
+						}
+					}
+					// Append our hook command
+					m["hooks"] = append(existingHooks, map[string]interface{}{
+						"type":    "command",
+						"command": commandToAdd,
+					})
+					hooks[i] = m
+					return hooks
+				}
 			}
 		}
 	}
 
-	return append(hooks, newHook)
+	// No matching matcher found, add a new entry
+	return append(hooks, map[string]interface{}{
+		"matcher": matcherToFind,
+		"hooks": []interface{}{
+			map[string]interface{}{
+				"type":    "command",
+				"command": commandToAdd,
+			},
+		},
+	})
 }
