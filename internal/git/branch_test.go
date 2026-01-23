@@ -1319,9 +1319,15 @@ func TestGit_MergeBranchWithOptions_WorktreeConflict(t *testing.T) {
 	// Get the base branch name (main or master)
 	baseBranch, _ := g.CurrentBranch(ctx)
 
-	// Create a worktree with a feature branch
-	worktreePath := filepath.Join(dir, "worktree")
-	err := g.CreateWorktree(ctx, worktreePath, "feature-in-worktree")
+	// Create a worktree in a temp directory outside the repo to avoid path issues
+	worktreeTempDir, err := os.MkdirTemp("", "worktree-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir for worktree: %v", err)
+	}
+	defer os.RemoveAll(worktreeTempDir)
+
+	worktreePath := filepath.Join(worktreeTempDir, "worktree")
+	err = g.CreateWorktree(ctx, worktreePath, "feature-in-worktree")
 	if err != nil {
 		t.Fatalf("CreateWorktree() error = %v", err)
 	}
@@ -1339,12 +1345,16 @@ func TestGit_MergeBranchWithOptions_WorktreeConflict(t *testing.T) {
 	exec.Command("git", "-C", dir, "commit", "-m", "Add main version").Run()
 
 	// Verify the worktree exists for this branch
+	// Use EvalSymlinks to normalize paths (handles macOS /tmp -> /private/tmp symlinks)
 	path, exists := g.WorktreeExistsForBranch(ctx, "feature-in-worktree")
 	if !exists {
 		t.Fatalf("WorktreeExistsForBranch() should find the worktree")
 	}
-	if path != worktreePath {
-		t.Fatalf("WorktreeExistsForBranch() = %q, want %q", path, worktreePath)
+	normalizedPath, _ := filepath.EvalSymlinks(path)
+	normalizedWorktreePath, _ := filepath.EvalSymlinks(worktreePath)
+	if normalizedPath != normalizedWorktreePath {
+		t.Fatalf("WorktreeExistsForBranch() = %q (normalized: %q), want %q (normalized: %q)",
+			path, normalizedPath, worktreePath, normalizedWorktreePath)
 	}
 	_ = worktreeGit
 	_ = baseBranch
@@ -1355,16 +1365,22 @@ func TestGit_MergeBranchWithOptions_WorktreeConflict(t *testing.T) {
 		t.Fatal("MergeBranchWithOptions() should fail when branch is in a worktree")
 	}
 
-	// Should NOT be "already used by worktree" error, but our custom message
-	errStr := err.Error()
-	if strings.Contains(errStr, "already used by worktree") {
-		t.Errorf("Error should not be git's cryptic message, got: %v", err)
+	// Should be a WorktreeConflictError
+	var wtErr *WorktreeConflictError
+	if !errors.As(err, &wtErr) {
+		t.Fatalf("Expected WorktreeConflictError, got %T: %v", err, err)
 	}
-	if !strings.Contains(errStr, "cannot auto-rebase") {
-		t.Errorf("Error should mention 'cannot auto-rebase', got: %v", err)
+
+	// Verify the error contains correct branch name
+	if wtErr.Branch != "feature-in-worktree" {
+		t.Errorf("WorktreeConflictError.Branch = %q, want %q", wtErr.Branch, "feature-in-worktree")
 	}
-	if !strings.Contains(errStr, worktreePath) {
-		t.Errorf("Error should mention worktree path, got: %v", err)
+
+	// Verify the error contains the worktree path (normalize for symlinks)
+	normalizedErrPath, _ := filepath.EvalSymlinks(wtErr.WorktreePath)
+	if normalizedErrPath != normalizedWorktreePath {
+		t.Errorf("WorktreeConflictError.WorktreePath = %q (normalized: %q), want %q",
+			wtErr.WorktreePath, normalizedErrPath, normalizedWorktreePath)
 	}
 }
 

@@ -123,6 +123,18 @@ func (e *DirtyWorktreeError) Error() string {
 	return fmt.Sprintf("cannot %s: worktree has uncommitted changes", e.Operation)
 }
 
+// WorktreeConflictError represents a branch that cannot be checked out because
+// it's already in use by another worktree.
+type WorktreeConflictError struct {
+	Branch       string
+	WorktreePath string
+}
+
+func (e *WorktreeConflictError) Error() string {
+	return fmt.Sprintf("cannot auto-rebase: branch '%s' is checked out in worktree at %s. "+
+		"Rebase the branch from within its container, or destroy the workstream first", e.Branch, e.WorktreePath)
+}
+
 // branchNameToTitle converts a branch name to a readable commit title.
 // Examples: "add-user-auth" -> "Add user auth", "fix_login_bug" -> "Fix login bug"
 func branchNameToTitle(branch string) string {
@@ -208,6 +220,11 @@ func (g *Git) MergeBranch(ctx context.Context, branch string) error {
 // Returns MergeConflictError if there are conflicts that need manual resolution.
 // Returns DirtyWorktreeError if there are uncommitted changes.
 func (g *Git) MergeBranchWithOptions(ctx context.Context, branch string, squash bool) error {
+	// Validate branch name to prevent command injection
+	if !isValidBranchName(branch) {
+		return fmt.Errorf("invalid branch name: %q", branch)
+	}
+
 	// Check for uncommitted changes first - fail early to avoid leaving worktree dirty
 	hasChanges, err := g.HasUncommittedChanges(ctx)
 	if err != nil {
@@ -335,15 +352,14 @@ func (g *Git) mergeBranchInternal(ctx context.Context, branch string, squash boo
 // rebaseAndRetryMerge attempts to rebase the branch onto the base branch and retry the merge.
 // This handles the common case where a branch was previously squash-merged, then
 // more work was done on it, causing conflicts on the next merge attempt.
-// Returns nil on success, MergeConflictError if rebase has conflicts.
+// Returns nil on success, MergeConflictError if rebase has conflicts,
+// WorktreeConflictError if branch is checked out in another worktree.
 func (g *Git) rebaseAndRetryMerge(ctx context.Context, branch string, squash bool) error {
 	// Check if the branch is checked out in another worktree
 	// Git doesn't allow checking out a branch that's already in use by a worktree
 	if worktreePath, exists := g.WorktreeExistsForBranch(ctx, branch); exists {
 		// Cannot rebase from here - the branch is locked to its worktree
-		// Return a helpful error suggesting the user rebase from within the container
-		return fmt.Errorf("cannot auto-rebase: branch '%s' is checked out in worktree at %s. "+
-			"Rebase the branch from within its container, or destroy the workstream first", branch, worktreePath)
+		return &WorktreeConflictError{Branch: branch, WorktreePath: worktreePath}
 	}
 
 	// Determine the base branch
