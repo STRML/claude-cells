@@ -1614,9 +1614,20 @@ func TestNewMergeDialog_WithPR(t *testing.T) {
 		t.Error("Type should be DialogMerge")
 	}
 
-	// With PR, order should be: push to PR, rebase, force push, separator, squash, merge, cancel
-	if len(d.MenuItems) != 7 {
-		t.Errorf("Should have 7 menu items with PR, got %d", len(d.MenuItems))
+	// With PR, order should be:
+	// 0. Push to open PR
+	// 1. Rebase on main
+	// 2. Force push
+	// 3. Separator (for GitHub merge options)
+	// 4. Merge PR via GitHub (squash)
+	// 5. Merge PR via GitHub (merge)
+	// 6. Merge PR via GitHub (rebase)
+	// 7. Separator (for local merge options)
+	// 8. Merge into main locally (squash)
+	// 9. Merge into main locally (merge)
+	// 10. Cancel
+	if len(d.MenuItems) != 11 {
+		t.Errorf("Should have 11 menu items with PR, got %d", len(d.MenuItems))
 	}
 	if !strings.Contains(d.MenuItems[0], "Push into open PR") {
 		t.Errorf("First item should be Push into open PR, got %s", d.MenuItems[0])
@@ -1632,9 +1643,9 @@ func TestNewMergeDialog_WithPR(t *testing.T) {
 	if !strings.HasPrefix(d.MenuItems[3], "───") {
 		t.Errorf("Fourth item should be separator, got %s", d.MenuItems[3])
 	}
-	// Fifth item should be squash
-	if !strings.Contains(d.MenuItems[4], "squash") {
-		t.Errorf("Fifth item should be squash, got %s", d.MenuItems[4])
+	// Fifth item should be GitHub merge squash
+	if !strings.Contains(d.MenuItems[4], "Merge PR via GitHub (squash)") {
+		t.Errorf("Fifth item should be Merge PR via GitHub (squash), got %s", d.MenuItems[4])
 	}
 }
 
