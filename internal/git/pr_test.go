@@ -545,10 +545,10 @@ func TestPRStatusInfo(t *testing.T) {
 
 // MockGitClientForPRStatus is a mock implementation for testing GetPRStatus
 type MockGitClientForPRStatus struct {
-	unpushedCount    int
-	unpushedErr      error
-	divergedCount    int
-	divergedErr      error
+	unpushedCount int
+	unpushedErr   error
+	divergedCount int
+	divergedErr   error
 }
 
 func (m *MockGitClientForPRStatus) GetUnpushedCommitCount(ctx context.Context, branch string) (int, error) {
@@ -567,10 +567,10 @@ func (m *MockGitClientForPRStatus) GetDivergedCommitCount(ctx context.Context, b
 
 func TestGetPRStatus_WithMockClient(t *testing.T) {
 	tests := []struct {
-		name            string
-		mockClient      *MockGitClientForPRStatus
-		expectedUnpushed int
-		expectedDiverged int
+		name               string
+		mockClient         *MockGitClientForPRStatus
+		expectedUnpushed   int
+		expectedDiverged   int
 		expectedIsDiverged bool
 	}{
 		{
@@ -579,8 +579,8 @@ func TestGetPRStatus_WithMockClient(t *testing.T) {
 				unpushedCount: 3,
 				divergedCount: 2,
 			},
-			expectedUnpushed: 3,
-			expectedDiverged: 2,
+			expectedUnpushed:   3,
+			expectedDiverged:   2,
 			expectedIsDiverged: true,
 		},
 		{
@@ -589,8 +589,8 @@ func TestGetPRStatus_WithMockClient(t *testing.T) {
 				unpushedCount: 1,
 				divergedCount: 0,
 			},
-			expectedUnpushed: 1,
-			expectedDiverged: 0,
+			expectedUnpushed:   1,
+			expectedDiverged:   0,
 			expectedIsDiverged: false,
 		},
 		{
@@ -599,8 +599,8 @@ func TestGetPRStatus_WithMockClient(t *testing.T) {
 				unpushedErr:   context.DeadlineExceeded,
 				divergedCount: 1,
 			},
-			expectedUnpushed: 0,
-			expectedDiverged: 1,
+			expectedUnpushed:   0,
+			expectedDiverged:   1,
 			expectedIsDiverged: true,
 		},
 		{
@@ -609,8 +609,8 @@ func TestGetPRStatus_WithMockClient(t *testing.T) {
 				unpushedCount: 2,
 				divergedErr:   context.DeadlineExceeded,
 			},
-			expectedUnpushed: 2,
-			expectedDiverged: 0,
+			expectedUnpushed:   2,
+			expectedDiverged:   0,
 			expectedIsDiverged: false,
 		},
 	}
