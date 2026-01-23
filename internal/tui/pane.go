@@ -343,26 +343,33 @@ func (p PaneModel) View() string {
 	if p.workstream.PRURL != "" && p.prStatus != nil {
 		var parts []string
 
-		// Check status indicator with vibrant colors
-		switch p.prStatus.CheckStatus {
-		case git.PRCheckStatusSuccess:
-			// Bright electric green on dark green background
-			checkStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#00FF88")).
-				Bold(true)
-			parts = append(parts, checkStyle.Render("✓"))
-		case git.PRCheckStatusPending:
-			// Bright yellow/gold
-			checkStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#FFD700")).
-				Bold(true)
-			parts = append(parts, checkStyle.Render("⏳"))
-		case git.PRCheckStatusFailure:
-			// Bright red/coral
-			checkStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#FF4466")).
-				Bold(true)
-			parts = append(parts, checkStyle.Render("✗"))
+		// Check status indicator with icon and summary (e.g., "✓ 3/3")
+		if p.prStatus.CheckStatus != git.PRCheckStatusUnknown {
+			var checkIcon string
+			var checkStyle lipgloss.Style
+			switch p.prStatus.CheckStatus {
+			case git.PRCheckStatusSuccess:
+				checkStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#00FF88")).
+					Bold(true)
+				checkIcon = "✓"
+			case git.PRCheckStatusPending:
+				checkStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#FFD700")).
+					Bold(true)
+				checkIcon = "⏳"
+			case git.PRCheckStatusFailure:
+				checkStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#FF4466")).
+					Bold(true)
+				checkIcon = "✗"
+			}
+			// Include summary like "3/3" if available
+			if p.prStatus.ChecksSummary != "" {
+				parts = append(parts, checkStyle.Render(checkIcon+" "+p.prStatus.ChecksSummary))
+			} else {
+				parts = append(parts, checkStyle.Render(checkIcon))
+			}
 		}
 
 		// Unpushed commits indicator - bright magenta
@@ -740,24 +747,10 @@ func (p PaneModel) View() string {
 		}
 	}
 
-	// PR status footer (only show when not in scroll mode, we have a PR, and we have status)
-	var prFooter string
-	if !p.scrollMode && p.workstream.PRURL != "" && p.prStatus != nil {
-		prFooter = p.renderPRFooter()
-	}
-
 	// Combine
 	var content string
-	footerContent := scrollHint
-	if prFooter != "" {
-		if footerContent != "" {
-			footerContent = footerContent + "  " + prFooter
-		} else {
-			footerContent = prFooter
-		}
-	}
-	if footerContent != "" {
-		content = header + "\n\n" + outputView + "\n" + footerContent + inputView
+	if scrollHint != "" {
+		content = header + "\n\n" + outputView + "\n" + scrollHint + inputView
 	} else {
 		content = header + "\n\n" + outputView + inputView
 	}
@@ -1401,50 +1394,6 @@ func (p *PaneModel) IsPRStatusLoading() bool {
 // SetSynopsisHidden sets whether the synopsis should be hidden in the header
 func (p *PaneModel) SetSynopsisHidden(hidden bool) {
 	p.synopsisHidden = hidden
-}
-
-// renderPRFooter renders a compact PR status footer line.
-// Returns a string like "PR #123: ✓ 3/3 | ↑2 unpushed" or "PR #123: ⏳ 2/3 | ⚠ diverged"
-func (p *PaneModel) renderPRFooter() string {
-	if p.prStatus == nil {
-		return ""
-	}
-
-	// Style for the footer
-	footerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#888888"))
-
-	// Build the footer parts
-	var parts []string
-
-	// PR number
-	parts = append(parts, fmt.Sprintf("PR #%d:", p.prStatus.Number))
-
-	// Check status with icon
-	var checkIcon string
-	switch p.prStatus.CheckStatus {
-	case git.PRCheckStatusSuccess:
-		checkIcon = "✓"
-	case git.PRCheckStatusPending:
-		checkIcon = "⏳"
-	case git.PRCheckStatusFailure:
-		checkIcon = "✗"
-	default:
-		checkIcon = "?"
-	}
-	parts = append(parts, fmt.Sprintf("%s %s", checkIcon, p.prStatus.ChecksSummary))
-
-	// Unpushed commits
-	if p.prStatus.UnpushedCount > 0 {
-		parts = append(parts, fmt.Sprintf("↑%d unpushed", p.prStatus.UnpushedCount))
-	}
-
-	// Divergence warning
-	if p.prStatus.IsDiverged {
-		parts = append(parts, "⚠ diverged")
-	}
-
-	return footerStyle.Render(strings.Join(parts, " | "))
 }
 
 // IsClaudeWorking returns true if Claude appears to be actively working.

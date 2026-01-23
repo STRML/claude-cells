@@ -1136,9 +1136,9 @@ func TestPaneModel_InverseVideoPreserved(t *testing.T) {
 
 	// Write text with inverse video (simulating Claude Code's cursor)
 	pane.WritePTYOutput([]byte("Input: "))
-	pane.WritePTYOutput([]byte("\x1b[7m"))  // Start inverse video
-	pane.WritePTYOutput([]byte(" "))        // Cursor block
-	pane.WritePTYOutput([]byte("\x1b[0m"))  // Reset
+	pane.WritePTYOutput([]byte("\x1b[7m")) // Start inverse video
+	pane.WritePTYOutput([]byte(" "))       // Cursor block
+	pane.WritePTYOutput([]byte("\x1b[0m")) // Reset
 	pane.WritePTYOutput([]byte(" more"))
 
 	// Render the vterm content
@@ -1208,123 +1208,6 @@ func TestPaneModel_PRStatusMethods(t *testing.T) {
 	}
 }
 
-// TestPaneModel_RenderPRFooter tests the renderPRFooter method
-func TestPaneModel_RenderPRFooter(t *testing.T) {
-	tests := []struct {
-		name     string
-		status   *git.PRStatusInfo
-		contains []string
-		excludes []string
-	}{
-		{
-			name:     "nil status returns empty",
-			status:   nil,
-			contains: nil,
-			excludes: []string{"PR #"},
-		},
-		{
-			name: "success status with all checks passed",
-			status: &git.PRStatusInfo{
-				Number:        42,
-				CheckStatus:   git.PRCheckStatusSuccess,
-				ChecksSummary: "5/5 passed",
-			},
-			contains: []string{"PR #42:", "✓", "5/5 passed"},
-			excludes: []string{"unpushed", "diverged"},
-		},
-		{
-			name: "pending status",
-			status: &git.PRStatusInfo{
-				Number:        99,
-				CheckStatus:   git.PRCheckStatusPending,
-				ChecksSummary: "2/4 passed",
-			},
-			contains: []string{"PR #99:", "⏳", "2/4 passed"},
-			excludes: []string{"unpushed", "diverged"},
-		},
-		{
-			name: "failure status",
-			status: &git.PRStatusInfo{
-				Number:        55,
-				CheckStatus:   git.PRCheckStatusFailure,
-				ChecksSummary: "1/3 passed",
-			},
-			contains: []string{"PR #55:", "✗", "1/3 passed"},
-			excludes: []string{"unpushed", "diverged"},
-		},
-		{
-			name: "unknown status",
-			status: &git.PRStatusInfo{
-				Number:        10,
-				CheckStatus:   git.PRCheckStatusUnknown,
-				ChecksSummary: "No checks",
-			},
-			contains: []string{"PR #10:", "?", "No checks"},
-			excludes: []string{"unpushed", "diverged"},
-		},
-		{
-			name: "with unpushed commits",
-			status: &git.PRStatusInfo{
-				Number:        77,
-				CheckStatus:   git.PRCheckStatusSuccess,
-				ChecksSummary: "3/3 passed",
-				UnpushedCount: 5,
-			},
-			contains: []string{"PR #77:", "✓", "↑5 unpushed"},
-			excludes: []string{"diverged"},
-		},
-		{
-			name: "with divergence",
-			status: &git.PRStatusInfo{
-				Number:        88,
-				CheckStatus:   git.PRCheckStatusPending,
-				ChecksSummary: "1/2 passed",
-				IsDiverged:    true,
-				DivergedCount: 3,
-			},
-			contains: []string{"PR #88:", "⚠ diverged"},
-			excludes: nil,
-		},
-		{
-			name: "with unpushed and diverged",
-			status: &git.PRStatusInfo{
-				Number:        100,
-				CheckStatus:   git.PRCheckStatusFailure,
-				ChecksSummary: "0/2 passed",
-				UnpushedCount: 2,
-				IsDiverged:    true,
-				DivergedCount: 1,
-			},
-			contains: []string{"PR #100:", "✗", "↑2 unpushed", "⚠ diverged"},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			ws := workstream.New("test")
-			pane := NewPaneModel(ws)
-			pane.SetPRStatus(tt.status)
-
-			result := pane.renderPRFooter()
-
-			// Check for expected content
-			for _, want := range tt.contains {
-				if !strings.Contains(result, want) {
-					t.Errorf("renderPRFooter() should contain %q, got %q", want, result)
-				}
-			}
-
-			// Check that excluded content is not present (strip ANSI for accurate check)
-			stripped := stripANSI(result)
-			for _, exclude := range tt.excludes {
-				if strings.Contains(stripped, exclude) {
-					t.Errorf("renderPRFooter() should not contain %q, got %q", exclude, stripped)
-				}
-			}
-		})
-	}
-}
-
 func TestPaneModel_View_PRStatusIndicator(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1378,6 +1261,28 @@ func TestPaneModel_View_PRStatusIndicator(t *testing.T) {
 				DivergedCount: 2,
 			},
 			contains: []string{"⚠", "↓2"},
+			excludes: []string{},
+		},
+		{
+			name:  "PR with checks summary shows summary in header",
+			prURL: "https://github.com/foo/bar/pull/42",
+			status: &git.PRStatusInfo{
+				Number:        42,
+				CheckStatus:   git.PRCheckStatusSuccess,
+				ChecksSummary: "3/3",
+			},
+			contains: []string{"PR #42", "✓", "3/3"},
+			excludes: []string{},
+		},
+		{
+			name:  "PR with pending checks shows summary",
+			prURL: "https://github.com/foo/bar/pull/99",
+			status: &git.PRStatusInfo{
+				Number:        99,
+				CheckStatus:   git.PRCheckStatusPending,
+				ChecksSummary: "1/3",
+			},
+			contains: []string{"PR #99", "⏳", "1/3"},
 			excludes: []string{},
 		},
 	}
