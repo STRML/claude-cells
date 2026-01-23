@@ -157,15 +157,28 @@ func (p *Pairing) GetSyncHealth() (healthy bool, conflicts []string) {
 // CheckSyncHealth checks the health of the mutagen sync session.
 // Returns an error if the session is unhealthy or lost.
 func (p *Pairing) CheckSyncHealth(ctx context.Context) error {
+	// Take read lock to check active state and get branch name
+	p.mu.RLock()
+	if !p.active {
+		p.mu.RUnlock()
+		return nil
+	}
+	branch := p.currentBranch
+	p.mu.RUnlock()
+
+	// Get detailed session status (includes conflicts, problems, and sync state)
+	// This is an external subprocess call - don't hold lock during I/O
+	sessionStatus, err := p.mutagen.GetSessionStatus(ctx, branch)
+
+	// Re-acquire write lock to update state
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if !p.active {
+	// Verify state hasn't changed while we were waiting
+	if !p.active || p.currentBranch != branch {
 		return nil
 	}
 
-	// Get detailed session status (includes conflicts, problems, and sync state)
-	sessionStatus, err := p.mutagen.GetSessionStatus(ctx, p.currentBranch)
 	if err != nil {
 		p.syncHealthy = false
 		p.syncStatus = SyncStatusError
@@ -185,7 +198,7 @@ func (p *Pairing) CheckSyncHealth(ctx context.Context) error {
 	switch sessionStatus.Status {
 	case SyncStatusDisconnected:
 		p.syncHealthy = false
-		return fmt.Errorf("sync session lost for branch %s", p.currentBranch)
+		return fmt.Errorf("sync session lost for branch %s", branch)
 	case SyncStatusConflicted:
 		p.syncHealthy = false
 		return fmt.Errorf("sync has %d conflict(s)", len(sessionStatus.Conflicts))

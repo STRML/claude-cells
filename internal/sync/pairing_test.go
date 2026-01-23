@@ -339,14 +339,24 @@ func TestPairing_CheckSyncHealth_UpdatesEnhancedFields(t *testing.T) {
 
 			// Enable pairing first (need session to exist during enable)
 			mutagen.sessionExists = true
-			_ = p.Enable(ctx, "feature-branch", "container-123", "/path/to/repo", "main")
+			if err := p.Enable(ctx, "feature-branch", "container-123", "/path/to/repo", "main"); err != nil {
+				t.Fatalf("Enable() failed: %v", err)
+			}
 
 			// Now set the test conditions
 			mutagen.sessionExists = tt.sessionExists
 			mutagen.syncStatus = tt.syncStatus
 			mutagen.conflicts = tt.conflicts
 
-			_ = p.CheckSyncHealth(ctx)
+			err := p.CheckSyncHealth(ctx)
+
+			// CheckSyncHealth returns errors for unhealthy states (conflicts, disconnected, error)
+			if tt.expectHealthy && err != nil {
+				t.Errorf("CheckSyncHealth() unexpected error for healthy state: %v", err)
+			}
+			if !tt.expectHealthy && err == nil {
+				t.Errorf("CheckSyncHealth() expected error for unhealthy state, got nil")
+			}
 
 			state := p.GetState()
 			if state.SyncStatus != tt.expectedStatus {

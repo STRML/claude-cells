@@ -163,7 +163,7 @@ func (m *Mutagen) GetSessionStatus(ctx context.Context, branchName string) (*Ses
 	sessionName := SessionName(branchName)
 
 	cmd := exec.CommandContext(ctx, "mutagen", "sync", "list", "--long", sessionName)
-	output, err := cmd.Output()
+	output, err := cmd.CombinedOutput()
 	if err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
 			// Session doesn't exist
@@ -175,7 +175,7 @@ func (m *Mutagen) GetSessionStatus(ctx context.Context, branchName string) (*Ses
 		}
 		return &SessionStatus{
 			Status:     SyncStatusError,
-			StatusText: err.Error(),
+			StatusText: fmt.Sprintf("%v: %s", err, string(output)),
 			LastUpdate: time.Now(),
 		}, err
 	}
