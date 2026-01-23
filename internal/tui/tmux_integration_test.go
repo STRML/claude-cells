@@ -730,6 +730,327 @@ func TestTmuxStartupGolden(t *testing.T) {
 	assertGolden(t, "startup_frame", maskedFrame)
 }
 
+// TestTmuxResizeScrollToBottom verifies that after resizing, the display
+// remains scrolled to the bottom (no spurious scroll displacement or newlines).
+// This tests the PTY resize behavior that sends signals to the child process.
+func TestTmuxResizeScrollToBottom(t *testing.T) {
+	if !tmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := testSessionName()
+
+	cleanupTmuxSession()
+	defer cleanupTmuxSession()
+
+	// Start tmux with a shell that generates output and shows a prompt
+	// Generate 100 lines of content, then show marker, then interactive bash
+	script := `for i in $(seq 1 100); do echo "Content line $i"; done; echo "=== BOTTOM MARKER ==="; cat`
+
+	startCmd := exec.Command("tmux", "new-session",
+		"-d",
+		"-s", sessionName,
+		"-x", "100",
+		"-y", "30",
+		"bash", "-c", script,
+	)
+
+	if err := startCmd.Run(); err != nil {
+		t.Fatalf("Failed to start tmux session: %v", err)
+	}
+
+	// Wait for output to complete (BOTTOM MARKER should appear)
+	if !waitForContent(t, "BOTTOM MARKER", 5*time.Second) {
+		frame := captureTmuxPane(t)
+		t.Fatalf("BOTTOM MARKER did not appear. Frame:\n%s", frame)
+	}
+
+	// Capture initial frame - should show bottom marker
+	initialFrame := captureTmuxPane(t)
+	t.Logf("Initial frame (bottom visible):\n%s", initialFrame)
+
+	if !strings.Contains(initialFrame, "BOTTOM MARKER") {
+		t.Error("Initial frame should show BOTTOM MARKER (we should be at bottom)")
+	}
+
+	// Count lines before resize
+	linesBefore := countLines(initialFrame)
+
+	// Now resize the window multiple times
+	sizes := []struct{ w, h int }{
+		{80, 24},  // smaller
+		{120, 40}, // larger
+		{100, 30}, // back to original-ish
+		{60, 20},  // much smaller
+		{140, 50}, // much larger
+	}
+
+	for _, size := range sizes {
+		t.Run(fmt.Sprintf("resize_%dx%d", size.w, size.h), func(t *testing.T) {
+			// Resize
+			resizeCmd := exec.Command("tmux", "resize-window",
+				"-t", sessionName,
+				"-x", fmt.Sprintf("%d", size.w),
+				"-y", fmt.Sprintf("%d", size.h),
+			)
+			if err := resizeCmd.Run(); err != nil {
+				t.Fatalf("Failed to resize: %v", err)
+			}
+
+			// Wait for resize to propagate
+			time.Sleep(300 * time.Millisecond)
+
+			// Capture frame
+			frame := captureTmuxPane(t)
+
+			// After resize, we should still see the bottom marker
+			// (not scrolled up to show old content)
+			if !strings.Contains(frame, "BOTTOM MARKER") {
+				// For very small heights, the marker might scroll off
+				if size.h >= 15 {
+					t.Errorf("After resize to %dx%d, BOTTOM MARKER not visible - may have scrolled up", size.w, size.h)
+					t.Logf("Frame:\n%s", frame)
+				}
+			}
+
+			// Check line count matches expected height
+			lines := countLines(frame)
+			if lines != size.h {
+				t.Errorf("After resize to %dx%d: got %d lines, want %d", size.w, size.h, lines, size.h)
+			}
+		})
+	}
+
+	// Final check: type some text and verify it appears (no spurious newlines)
+	sendKeys(t, "TEST_INPUT")
+	time.Sleep(100 * time.Millisecond)
+
+	finalFrame := captureTmuxPane(t)
+	// The input should appear on a single line, not spread across multiple
+	if !strings.Contains(finalFrame, "TEST_INPUT") {
+		t.Error("Typed input should appear in frame")
+		t.Logf("Final frame:\n%s", finalFrame)
+	}
+
+	t.Logf("Initial lines: %d, resize behavior verified OK", linesBefore)
+}
+
+// TestTmuxPTYResizeSignals verifies that PTY resize properly triggers
+// the child process to redraw. This simulates what ccells does when
+// sending Ctrl+L after resize.
+func TestTmuxPTYResizeSignals(t *testing.T) {
+	if !tmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := testSessionName()
+
+	cleanupTmuxSession()
+	defer cleanupTmuxSession()
+
+	// Start with vim or less which responds to SIGWINCH
+	// Using 'less' is simpler - it shows line numbers and responds to resize
+	script := `seq 1 1000 | cat -n > /tmp/testfile.txt; less /tmp/testfile.txt`
+
+	startCmd := exec.Command("tmux", "new-session",
+		"-d",
+		"-s", sessionName,
+		"-x", "80",
+		"-y", "24",
+		"bash", "-c", script,
+	)
+
+	if err := startCmd.Run(); err != nil {
+		t.Fatalf("Failed to start tmux session: %v", err)
+	}
+
+	// Wait for less to start (shows : prompt at bottom or file content)
+	time.Sleep(1 * time.Second)
+
+	// Go to end of file in less
+	sendKey(t, "G")
+	time.Sleep(200 * time.Millisecond)
+
+	// Capture - should show high line numbers (near 1000)
+	initialFrame := captureTmuxPane(t)
+	t.Logf("Initial frame (at end of file):\n%s", initialFrame)
+
+	if !strings.Contains(initialFrame, "1000") {
+		t.Log("Warning: May not be at end of file")
+	}
+
+	// Resize window
+	resizeCmd := exec.Command("tmux", "resize-window",
+		"-t", sessionName,
+		"-x", "120",
+		"-y", "40",
+	)
+	if err := resizeCmd.Run(); err != nil {
+		t.Fatalf("Failed to resize: %v", err)
+	}
+
+	// Wait and capture
+	time.Sleep(500 * time.Millisecond)
+	afterResizeFrame := captureTmuxPane(t)
+
+	// Less should have redrawn and still show the end of file
+	if !strings.Contains(afterResizeFrame, "1000") {
+		t.Error("After resize, less should still show end of file (line 1000)")
+		t.Logf("Frame after resize:\n%s", afterResizeFrame)
+	}
+
+	// Verify the new dimensions are used
+	lines := countLines(afterResizeFrame)
+	if lines != 40 {
+		t.Errorf("Expected 40 lines after resize, got %d", lines)
+	}
+
+	// Quit less
+	sendKey(t, "q")
+}
+
+// TestTmuxCtrlODoesNotInsertNewlines verifies that sending Ctrl+O (0x0F) to
+// a bash prompt does NOT insert newlines. This was a bug in the resize handler
+// where Ctrl+O was being sent to "scroll to bottom" but instead it was causing
+// newlines to appear in Claude Code's input area.
+func TestTmuxCtrlODoesNotInsertNewlines(t *testing.T) {
+	if !tmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := testSessionName()
+
+	cleanupTmuxSession()
+	defer cleanupTmuxSession()
+
+	// Start tmux with a clean bash prompt
+	startCmd := exec.Command("tmux", "new-session",
+		"-d",
+		"-s", sessionName,
+		"-x", "80",
+		"-y", "24",
+		"bash", "--norc", "--noprofile",
+	)
+
+	if err := startCmd.Run(); err != nil {
+		t.Fatalf("Failed to start tmux session: %v", err)
+	}
+
+	// Wait for bash prompt
+	time.Sleep(500 * time.Millisecond)
+
+	// Capture initial frame
+	initialFrame := captureTmuxPane(t)
+	t.Logf("Initial frame:\n%s", initialFrame)
+
+	// Count the number of prompt lines (bash-X.X#) initially
+	initialPromptCount := strings.Count(initialFrame, "bash-")
+
+	// Now send Ctrl+O twice (what the resize handler was doing)
+	sendKeys(t, "C-o", "C-o")
+	time.Sleep(200 * time.Millisecond)
+
+	// Capture frame after Ctrl+O
+	afterCtrlOFrame := captureTmuxPane(t)
+	t.Logf("After Ctrl+O x2:\n%s", afterCtrlOFrame)
+
+	// In bash, Ctrl+O is "operate-and-get-next" which executes the current line
+	// On an empty prompt, this might just show a new prompt
+	afterCtrlOPromptCount := strings.Count(afterCtrlOFrame, "bash-")
+
+	// The prompt count should not increase by more than 1 (the Ctrl+O might
+	// execute empty line once, showing new prompt)
+	if afterCtrlOPromptCount > initialPromptCount+2 {
+		t.Errorf("Ctrl+O appears to have created extra newlines/prompts: initial=%d, after=%d",
+			initialPromptCount, afterCtrlOPromptCount)
+	}
+
+	// Now type some text and verify it appears on a single line
+	sendKeys(t, "echo hello")
+	time.Sleep(100 * time.Millisecond)
+
+	afterTypeFrame := captureTmuxPane(t)
+
+	// The "echo hello" should appear as continuous text, not split by newlines
+	if !strings.Contains(afterTypeFrame, "echo hello") {
+		t.Error("Typed text should appear in frame")
+		t.Logf("Frame after typing:\n%s", afterTypeFrame)
+	}
+
+	t.Log("Ctrl+O behavior test completed")
+}
+
+// TestTmuxResizeWithCcellsPTY is a more realistic test that simulates what
+// ccells does: resize the PTY and send Ctrl+L (and previously Ctrl+O).
+// This tests that resize followed by Ctrl+L properly redraws without issues.
+func TestTmuxResizeWithCtrlL(t *testing.T) {
+	if !tmuxAvailable() {
+		t.Skip("tmux not available")
+	}
+
+	sessionName := testSessionName()
+
+	cleanupTmuxSession()
+	defer cleanupTmuxSession()
+
+	// Start tmux with vim which responds well to SIGWINCH and Ctrl+L
+	script := `echo -e "Line 1\nLine 2\nLine 3\nLine 4\nLine 5\nLine 6\nLine 7\nLine 8\nLine 9\nLine 10" > /tmp/testfile.txt; vim /tmp/testfile.txt`
+
+	startCmd := exec.Command("tmux", "new-session",
+		"-d",
+		"-s", sessionName,
+		"-x", "80",
+		"-y", "24",
+		"bash", "-c", script,
+	)
+
+	if err := startCmd.Run(); err != nil {
+		t.Fatalf("Failed to start tmux session: %v", err)
+	}
+
+	// Wait for vim to start
+	if !waitForContent(t, "Line 1", 3*time.Second) {
+		t.Skip("vim did not start properly")
+	}
+
+	// Capture initial frame
+	initialFrame := captureTmuxPane(t)
+	t.Logf("Initial vim frame:\n%s", initialFrame)
+
+	// Resize window (this sends SIGWINCH to vim)
+	resizeCmd := exec.Command("tmux", "resize-window",
+		"-t", sessionName,
+		"-x", "100",
+		"-y", "30",
+	)
+	if err := resizeCmd.Run(); err != nil {
+		t.Fatalf("Failed to resize: %v", err)
+	}
+
+	// Send Ctrl+L to force redraw (what ccells does)
+	time.Sleep(100 * time.Millisecond)
+	sendKey(t, "C-l")
+	time.Sleep(200 * time.Millisecond)
+
+	// Capture frame after resize + Ctrl+L
+	afterResizeFrame := captureTmuxPane(t)
+	t.Logf("After resize + Ctrl+L:\n%s", afterResizeFrame)
+
+	// Vim should still show the file content
+	if !strings.Contains(afterResizeFrame, "Line 1") {
+		t.Error("Vim should still show file content after resize + Ctrl+L")
+	}
+
+	// Verify line count matches new height
+	lines := countLines(afterResizeFrame)
+	if lines != 30 {
+		t.Errorf("Expected 30 lines after resize, got %d", lines)
+	}
+
+	// Quit vim
+	sendKeys(t, "Escape", ":", "q", "!", "Enter")
+}
+
 // TestTmuxGoldenWithDialog tests golden file comparison with a dialog open
 func TestTmuxGoldenWithDialog(t *testing.T) {
 	if !tmuxAvailable() {

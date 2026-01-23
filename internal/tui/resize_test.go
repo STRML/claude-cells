@@ -152,10 +152,10 @@ func countCtrlO(data []byte) int {
 	return count
 }
 
-// TestPaneModel_SetSize_SendsCtrlOTwiceOnResize verifies that Ctrl+O is sent twice
-// after resize to fix Claude Code display corruption. Empirically, this fixes issues
-// where the text input floats to the top or other visual corruption occurs.
-func TestPaneModel_SetSize_SendsCtrlOTwiceOnResize(t *testing.T) {
+// TestPaneModel_SetSize_DoesNotSendCtrlO verifies that Ctrl+O is NOT sent on resize.
+// Previously Ctrl+O was sent to fix display corruption, but it was causing newlines
+// to be inserted in bash/readline and Claude Code's input area.
+func TestPaneModel_SetSize_DoesNotSendCtrlO(t *testing.T) {
 	ws := workstream.New("test")
 	pane := NewPaneModel(ws)
 
@@ -172,19 +172,16 @@ func TestPaneModel_SetSize_SendsCtrlOTwiceOnResize(t *testing.T) {
 	pane.SetSize(100, 50)
 	mockStdin.buf.Reset() // Clear any initial writes
 
-	// Resize - should send Ctrl+O twice
+	// Resize - should NOT send Ctrl+O (it was causing newlines)
 	pane.SetSize(80, 50)
 	ctrlOCount := countCtrlO(mockStdin.buf.Bytes())
-	if ctrlOCount != 2 {
-		t.Errorf("Expected 2 Ctrl+O on resize, got %d", ctrlOCount)
-	}
-	mockStdin.buf.Reset()
-
-	// Same exact size - should NOT send Ctrl+O
-	pane.SetSize(80, 50)
-	ctrlOCount = countCtrlO(mockStdin.buf.Bytes())
 	if ctrlOCount != 0 {
-		t.Errorf("Expected 0 Ctrl+O when size unchanged, got %d", ctrlOCount)
+		t.Errorf("Expected 0 Ctrl+O on resize (was causing newlines), got %d", ctrlOCount)
+	}
+
+	// But should still send Ctrl+L for redraw
+	if !containsCtrlL(mockStdin.buf.Bytes()) {
+		t.Error("Ctrl+L should still be sent for redraw")
 	}
 }
 

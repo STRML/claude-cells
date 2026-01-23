@@ -1232,20 +1232,16 @@ func (p *PaneModel) setSizeInternal(width, height int, sendRefresh bool) {
 		}
 
 		// Only send refresh signals if requested (i.e., for actual window resizes)
-		// Layout-induced resizes (pane count changes) should not send these as
-		// Ctrl+O can interfere with Claude Code's input handling, causing newlines
-		// to be inserted in the input area.
+		// Layout-induced resizes (pane count changes) should not send Ctrl+L as
+		// it can cause visual disruption.
 		if sendRefresh {
-			// Always send Ctrl+L on resize to trigger a full redraw.
+			// Send Ctrl+L on resize to trigger a full redraw.
 			// This ensures the process redraws for the new size, preventing corruption
 			// from output generated for the old size.
+			// Note: Previously we also sent Ctrl+O twice here, but that was causing
+			// newlines to be inserted in bash/readline and Claude Code's input area.
+			// SIGWINCH from PTY resize + Ctrl+L is sufficient for proper redraw.
 			_ = p.pty.Write([]byte{12}) // Ctrl+L (form feed) - triggers screen redraw
-
-			// Send Ctrl+O twice after resize to fix Claude Code display corruption.
-			// Empirically, this fixes issues where the text input floats to the top
-			// or other visual corruption occurs after resize.
-			_ = p.pty.Write([]byte{0x0F}) // Ctrl+O
-			_ = p.pty.Write([]byte{0x0F}) // Ctrl+O again
 		}
 	}
 
