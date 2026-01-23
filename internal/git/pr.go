@@ -13,6 +13,28 @@ import (
 	"github.com/STRML/claude-cells/internal/claude"
 )
 
+// PRCheckStatus represents the aggregated status of PR checks.
+type PRCheckStatus string
+
+const (
+	PRCheckStatusSuccess PRCheckStatus = "success"
+	PRCheckStatusPending PRCheckStatus = "pending"
+	PRCheckStatusFailure PRCheckStatus = "failure"
+	PRCheckStatusUnknown PRCheckStatus = "unknown"
+)
+
+// PRStatusInfo contains comprehensive PR status information.
+type PRStatusInfo struct {
+	Number        int           // PR number
+	URL           string        // PR URL
+	HeadSHA       string        // PR's head commit SHA
+	CheckStatus   PRCheckStatus // Aggregated check status
+	ChecksSummary string        // e.g., "3/5 passed"
+	UnpushedCount int           // Local commits not in PR
+	DivergedCount int           // Remote commits not in local
+	IsDiverged    bool          // True if remote has commits not in local
+}
+
 // GH wraps the GitHub CLI for PR operations.
 type GH struct{}
 
@@ -128,6 +150,116 @@ func (g *GH) PRExists(ctx context.Context, repoPath string) (bool, *PRResponse, 
 		return false, nil, fmt.Errorf("failed to parse PR response: %w", err)
 	}
 	return true, &resp, nil
+}
+
+// prStatusCheckRollup represents the statusCheckRollup from GitHub API.
+type prStatusCheckRollup struct {
+	State    string `json:"state"` // SUCCESS, PENDING, FAILURE, ERROR, EXPECTED
+	Contexts []struct {
+		State      string `json:"state"`
+		Conclusion string `json:"conclusion"`
+	} `json:"contexts"`
+}
+
+// prViewResponse is the full response from gh pr view --json.
+type prViewResponse struct {
+	Number            int                 `json:"number"`
+	URL               string              `json:"url"`
+	HeadRefOid        string              `json:"headRefOid"`
+	StatusCheckRollup prStatusCheckRollup `json:"statusCheckRollup"`
+	HeadRefName       string              `json:"headRefName"`
+}
+
+// GetPRStatus retrieves comprehensive PR status including checks and commit comparison.
+// The gitClient is used to compare local commits with the PR's head SHA.
+func (g *GH) GetPRStatus(ctx context.Context, repoPath string, gitClient GitClient) (*PRStatusInfo, error) {
+	// Query PR with status check rollup
+	cmd := exec.CommandContext(ctx, "gh", "pr", "view",
+		"--json", "number,url,headRefOid,statusCheckRollup,headRefName")
+	cmd.Dir = repoPath
+	out, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("gh pr view failed: %w", err)
+	}
+
+	var resp prViewResponse
+	if err := json.Unmarshal(out, &resp); err != nil {
+		return nil, fmt.Errorf("failed to parse PR response: %w", err)
+	}
+
+	// Aggregate check status
+	checkStatus, checksSummary := aggregateCheckStatus(resp.StatusCheckRollup)
+
+	status := &PRStatusInfo{
+		Number:        resp.Number,
+		URL:           resp.URL,
+		HeadSHA:       resp.HeadRefOid,
+		CheckStatus:   checkStatus,
+		ChecksSummary: checksSummary,
+	}
+
+	// Compare local commits with PR's remote head
+	if gitClient != nil && resp.HeadRefName != "" {
+		// Get unpushed commits: commits in local branch but not in origin/<branch>
+		unpushed, err := gitClient.GetUnpushedCommitCount(ctx, resp.HeadRefName)
+		if err == nil {
+			status.UnpushedCount = unpushed
+		}
+
+		// Get diverged commits: commits in origin/<branch> but not in local
+		diverged, err := gitClient.GetDivergedCommitCount(ctx, resp.HeadRefName)
+		if err == nil {
+			status.DivergedCount = diverged
+			status.IsDiverged = diverged > 0
+		}
+	}
+
+	return status, nil
+}
+
+// aggregateCheckStatus converts the statusCheckRollup into a simple status and summary.
+func aggregateCheckStatus(rollup prStatusCheckRollup) (PRCheckStatus, string) {
+	if len(rollup.Contexts) == 0 {
+		return PRCheckStatusUnknown, "No checks"
+	}
+
+	passed := 0
+	failed := 0
+	pending := 0
+	total := len(rollup.Contexts)
+
+	for _, ctx := range rollup.Contexts {
+		// Conclusion takes precedence if present
+		conclusion := ctx.Conclusion
+		if conclusion == "" {
+			conclusion = ctx.State
+		}
+
+		switch strings.ToLower(conclusion) {
+		case "success", "skipped", "neutral":
+			passed++
+		case "failure", "error", "cancelled", "timed_out", "action_required":
+			failed++
+		default:
+			// pending, queued, in_progress, waiting, etc.
+			pending++
+		}
+	}
+
+	var status PRCheckStatus
+	switch {
+	case failed > 0:
+		status = PRCheckStatusFailure
+	case pending > 0:
+		status = PRCheckStatusPending
+	case passed == total:
+		status = PRCheckStatusSuccess
+	default:
+		status = PRCheckStatusUnknown
+	}
+
+	summary := fmt.Sprintf("%d/%d passed", passed, total)
+	return status, summary
 }
 
 // prContentResponse is the expected JSON response from Claude for PR content generation.

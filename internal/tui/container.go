@@ -1192,6 +1192,20 @@ type RebaseBranchMsg struct {
 	ConflictFiles []string // Files with conflicts (if rebase stopped)
 }
 
+// PRStatusMsg is sent when PR status is fetched.
+type PRStatusMsg struct {
+	WorkstreamID string
+	Status       *git.PRStatusInfo
+	Error        error
+}
+
+// FetchRebaseResultMsg is sent when a fetch-and-rebase operation completes.
+type FetchRebaseResultMsg struct {
+	WorkstreamID  string
+	Error         error
+	ConflictFiles []string // Files with conflicts if rebase failed
+}
+
 // RebaseBranchCmd returns a command that rebases a branch onto main.
 func RebaseBranchCmd(ws *workstream.Workstream) tea.Cmd {
 	return func() tea.Msg {
@@ -1216,6 +1230,64 @@ func RebaseBranchCmd(ws *workstream.Workstream) tea.Cmd {
 		}
 
 		return RebaseBranchMsg{WorkstreamID: ws.ID}
+	}
+}
+
+// FetchPRStatusCmd returns a command that fetches comprehensive PR status.
+func FetchPRStatusCmd(ws *workstream.Workstream) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		// Use worktree path for git operations
+		worktreePath := resolveWorktreePath(ws)
+		if worktreePath == "" {
+			return PRStatusMsg{WorkstreamID: ws.ID, Error: fmt.Errorf("no worktree path")}
+		}
+
+		gitRepo := GitClientFactory(worktreePath)
+		gh := git.NewGH()
+
+		status, err := gh.GetPRStatus(ctx, worktreePath, gitRepo)
+		if err != nil {
+			return PRStatusMsg{WorkstreamID: ws.ID, Error: err}
+		}
+
+		return PRStatusMsg{
+			WorkstreamID: ws.ID,
+			Status:       status,
+		}
+	}
+}
+
+// FetchRebaseCmd returns a command that fetches main and rebases the current branch onto it.
+func FetchRebaseCmd(ws *workstream.Workstream) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
+
+		// Use worktree path for git operations
+		worktreePath := resolveWorktreePath(ws)
+		if worktreePath == "" {
+			return FetchRebaseResultMsg{WorkstreamID: ws.ID, Error: fmt.Errorf("no worktree path")}
+		}
+
+		gitRepo := GitClientFactory(worktreePath)
+
+		// Perform fetch and rebase
+		if err := gitRepo.FetchAndRebase(ctx); err != nil {
+			// Check if it's a conflict error
+			if conflictErr, ok := err.(*git.MergeConflictError); ok {
+				return FetchRebaseResultMsg{
+					WorkstreamID:  ws.ID,
+					Error:         err,
+					ConflictFiles: conflictErr.ConflictFiles,
+				}
+			}
+			return FetchRebaseResultMsg{WorkstreamID: ws.ID, Error: err}
+		}
+
+		return FetchRebaseResultMsg{WorkstreamID: ws.ID}
 	}
 }
 

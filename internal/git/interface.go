@@ -33,6 +33,9 @@ type GitClient interface {
 	PullMain(ctx context.Context) error
 	UpdateMainBranch(ctx context.Context) error
 	RemoteURL(ctx context.Context, remoteName string) (string, error)
+	GetUnpushedCommitCount(ctx context.Context, branch string) (int, error)
+	GetDivergedCommitCount(ctx context.Context, branch string) (int, error)
+	FetchAndRebase(ctx context.Context) error
 
 	// Merge/rebase operations
 	MergeBranch(ctx context.Context, branch string) error

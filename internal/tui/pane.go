@@ -11,6 +11,7 @@ import (
 	"charm.land/bubbles/v2/viewport"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/STRML/claude-cells/internal/git"
 	"github.com/STRML/claude-cells/internal/workstream"
 	"github.com/hinshun/vt10x"
 )
@@ -60,6 +61,10 @@ type PaneModel struct {
 
 	// In-pane dialog (e.g., merge dialog shown inside the pane)
 	inPaneDialog *DialogModel
+
+	// PR status for merge dialog enhancement
+	prStatus        *git.PRStatusInfo
+	prStatusLoading bool
 }
 
 // Width returns the pane width
@@ -643,10 +648,24 @@ func (p PaneModel) View() string {
 		}
 	}
 
+	// PR status footer (only show when not in scroll mode and we have PR status)
+	var prFooter string
+	if !p.scrollMode && p.prStatus != nil {
+		prFooter = p.renderPRFooter()
+	}
+
 	// Combine
 	var content string
-	if scrollHint != "" {
-		content = header + "\n\n" + outputView + "\n" + scrollHint + inputView
+	footerContent := scrollHint
+	if prFooter != "" {
+		if footerContent != "" {
+			footerContent = footerContent + "  " + prFooter
+		} else {
+			footerContent = prFooter
+		}
+	}
+	if footerContent != "" {
+		content = header + "\n\n" + outputView + "\n" + footerContent + inputView
 	} else {
 		content = header + "\n\n" + outputView + inputView
 	}
@@ -1232,6 +1251,71 @@ func (p *PaneModel) ClearInPaneDialog() {
 // HasInPaneDialog returns true if the pane has an active in-pane dialog
 func (p *PaneModel) HasInPaneDialog() bool {
 	return p.inPaneDialog != nil
+}
+
+// GetPRStatus returns the current PR status, if any
+func (p *PaneModel) GetPRStatus() *git.PRStatusInfo {
+	return p.prStatus
+}
+
+// SetPRStatus sets the PR status
+func (p *PaneModel) SetPRStatus(status *git.PRStatusInfo) {
+	p.prStatus = status
+	p.prStatusLoading = false
+}
+
+// SetPRStatusLoading sets whether PR status is currently being loaded
+func (p *PaneModel) SetPRStatusLoading(loading bool) {
+	p.prStatusLoading = loading
+}
+
+// IsPRStatusLoading returns true if PR status is being loaded
+func (p *PaneModel) IsPRStatusLoading() bool {
+	return p.prStatusLoading
+}
+
+// renderPRFooter renders a compact PR status footer line.
+// Returns a string like "PR #123: ✓ 3/3 | ↑2 unpushed" or "PR #123: ⏳ 2/3 | ⚠ diverged"
+func (p *PaneModel) renderPRFooter() string {
+	if p.prStatus == nil {
+		return ""
+	}
+
+	// Style for the footer
+	footerStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#888888"))
+
+	// Build the footer parts
+	var parts []string
+
+	// PR number
+	parts = append(parts, fmt.Sprintf("PR #%d:", p.prStatus.Number))
+
+	// Check status with icon
+	var checkIcon string
+	switch p.prStatus.CheckStatus {
+	case git.PRCheckStatusSuccess:
+		checkIcon = "✓"
+	case git.PRCheckStatusPending:
+		checkIcon = "⏳"
+	case git.PRCheckStatusFailure:
+		checkIcon = "✗"
+	default:
+		checkIcon = "?"
+	}
+	parts = append(parts, fmt.Sprintf("%s %s", checkIcon, p.prStatus.ChecksSummary))
+
+	// Unpushed commits
+	if p.prStatus.UnpushedCount > 0 {
+		parts = append(parts, fmt.Sprintf("↑%d unpushed", p.prStatus.UnpushedCount))
+	}
+
+	// Divergence warning
+	if p.prStatus.IsDiverged {
+		parts = append(parts, "⚠ diverged")
+	}
+
+	return footerStyle.Render(strings.Join(parts, " | "))
 }
 
 // IsClaudeWorking returns true if Claude appears to be actively working.

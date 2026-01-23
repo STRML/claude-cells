@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/STRML/claude-cells/internal/claude"
@@ -725,4 +726,71 @@ func (g *Git) RepoID(ctx context.Context) (string, error) {
 		return hash, nil
 	}
 	return "", fmt.Errorf("no commits found in repository")
+}
+
+// GetUnpushedCommitCount returns the number of commits on the local branch
+// that are not yet on the remote (origin/<branch>).
+// Returns 0 if there's no tracking branch or on error.
+func (g *Git) GetUnpushedCommitCount(ctx context.Context, branch string) (int, error) {
+	// Count commits in local branch that are not in origin/<branch>
+	out, err := g.run(ctx, "rev-list", "--count", "origin/"+branch+".."+branch)
+	if err != nil {
+		// Might fail if origin/<branch> doesn't exist (never pushed)
+		return 0, err
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse commit count: %w", err)
+	}
+	return count, nil
+}
+
+// GetDivergedCommitCount returns the number of commits on the remote branch
+// that are not in the local branch (commits we don't have).
+// Returns 0 if there's no tracking branch or on error.
+func (g *Git) GetDivergedCommitCount(ctx context.Context, branch string) (int, error) {
+	// Fetch first to ensure we have the latest remote state
+	_, _ = g.run(ctx, "fetch", "origin", branch)
+
+	// Count commits in origin/<branch> that are not in local branch
+	out, err := g.run(ctx, "rev-list", "--count", branch+"..origin/"+branch)
+	if err != nil {
+		// Might fail if origin/<branch> doesn't exist
+		return 0, err
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse commit count: %w", err)
+	}
+	return count, nil
+}
+
+// FetchAndRebase fetches the latest main from origin and rebases the current branch onto it.
+// Returns a MergeConflictError if there are conflicts that need resolution.
+func (g *Git) FetchAndRebase(ctx context.Context) error {
+	// Determine the base branch
+	baseBranch, err := g.GetBaseBranch(ctx)
+	if err != nil {
+		baseBranch = "main"
+	}
+
+	// Fetch latest from origin
+	if _, err := g.run(ctx, "fetch", "origin", baseBranch); err != nil {
+		return fmt.Errorf("failed to fetch: %w", err)
+	}
+
+	// Rebase onto origin/<baseBranch>
+	_, err = g.run(ctx, "rebase", "origin/"+baseBranch)
+	if err != nil {
+		// Check if rebase has conflicts
+		conflictFiles, conflictErr := g.GetConflictFiles(ctx)
+		if conflictErr == nil && len(conflictFiles) > 0 {
+			// Get current branch for error message
+			branch, _ := g.CurrentBranch(ctx)
+			return &MergeConflictError{Branch: branch, ConflictFiles: conflictFiles}
+		}
+		return fmt.Errorf("rebase failed: %w", err)
+	}
+
+	return nil
 }

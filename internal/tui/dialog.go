@@ -8,6 +8,7 @@ import (
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/STRML/claude-cells/internal/git"
 )
 
 // DialogType represents the type of dialog
@@ -184,12 +185,14 @@ const (
 type MergeAction string
 
 const (
-	MergeActionMergeMain  MergeAction = "merge_main"
-	MergeActionSquashMain MergeAction = "squash_main"
-	MergeActionCreatePR   MergeAction = "create_pr"
-	MergeActionPush       MergeAction = "push"
-	MergeActionForcePush  MergeAction = "force_push"
-	MergeActionCancel     MergeAction = "cancel"
+	MergeActionMergeMain   MergeAction = "merge_main"
+	MergeActionSquashMain  MergeAction = "squash_main"
+	MergeActionCreatePR    MergeAction = "create_pr"
+	MergeActionPushToPR    MergeAction = "push_to_pr"
+	MergeActionPush        MergeAction = "push"
+	MergeActionForcePush   MergeAction = "force_push"
+	MergeActionFetchRebase MergeAction = "fetch_rebase"
+	MergeActionCancel      MergeAction = "cancel"
 )
 
 // CommitBeforeMergeAction represents a commit-before-merge dialog action
@@ -244,7 +247,7 @@ func NewBranchConflictDialog(branchName, workstreamID, branchInfo string) Dialog
 }
 
 // NewMergeDialog creates a merge/PR menu dialog
-func NewMergeDialog(branchName, workstreamID, branchInfo string, hasBeenPushed bool, prURL string) DialogModel {
+func NewMergeDialog(branchName, workstreamID, branchInfo string, hasBeenPushed bool, prURL string, prStatus *git.PRStatusInfo) DialogModel {
 	var body strings.Builder
 	body.WriteString(fmt.Sprintf("Branch: %s\n", branchName))
 
@@ -258,6 +261,47 @@ func NewMergeDialog(branchName, workstreamID, branchInfo string, hasBeenPushed b
 		body.WriteString("\n")
 	}
 
+	// Show PR status box if we have status info
+	if prStatus != nil {
+		body.WriteString("\n")
+		body.WriteString("┌─ PR Status ─────────────────────────┐\n")
+
+		// Check status with icon
+		var checkIcon string
+		switch prStatus.CheckStatus {
+		case git.PRCheckStatusSuccess:
+			checkIcon = "✓"
+		case git.PRCheckStatusPending:
+			checkIcon = "⏳"
+		case git.PRCheckStatusFailure:
+			checkIcon = "✗"
+		default:
+			checkIcon = "?"
+		}
+		body.WriteString(fmt.Sprintf("│ Checks: %s %s", checkIcon, prStatus.ChecksSummary))
+		body.WriteString(strings.Repeat(" ", max(0, 29-len(prStatus.ChecksSummary))))
+		body.WriteString("│\n")
+
+		// Show unpushed commits
+		if prStatus.UnpushedCount > 0 {
+			unpushedText := fmt.Sprintf("↑ %d unpushed commit(s)", prStatus.UnpushedCount)
+			body.WriteString(fmt.Sprintf("│ %s", unpushedText))
+			body.WriteString(strings.Repeat(" ", max(0, 35-len(unpushedText))))
+			body.WriteString("│\n")
+		}
+
+		// Show divergence warning
+		if prStatus.IsDiverged {
+			divergedText := fmt.Sprintf("⚠ Diverged: %d commit(s) on remote", prStatus.DivergedCount)
+			body.WriteString(fmt.Sprintf("│ %s", divergedText))
+			body.WriteString(strings.Repeat(" ", max(0, 35-len(divergedText))))
+			body.WriteString("│\n")
+			body.WriteString("│   Consider rebasing first          │\n")
+		}
+
+		body.WriteString("└─────────────────────────────────────┘\n")
+	}
+
 	// Build menu items based on state
 	menuItems := []string{
 		"Merge into main (squash)",
@@ -265,13 +309,20 @@ func NewMergeDialog(branchName, workstreamID, branchInfo string, hasBeenPushed b
 	}
 
 	if prURL != "" {
-		// PR already exists - grey it out with explanation
-		menuItems = append(menuItems, "Create Pull Request (already exists)")
+		// PR already exists - show push to PR option
+		if prStatus != nil && prStatus.UnpushedCount > 0 {
+			menuItems = append(menuItems, fmt.Sprintf("Push to open PR (%d commit(s))", prStatus.UnpushedCount))
+		} else {
+			menuItems = append(menuItems, "Push to open PR")
+		}
 	} else {
 		menuItems = append(menuItems, "Create Pull Request")
 	}
 
 	menuItems = append(menuItems, "Push branch only")
+
+	// Always show rebase option
+	menuItems = append(menuItems, "Rebase on main (fetch first)")
 
 	// Show force push option if branch has been pushed (allows re-pushing after amend)
 	if hasBeenPushed {
@@ -783,8 +834,12 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 					action = MergeActionMergeMain
 				case strings.HasPrefix(selectedItem, "Create Pull Request"):
 					action = MergeActionCreatePR
+				case strings.HasPrefix(selectedItem, "Push to open PR"):
+					action = MergeActionPushToPR
 				case strings.HasPrefix(selectedItem, "Push branch only"):
 					action = MergeActionPush
+				case strings.HasPrefix(selectedItem, "Rebase on main"):
+					action = MergeActionFetchRebase
 				case strings.HasPrefix(selectedItem, "Force push"):
 					action = MergeActionForcePush
 				default:

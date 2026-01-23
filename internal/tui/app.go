@@ -882,7 +882,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
 				ws := m.panes[m.focusedPane].Workstream()
 				// Check for uncommitted changes before showing merge dialog
-				return m, CheckUncommittedChangesCmd(ws)
+				// Also fetch PR status in parallel if a PR exists
+				cmds := []tea.Cmd{CheckUncommittedChangesCmd(ws)}
+				if ws.PRURL != "" {
+					m.panes[m.focusedPane].SetPRStatusLoading(true)
+					cmds = append(cmds, FetchPRStatusCmd(ws))
+				}
+				return m, tea.Batch(cmds...)
 			}
 			return m, nil
 
@@ -1409,7 +1415,7 @@ Scroll Mode:
 				ws := m.panes[i].Workstream()
 				if msg.Error != nil {
 					// Error checking - just show merge dialog anyway
-					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo, ws.GetHasBeenPushed(), ws.PRURL)
+					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo, ws.GetHasBeenPushed(), ws.PRURL, m.panes[i].GetPRStatus())
 					m.panes[i].SetInPaneDialog(&dialog)
 				} else if msg.HasChanges {
 					// Has uncommitted changes - ask if user wants to commit first
@@ -1417,7 +1423,7 @@ Scroll Mode:
 					m.panes[i].SetInPaneDialog(&dialog)
 				} else {
 					// No uncommitted changes - show merge dialog directly
-					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo, ws.GetHasBeenPushed(), ws.PRURL)
+					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo, ws.GetHasBeenPushed(), ws.PRURL, m.panes[i].GetPRStatus())
 					m.panes[i].SetInPaneDialog(&dialog)
 				}
 				break
@@ -1444,7 +1450,7 @@ Scroll Mode:
 					// Don't show merge dialog yet - user can press 'm' again after commit
 				case CommitBeforeMergeNo:
 					// Continue to merge dialog without committing (in-pane)
-					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo, ws.GetHasBeenPushed(), ws.PRURL)
+					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo, ws.GetHasBeenPushed(), ws.PRURL, m.panes[i].GetPRStatus())
 					m.panes[i].SetInPaneDialog(&dialog)
 				}
 				break
@@ -1813,6 +1819,63 @@ Scroll Mode:
 					dialog := NewForcePushConfirmDialog(ws.BranchName, ws.ID)
 					m.panes[i].SetInPaneDialog(&dialog)
 					return m, nil
+				case MergeActionPushToPR:
+					// Push to open PR - same as push but with different messaging
+					m.panes[i].AppendOutput("\nPushing to open PR...\n")
+					dialog := NewProgressDialog("Pushing to PR", fmt.Sprintf("Branch: %s\n\nPushing commits to open PR...", ws.BranchName), ws.ID)
+					m.panes[i].SetInPaneDialog(&dialog)
+					return m, PushBranchCmd(ws)
+				case MergeActionFetchRebase:
+					// Fetch main and rebase
+					m.panes[i].AppendOutput("\nFetching main and rebasing...\n")
+					dialog := NewProgressDialog("Rebasing", fmt.Sprintf("Branch: %s\n\nFetching main and rebasing...", ws.BranchName), ws.ID)
+					m.panes[i].SetInPaneDialog(&dialog)
+					return m, FetchRebaseCmd(ws)
+				}
+				break
+			}
+		}
+		return m, nil
+
+	case PRStatusMsg:
+		// Update pane's PR status
+		for i := range m.panes {
+			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				if msg.Error != nil {
+					// Log error but don't disrupt user
+					m.panes[i].SetPRStatusLoading(false)
+				} else {
+					m.panes[i].SetPRStatus(msg.Status)
+				}
+				break
+			}
+		}
+		return m, nil
+
+	case FetchRebaseResultMsg:
+		// Handle fetch-and-rebase result
+		for i := range m.panes {
+			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				ws := m.panes[i].Workstream()
+				if msg.Error != nil {
+					if len(msg.ConflictFiles) > 0 {
+						// Rebase has conflicts - show conflict dialog with option to ask Claude
+						m.panes[i].AppendOutput(fmt.Sprintf("Rebase has conflicts in %d file(s)\n", len(msg.ConflictFiles)))
+						dialog := NewMergeConflictDialog(ws.BranchName, ws.ID, msg.ConflictFiles)
+						m.panes[i].SetInPaneDialog(&dialog)
+					} else {
+						m.panes[i].AppendOutput(fmt.Sprintf("Rebase failed: %v\n", msg.Error))
+						if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
+							dialog.SetComplete(fmt.Sprintf("Rebase Failed\n\n%v", msg.Error))
+						}
+					}
+				} else {
+					m.panes[i].AppendOutput("Rebase successful!\n")
+					// Notify Claude about the rebase
+					_ = m.panes[i].SendToPTYWithEnter(fmt.Sprintf("[ccells] ✓ Rebased '%s' onto main", ws.BranchName))
+					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
+						dialog.SetComplete("Rebase successful!\n\nBranch is now up-to-date with main.\nPress Enter or Esc to close.")
+					}
 				}
 				break
 			}
@@ -1865,6 +1928,8 @@ Scroll Mode:
 					// Store PR info and mark as pushed (PR creation pushes the branch)
 					ws.SetPRInfo(msg.PRNumber, msg.PRURL)
 					ws.SetHasBeenPushed(true)
+					// Notify Claude about the PR and amend prevention
+					_ = m.panes[i].SendToPTYWithEnter(fmt.Sprintf("[ccells] ✓ PR #%d created: %s\n\nIMPORTANT: Never use `git commit --amend` after a PR has been pushed. Create new commits instead.", msg.PRNumber, msg.PRURL))
 					// Update in-pane progress dialog if open
 					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
 						dialog.SetComplete(fmt.Sprintf("Pull Request Created!\n\nPR #%d: %s\n\nPress Enter or Esc to close.", msg.PRNumber, msg.PRURL))

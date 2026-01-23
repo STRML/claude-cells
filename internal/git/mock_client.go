@@ -47,6 +47,9 @@ type MockGitClient struct {
 	PullMainFn                   func(ctx context.Context) error
 	UpdateMainBranchFn           func(ctx context.Context) error
 	RemoteURLFn                  func(ctx context.Context, remoteName string) (string, error)
+	GetUnpushedCommitCountFn     func(ctx context.Context, branch string) (int, error)
+	GetDivergedCommitCountFn     func(ctx context.Context, branch string) (int, error)
+	FetchAndRebaseFn             func(ctx context.Context) error
 	MergeBranchFn                func(ctx context.Context, branch string) error
 	MergeBranchWithOptionsFn     func(ctx context.Context, branch string, squash bool) error
 	RebaseBranchFn               func(ctx context.Context, branch string) error
@@ -447,6 +450,39 @@ func (m *MockGitClient) RemoteURL(ctx context.Context, remoteName string) (strin
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	return m.remoteURL, nil
+}
+
+func (m *MockGitClient) GetUnpushedCommitCount(ctx context.Context, branch string) (int, error) {
+	if m.Err != nil {
+		return 0, m.Err
+	}
+	if m.GetUnpushedCommitCountFn != nil {
+		return m.GetUnpushedCommitCountFn(ctx, branch)
+	}
+	// Default: no unpushed commits
+	return 0, nil
+}
+
+func (m *MockGitClient) GetDivergedCommitCount(ctx context.Context, branch string) (int, error) {
+	if m.Err != nil {
+		return 0, m.Err
+	}
+	if m.GetDivergedCommitCountFn != nil {
+		return m.GetDivergedCommitCountFn(ctx, branch)
+	}
+	// Default: no diverged commits
+	return 0, nil
+}
+
+func (m *MockGitClient) FetchAndRebase(ctx context.Context) error {
+	if m.Err != nil {
+		return m.Err
+	}
+	if m.FetchAndRebaseFn != nil {
+		return m.FetchAndRebaseFn(ctx)
+	}
+	// Default: succeed
+	return nil
 }
 
 // Merge/rebase operations
