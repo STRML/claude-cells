@@ -93,8 +93,8 @@ func buildQueryArgs(prompt string, model string) []string {
 		"--disable-slash-commands",                                    // Disable skills
 		"--strict-mcp-config",                                         // Only use MCP from --mcp-config (none)
 		"--system-prompt", "You are a helpful assistant. Be concise.", // Minimal system prompt
-		"--output-format", "json",                                     // Always use JSON for clean parsing
-		"--settings", `{"disableAllHooks":true}`,                      // Disable all hooks for ephemeral queries
+		"--output-format", "json", // Always use JSON for clean parsing
+		"--settings", `{"disableAllHooks":true}`, // Disable all hooks for ephemeral queries
 	}
 	if model != "" {
 		args = append(args, "--model", model)
