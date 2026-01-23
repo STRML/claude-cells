@@ -271,7 +271,7 @@ func TestEmbeddedDockerfileContent(t *testing.T) {
 	expectedMarkers := []string{
 		"FROM",
 		"WORKDIR /workspace",
-		"claude-code",
+		"claude.ai/install.sh", // Native installer URL
 	}
 
 	for _, marker := range expectedMarkers {

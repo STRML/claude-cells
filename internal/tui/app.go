@@ -60,33 +60,33 @@ func dragModifier() string {
 
 // AppModel is the main application model
 type AppModel struct {
-	ctx            context.Context // App-level context for cancellation
-	manager        *workstream.PersistentManager
-	panes          []PaneModel
-	focusedPane    int
-	nextPaneIndex  int        // Counter for assigning permanent pane indices
-	layout         LayoutType // Current pane layout
-	statusBar      StatusBarModel
-	dialog         *DialogModel
-	width          int
-	height         int
-	quitting       bool
-	inputMode      bool                 // True when input is being routed to focused pane
-	mouseEnabled   bool                 // True when mouse capture is enabled (click-to-focus)
-	dragHintShown  bool                 // True if we've shown the drag modifier hint this session
-	ctrlVHintShown bool                 // True if we've shown the Ctrl+V paste hint this session
-	lastEscapeTime      time.Time // For double-escape quit detection in nav mode
-	inputModeEscCount   int       // Count of ESC presses in input mode (for hint)
-	inputModeEscTime    time.Time // Time of first ESC press in current window
-	inputModeEscHinted  bool      // True if we've shown the ESC hint this session
-	toast               string    // Temporary notification message
-	toastExpiry         time.Time // When toast should disappear
-	workingDir     string               // Current working directory (git repo path)
-	stateDir       string               // State file directory (~/.claude-cells/state/<repo-id>/)
-	repoInfo       *workstream.RepoInfo // Repo metadata for state file
-	resuming       bool                 // True if resuming from saved state
-	tmuxPrefix     bool                 // True after ctrl-b is pressed (tmux-style prefix)
-	tmuxPrefixTime time.Time            // When prefix was pressed
+	ctx                context.Context // App-level context for cancellation
+	manager            *workstream.PersistentManager
+	panes              []PaneModel
+	focusedPane        int
+	nextPaneIndex      int        // Counter for assigning permanent pane indices
+	layout             LayoutType // Current pane layout
+	statusBar          StatusBarModel
+	dialog             *DialogModel
+	width              int
+	height             int
+	quitting           bool
+	inputMode          bool                 // True when input is being routed to focused pane
+	mouseEnabled       bool                 // True when mouse capture is enabled (click-to-focus)
+	dragHintShown      bool                 // True if we've shown the drag modifier hint this session
+	ctrlVHintShown     bool                 // True if we've shown the Ctrl+V paste hint this session
+	lastEscapeTime     time.Time            // For double-escape quit detection in nav mode
+	inputModeEscCount  int                  // Count of ESC presses in input mode (for hint)
+	inputModeEscTime   time.Time            // Time of first ESC press in current window
+	inputModeEscHinted bool                 // True if we've shown the ESC hint this session
+	toast              string               // Temporary notification message
+	toastExpiry        time.Time            // When toast should disappear
+	workingDir         string               // Current working directory (git repo path)
+	stateDir           string               // State file directory (~/.claude-cells/state/<repo-id>/)
+	repoInfo           *workstream.RepoInfo // Repo metadata for state file
+	resuming           bool                 // True if resuming from saved state
+	tmuxPrefix         bool                 // True after ctrl-b is pressed (tmux-style prefix)
+	tmuxPrefixTime     time.Time            // When prefix was pressed
 	// Pairing mode orchestrator (single source of truth)
 	pairingOrchestrator *sync.Pairing
 	// Pane swap state

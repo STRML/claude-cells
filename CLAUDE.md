@@ -102,6 +102,24 @@ security:
   tier: compat  # Or add specific capabilities with cap_add
 ```
 
+### Dockerfile Customization
+
+Custom packages can be injected into container images via `~/.claude-cells/config.yaml`:
+
+```yaml
+dockerfile:
+  inject:
+    - "npm install -g ccstatusline"      # Default - status line tool
+    - "apt-get update && apt-get install -y vim"
+    - "pip install ipython"
+```
+
+- **Global config**: `~/.claude-cells/config.yaml` applies to all projects
+- **Project config**: `.claude-cells/config.yaml` overrides global (entire inject list replaced, not merged)
+- **Default**: If no config exists, `ccstatusline` is installed automatically
+
+Injected commands run as `RUN` instructions after Claude Code installation but before the container's `WORKDIR` is set.
+
 ## Development Rules
 
 ### Test-Driven Development (Mandatory)
@@ -199,6 +217,7 @@ if app.dialog == nil {
 - **Container Security Hardening**: Tiered security defaults (hardened/moderate/compat) with auto-relaxation on startup failure. Drops dangerous capabilities, enables no-new-privileges, uses init process.
 - **PR Generation via Claude CLI**: Uses Claude (haiku model) to generate PR titles and descriptions from branch diffs.
 - **tmux Integration Testing**: Golden file support for viewport verification tests.
+- **Native Claude Code Installer**: Uses `claude.ai/install.sh` instead of npm. Configurable injection via `~/.claude-cells/config.yaml`.
 
 ### Remaining Technical Debt
 
@@ -268,3 +287,4 @@ go func() {
 3. `gofmt -s -w .` - formatted
 4. Tests cover the change
 5. No `TODO` without an issue number
+6. **Update README.md and CLAUDE.md** for user-facing changes (new features, config options, CLI flags)

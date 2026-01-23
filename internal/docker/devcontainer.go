@@ -485,9 +485,18 @@ func BuildEnhancedImage(ctx context.Context, baseImage, targetImage string, outp
 # Install curl and bash if not present (needed for Claude Code installer)
 RUN command -v curl || (apt-get update && apt-get install -y curl bash && rm -rf /var/lib/apt/lists/*) || (apk add --no-cache curl bash) || true
 
-# Install Claude Code globally via npm if npm is available, otherwise use installer script
-RUN command -v npm && npm install -g @anthropic-ai/claude-code || curl -fsSL https://claude.ai/install.sh | bash
+# Install Claude Code using native installer
+RUN curl -fsSL https://claude.ai/install.sh | bash
 `, baseImage)
+
+	// Add injections from config
+	dfCfg := LoadDockerfileConfig("")
+	if len(dfCfg.Inject) > 0 {
+		dockerfile += "\n# Injected from ~/.claude-cells/config.yaml\n"
+		for _, cmd := range dfCfg.Inject {
+			dockerfile += fmt.Sprintf("RUN %s\n", cmd)
+		}
+	}
 
 	// Create temp directory for build context
 	tmpDir, err := os.MkdirTemp("", "ccells-build-*")

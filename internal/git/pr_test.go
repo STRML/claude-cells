@@ -430,7 +430,7 @@ func TestAggregateCheckStatus(t *testing.T) {
 			if status != tt.expectedStatus {
 				t.Errorf("status = %v, want %v", status, tt.expectedStatus)
 			}
-			if !findSubstring(summary, tt.expectedHas) {
+			if !strings.Contains(summary, tt.expectedHas) {
 				t.Errorf("summary = %q, want to contain %q", summary, tt.expectedHas)
 			}
 		})

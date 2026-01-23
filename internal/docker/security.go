@@ -88,9 +88,18 @@ type SecurityConfig struct {
 	AutoRelax *bool `yaml:"auto_relax,omitempty"`
 }
 
+// DockerfileConfig defines Dockerfile customization settings.
+type DockerfileConfig struct {
+	// Inject specifies RUN commands to inject into the Dockerfile.
+	// These are appended after Claude Code installation.
+	// Example: ["npm install -g ccstatusline", "apt-get install -y vim"]
+	Inject []string `yaml:"inject,omitempty"`
+}
+
 // CellsConfig is the top-level configuration file structure.
 type CellsConfig struct {
-	Security SecurityConfig `yaml:"security,omitempty"`
+	Security   SecurityConfig   `yaml:"security,omitempty"`
+	Dockerfile DockerfileConfig `yaml:"dockerfile,omitempty"`
 }
 
 // Helper functions for pointer creation
@@ -191,6 +200,34 @@ func loadGlobalCellsConfig() *CellsConfig {
 
 	configPath := filepath.Join(cellsDir, "config.yaml")
 	return loadCellsConfigFile(configPath)
+}
+
+// LoadDockerfileConfig loads and merges Dockerfile configuration.
+// Order of precedence (highest to lowest):
+// 1. Project config (.claude-cells/config.yaml in projectPath)
+// 2. Global config (~/.claude-cells/config.yaml)
+// 3. Default (ccstatusline)
+func LoadDockerfileConfig(projectPath string) DockerfileConfig {
+	// Default: install ccstatusline
+	cfg := DockerfileConfig{
+		Inject: []string{"npm install -g ccstatusline"},
+	}
+
+	// Load global config
+	globalCfg := loadGlobalCellsConfig()
+	if globalCfg != nil && len(globalCfg.Dockerfile.Inject) > 0 {
+		cfg.Inject = globalCfg.Dockerfile.Inject
+	}
+
+	// Load project config (takes precedence)
+	if projectPath != "" {
+		projectCfg := loadProjectCellsConfig(projectPath)
+		if projectCfg != nil && len(projectCfg.Dockerfile.Inject) > 0 {
+			cfg.Inject = projectCfg.Dockerfile.Inject
+		}
+	}
+
+	return cfg
 }
 
 // loadProjectCellsConfig loads .claude-cells/config.yaml from the project
@@ -383,6 +420,14 @@ func TierDescription(tier SecurityTier) string {
 // DefaultConfigYAML is the default config.yaml content with commented documentation.
 const DefaultConfigYAML = `# Claude Cells Configuration
 # Documentation: https://github.com/anthropics/claude-cells/blob/main/docs/CONTAINER-SECURITY.md
+
+# Dockerfile customization - commands injected after Claude Code installation
+dockerfile:
+  inject:
+    - "npm install -g ccstatusline"
+    # Add additional packages here, e.g.:
+    # - "apt-get update && apt-get install -y vim"
+    # - "pip install ipython"
 
 security:
   # Security tier controls the default capability drops.

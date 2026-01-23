@@ -213,9 +213,23 @@ Claude Cells stores data in:
 
 | Location | Purpose |
 |----------|---------|
-| `~/.claude-cells/` | Global config, Claude credentials, and skills (copied into containers) |
+| `~/.claude-cells/config.yaml` | Global configuration (security, Dockerfile customization) |
 | `~/.claude-cells/state/<repo-id>/` | Session state for resume (keyed by first commit hash, auto-saved) |
 | `/tmp/ccells/worktrees/` | Git worktrees for container isolation |
+
+### Dockerfile Customization
+
+Customize what gets installed in container images via `~/.claude-cells/config.yaml`:
+
+```yaml
+dockerfile:
+  inject:
+    - "npm install -g ccstatusline"      # Installed by default
+    - "apt-get update && apt-get install -y vim"
+    - "pip install ipython"
+```
+
+Project-specific `.claude-cells/config.yaml` with `dockerfile.inject` replaces (not merges with) the global inject list.
 
 ## Troubleshooting
 
