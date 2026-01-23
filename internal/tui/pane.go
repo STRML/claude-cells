@@ -382,7 +382,7 @@ func (p PaneModel) View() string {
 			prNumStyle := lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#00DDFF")). // Bright cyan
 				Bold(true)
-			prBadge = prNumStyle.Render(fmt.Sprintf("#%d", p.prStatus.Number)) + " " + strings.Join(parts, " ")
+			prBadge = prNumStyle.Render(fmt.Sprintf("PR #%d", p.prStatus.Number)) + " " + strings.Join(parts, " ")
 		}
 	}
 
