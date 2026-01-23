@@ -14,10 +14,10 @@ const (
 	OpGitPush  Operation = "git-push"
 
 	// gh CLI operations - read-only
-	OpGHPRView   Operation = "gh-pr-view"
-	OpGHPRChecks Operation = "gh-pr-checks"
-	OpGHPRDiff   Operation = "gh-pr-diff"
-	OpGHPRList   Operation = "gh-pr-list"
+	OpGHPRView    Operation = "gh-pr-view"
+	OpGHPRChecks  Operation = "gh-pr-checks"
+	OpGHPRDiff    Operation = "gh-pr-diff"
+	OpGHPRList    Operation = "gh-pr-list"
 	OpGHIssueView Operation = "gh-issue-view"
 	OpGHIssueList Operation = "gh-issue-list"
 
@@ -56,15 +56,15 @@ type PRCreateResult struct {
 
 // SocketConfig configures the socket server for a container.
 type SocketConfig struct {
-	ContainerID  string
-	SocketPath   string
-	Workstream   WorkstreamInfo
+	ContainerID string
+	SocketPath  string
+	Workstream  WorkstreamInfo
 }
 
 // SocketInfo tracks an active socket for a container.
 type SocketInfo struct {
-	SocketPath   string
-	ContainerID  string
-	Workstream   WorkstreamInfo
-	CreatedAt    time.Time
+	SocketPath  string
+	ContainerID string
+	Workstream  WorkstreamInfo
+	CreatedAt   time.Time
 }

@@ -18,9 +18,9 @@ func TestValidatePush(t *testing.T) {
 			ws:   WorkstreamInfo{Branch: "feature-branch"},
 		},
 		{
-			name: "push to wrong branch",
-			args: []string{"origin", "other-branch"},
-			ws:   WorkstreamInfo{Branch: "feature-branch"},
+			name:    "push to wrong branch",
+			args:    []string{"origin", "other-branch"},
+			ws:      WorkstreamInfo{Branch: "feature-branch"},
 			wantErr: true,
 			errMsg:  "can only push to branch",
 		},
@@ -30,30 +30,30 @@ func TestValidatePush(t *testing.T) {
 			ws:   WorkstreamInfo{Branch: "feature-branch"},
 		},
 		{
-			name: "push with HEAD:branch syntax - wrong",
-			args: []string{"origin", "HEAD:other-branch"},
-			ws:   WorkstreamInfo{Branch: "feature-branch"},
+			name:    "push with HEAD:branch syntax - wrong",
+			args:    []string{"origin", "HEAD:other-branch"},
+			ws:      WorkstreamInfo{Branch: "feature-branch"},
 			wantErr: true,
 			errMsg:  "can only push to branch",
 		},
 		{
-			name: "push with --force flag",
-			args: []string{"--force", "origin", "feature-branch"},
-			ws:   WorkstreamInfo{Branch: "feature-branch"},
+			name:    "push with --force flag",
+			args:    []string{"--force", "origin", "feature-branch"},
+			ws:      WorkstreamInfo{Branch: "feature-branch"},
 			wantErr: true,
 			errMsg:  "force push not allowed",
 		},
 		{
-			name: "push with -f flag",
-			args: []string{"-f", "origin", "feature-branch"},
-			ws:   WorkstreamInfo{Branch: "feature-branch"},
+			name:    "push with -f flag",
+			args:    []string{"-f", "origin", "feature-branch"},
+			ws:      WorkstreamInfo{Branch: "feature-branch"},
 			wantErr: true,
 			errMsg:  "force push not allowed",
 		},
 		{
-			name: "push with --force-with-lease",
-			args: []string{"--force-with-lease", "origin", "feature-branch"},
-			ws:   WorkstreamInfo{Branch: "feature-branch"},
+			name:    "push with --force-with-lease",
+			args:    []string{"--force-with-lease", "origin", "feature-branch"},
+			ws:      WorkstreamInfo{Branch: "feature-branch"},
 			wantErr: true,
 			errMsg:  "force push not allowed",
 		},
@@ -123,9 +123,9 @@ func TestValidateMerge(t *testing.T) {
 			ws:   WorkstreamInfo{Branch: "feature-branch", PRNumber: 123},
 		},
 		{
-			name: "merge by PR number - wrong",
-			args: []string{"456"},
-			ws:   WorkstreamInfo{Branch: "feature-branch", PRNumber: 123},
+			name:    "merge by PR number - wrong",
+			args:    []string{"456"},
+			ws:      WorkstreamInfo{Branch: "feature-branch", PRNumber: 123},
 			wantErr: true,
 			errMsg:  "can only merge PR #123",
 		},
@@ -135,16 +135,16 @@ func TestValidateMerge(t *testing.T) {
 			ws:   WorkstreamInfo{Branch: "feature-branch", PRNumber: 123},
 		},
 		{
-			name: "merge by URL - wrong",
-			args: []string{"https://github.com/owner/repo/pull/456"},
-			ws:   WorkstreamInfo{Branch: "feature-branch", PRNumber: 123},
+			name:    "merge by URL - wrong",
+			args:    []string{"https://github.com/owner/repo/pull/456"},
+			ws:      WorkstreamInfo{Branch: "feature-branch", PRNumber: 123},
 			wantErr: true,
 			errMsg:  "can only merge PR #123",
 		},
 		{
-			name: "merge with no PR associated",
-			args: []string{},
-			ws:   WorkstreamInfo{Branch: "feature-branch", PRNumber: 0},
+			name:    "merge with no PR associated",
+			args:    []string{},
+			ws:      WorkstreamInfo{Branch: "feature-branch", PRNumber: 0},
 			wantErr: true,
 			errMsg:  "no PR associated",
 		},
@@ -173,12 +173,12 @@ func TestValidateMerge(t *testing.T) {
 
 func TestParseOperation(t *testing.T) {
 	tests := []struct {
-		name       string
-		cmd        string
-		args       []string
-		wantOp     Operation
-		wantArgs   []string
-		wantErr    bool
+		name     string
+		cmd      string
+		args     []string
+		wantOp   Operation
+		wantArgs []string
+		wantErr  bool
 	}{
 		{
 			name:     "git fetch",

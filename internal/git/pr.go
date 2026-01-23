@@ -406,8 +406,18 @@ type PRMergeOptions struct {
 func (g *GH) MergePR(ctx context.Context, repoPath string, opts *PRMergeOptions) error {
 	args := []string{"pr", "merge"}
 
+	// Handle nil opts by using safe defaults
+	method := "squash"
+	deleteBranch := false
+	if opts != nil {
+		if opts.Method != "" {
+			method = opts.Method
+		}
+		deleteBranch = opts.DeleteBranch
+	}
+
 	// Add merge method flag
-	switch opts.Method {
+	switch method {
 	case "squash":
 		args = append(args, "--squash")
 	case "rebase":
@@ -420,7 +430,7 @@ func (g *GH) MergePR(ctx context.Context, repoPath string, opts *PRMergeOptions)
 	}
 
 	// Handle branch deletion
-	if opts.DeleteBranch {
+	if deleteBranch {
 		args = append(args, "--delete-branch")
 	}
 

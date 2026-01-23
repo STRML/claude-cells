@@ -118,19 +118,6 @@ func stopGitProxySocket(containerID string) {
 	}
 }
 
-// updateGitProxyWorkstream updates the workstream info for a container's git proxy
-func updateGitProxyWorkstream(containerID string, ws *workstream.Workstream) {
-	if services.gitProxy != nil {
-		wsInfo := gitproxy.WorkstreamInfo{
-			ID:           ws.ID,
-			Branch:       ws.BranchName,
-			PRNumber:     ws.PRNumber,
-			WorktreePath: ws.WorktreePath,
-		}
-		services.gitProxy.UpdateWorkstream(containerID, wsInfo)
-	}
-}
-
 // ContainerStartedMsg is sent when a container successfully starts.
 type ContainerStartedMsg struct {
 	WorkstreamID string
@@ -1358,7 +1345,7 @@ func GHMergePRCmd(ws *workstream.Workstream, mergeMethod string) tea.Cmd {
 
 		// Build merge options
 		opts := &git.PRMergeOptions{
-			Method:      mergeMethod,
+			Method:       mergeMethod,
 			DeleteBranch: false, // Don't delete - let the user decide via destroy dialog
 		}
 

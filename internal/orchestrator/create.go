@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -286,8 +287,9 @@ func (o *Orchestrator) buildFullContainerConfig(ws *workstream.Workstream, workt
 
 	// Inject git proxy script into container's Claude settings
 	if err := gitproxy.InjectProxyConfig(configPaths.ClaudeDir); err != nil {
-		// Non-fatal - just log and continue without proxy
+		// Non-fatal - log warning and continue without proxy
 		// (The container will work but won't have git proxy)
+		log.Printf("[orchestrator] Warning: failed to inject git proxy config for %s: %v", configPaths.ClaudeDir, err)
 	}
 
 	// Return config dir (parent of ClaudeDir) for credential registration

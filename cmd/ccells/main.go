@@ -245,9 +245,9 @@ func main() {
 
 	// Start git proxy server for proxying git/gh commands from containers
 	gitProxyServer := gitproxy.NewServer(func(workstreamID string, prNumber int, prURL string) {
-		// Callback when a PR is created via the proxy
-		// This updates the workstream state with the PR info
-		// The TUI will pick this up on next state save
+		// Callback when a PR is created via the proxy.
+		// Currently only logs the event. State updates happen via the gitproxy
+		// server's internal workstream tracking (UpdateWorkstream method).
 		tui.LogDebug("PR #%d created for workstream %s: %s", prNumber, workstreamID, prURL)
 	})
 	defer gitProxyServer.Shutdown()

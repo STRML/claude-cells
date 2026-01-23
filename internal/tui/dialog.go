@@ -186,17 +186,17 @@ const (
 type MergeAction string
 
 const (
-	MergeActionMergeMain      MergeAction = "merge_main"
-	MergeActionSquashMain     MergeAction = "squash_main"
-	MergeActionCreatePR       MergeAction = "create_pr"
-	MergeActionPushToPR       MergeAction = "push_to_pr"
-	MergeActionPush           MergeAction = "push"
-	MergeActionForcePush      MergeAction = "force_push"
-	MergeActionFetchRebase    MergeAction = "fetch_rebase"
-	MergeActionGHMergeSquash  MergeAction = "gh_merge_squash"  // Merge PR via GitHub (squash)
-	MergeActionGHMergeMerge   MergeAction = "gh_merge_merge"   // Merge PR via GitHub (merge commit)
-	MergeActionGHMergeRebase  MergeAction = "gh_merge_rebase"  // Merge PR via GitHub (rebase)
-	MergeActionCancel         MergeAction = "cancel"
+	MergeActionMergeMain     MergeAction = "merge_main"
+	MergeActionSquashMain    MergeAction = "squash_main"
+	MergeActionCreatePR      MergeAction = "create_pr"
+	MergeActionPushToPR      MergeAction = "push_to_pr"
+	MergeActionPush          MergeAction = "push"
+	MergeActionForcePush     MergeAction = "force_push"
+	MergeActionFetchRebase   MergeAction = "fetch_rebase"
+	MergeActionGHMergeSquash MergeAction = "gh_merge_squash" // Merge PR via GitHub (squash)
+	MergeActionGHMergeMerge  MergeAction = "gh_merge_merge"  // Merge PR via GitHub (merge commit)
+	MergeActionGHMergeRebase MergeAction = "gh_merge_rebase" // Merge PR via GitHub (rebase)
+	MergeActionCancel        MergeAction = "cancel"
 )
 
 // CommitBeforeMergeAction represents a commit-before-merge dialog action
@@ -873,7 +873,7 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 					strings.HasPrefix(selectedItem, "Merge into main (squash)"):
 					action = MergeActionSquashMain
 				case strings.HasPrefix(selectedItem, "Merge into main locally (merge)"),
-					strings.HasPrefix(selectedItem, "Merge into main (merge"):
+					strings.HasPrefix(selectedItem, "Merge into main (merge commit)"):
 					action = MergeActionMergeMain
 				case strings.HasPrefix(selectedItem, "Create Pull Request"):
 					action = MergeActionCreatePR

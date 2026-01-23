@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 )
 
 // PRUpdateCallback is called when a PR is created via the proxy.
@@ -18,11 +19,11 @@ type PRUpdateCallback func(workstreamID string, prNumber int, prURL string)
 
 // Server manages git proxy sockets for all containers.
 type Server struct {
-	mu        sync.RWMutex
-	sockets   map[string]*socketHandler // containerID -> handler
-	executor  *Executor
+	mu          sync.RWMutex
+	sockets     map[string]*socketHandler // containerID -> handler
+	executor    *Executor
 	onPRCreated PRUpdateCallback
-	baseDir   string // Base directory for sockets
+	baseDir     string // Base directory for sockets
 }
 
 // NewServer creates a new git proxy server.
@@ -40,9 +41,18 @@ type socketHandler struct {
 	listener   net.Listener
 	socketPath string
 	workstream WorkstreamInfo
+	wsMu       sync.RWMutex // Protects workstream field
 	server     *Server
 	done       chan struct{}
 	wg         sync.WaitGroup
+}
+
+// shortContainerID safely truncates a container ID for logging.
+func shortContainerID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
 }
 
 // StartSocket creates and starts a socket for a container.
@@ -93,7 +103,7 @@ func (s *Server) StartSocket(ctx context.Context, containerID string, ws Workstr
 	go handler.acceptLoop()
 
 	log.Printf("[gitproxy] Started socket for container %s at %s (branch: %s)",
-		containerID[:12], socketPath, ws.Branch)
+		shortContainerID(containerID), socketPath, ws.Branch)
 
 	return socketPath, nil
 }
@@ -122,17 +132,20 @@ func (s *Server) StopSocket(containerID string) {
 	os.Remove(handler.socketPath)
 	os.Remove(filepath.Dir(handler.socketPath))
 
-	log.Printf("[gitproxy] Stopped socket for container %s", containerID[:12])
+	log.Printf("[gitproxy] Stopped socket for container %s", shortContainerID(containerID))
 }
 
 // UpdateWorkstream updates the workstream info for a container's socket.
 // This is used to update PR number after creation.
 func (s *Server) UpdateWorkstream(containerID string, ws WorkstreamInfo) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.mu.RLock()
+	handler, exists := s.sockets[containerID]
+	s.mu.RUnlock()
 
-	if handler, exists := s.sockets[containerID]; exists {
+	if exists {
+		handler.wsMu.Lock()
 		handler.workstream = ws
+		handler.wsMu.Unlock()
 	}
 }
 
@@ -202,8 +215,13 @@ func (h *socketHandler) handleConnection(conn net.Conn) {
 		return
 	}
 
+	// Get a snapshot of workstream info under lock
+	h.wsMu.RLock()
+	ws := h.workstream
+	h.wsMu.RUnlock()
+
 	// Log the request
-	log.Printf("[gitproxy] %s: %s %v", h.workstream.Branch, req.Operation, req.Args)
+	log.Printf("[gitproxy] %s: %s %v", ws.Branch, req.Operation, req.Args)
 
 	// Validate operation
 	if !IsAllowedOperation(req.Operation) {
@@ -212,22 +230,27 @@ func (h *socketHandler) handleConnection(conn net.Conn) {
 	}
 
 	// Validate arguments against workstream constraints
-	if err := Validate(req.Operation, req.Args, h.workstream); err != nil {
+	if err := Validate(req.Operation, req.Args, ws); err != nil {
 		h.sendError(conn, err.Error())
 		return
 	}
 
-	// Execute the command
-	ctx := context.Background()
-	resp, prResult := h.server.executor.Execute(ctx, req.Operation, req.Args, h.workstream)
+	// Execute the command with timeout context
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	defer cancel()
+	resp, prResult := h.server.executor.Execute(ctx, req.Operation, req.Args, ws)
 
 	// If PR was created, update workstream and notify callback
 	if prResult != nil {
+		h.wsMu.Lock()
 		h.workstream.PRNumber = prResult.Number
+		wsID := h.workstream.ID
+		h.wsMu.Unlock()
+
 		if h.server.onPRCreated != nil {
-			h.server.onPRCreated(h.workstream.ID, prResult.Number, prResult.URL)
+			h.server.onPRCreated(wsID, prResult.Number, prResult.URL)
 		}
-		log.Printf("[gitproxy] PR #%d created for %s", prResult.Number, h.workstream.Branch)
+		log.Printf("[gitproxy] PR #%d created for %s", prResult.Number, ws.Branch)
 	}
 
 	// Send response

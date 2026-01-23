@@ -127,22 +127,39 @@ if [ -z "$RESPONSE" ]; then
     exit 1
 fi
 
-# Parse response using jq if available, otherwise use grep/sed
+# Parse response using jq if available, otherwise use python
 if command -v jq &> /dev/null; then
     EXIT_CODE=$(echo "$RESPONSE" | jq -r '.exit_code // 1')
     STDOUT=$(echo "$RESPONSE" | jq -r '.stdout // ""')
     STDERR=$(echo "$RESPONSE" | jq -r '.stderr // ""')
     ERROR=$(echo "$RESPONSE" | jq -r '.error // ""')
+elif command -v python3 &> /dev/null; then
+    # Use python for robust JSON parsing when jq is not available
+    PARSED=$(echo "$RESPONSE" | python3 -c '
+import sys, json
+try:
+    r = json.loads(sys.stdin.read())
+    print(r.get("exit_code", 1))
+    print(r.get("stdout", ""))
+    print(r.get("stderr", ""))
+    print(r.get("error", ""))
+except:
+    print("1")
+    print("")
+    print("")
+    print("Failed to parse response")
+')
+    EXIT_CODE=$(echo "$PARSED" | sed -n '1p')
+    STDOUT=$(echo "$PARSED" | sed -n '2p')
+    STDERR=$(echo "$PARSED" | sed -n '3p')
+    ERROR=$(echo "$PARSED" | sed -n '4p')
 else
-    # Fallback parsing without jq (less robust but works for simple cases)
+    # Last resort: basic extraction (may fail on escaped quotes)
     EXIT_CODE=$(echo "$RESPONSE" | grep -o '"exit_code":[0-9]*' | cut -d: -f2)
     [ -z "$EXIT_CODE" ] && EXIT_CODE=1
-
-    # For stdout/stderr/error, this is a simplified extraction
-    # In practice, jq should always be available in our containers
     STDOUT=""
     STDERR=""
-    ERROR=$(echo "$RESPONSE" | grep -o '"error":"[^"]*"' | cut -d'"' -f4)
+    ERROR="JSON parsing unavailable (install jq or python3)"
 fi
 
 # Output results

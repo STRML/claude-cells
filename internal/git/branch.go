@@ -754,10 +754,10 @@ func (g *Git) RepoID(ctx context.Context) (string, error) {
 	return "", fmt.Errorf("no commits found in repository")
 }
 
-// isValidBranchName validates that a branch name is safe to use in git commands.
+// IsValidBranchName validates that a branch name is safe to use in git commands.
 // Returns false if the name could be interpreted as a git option or contains
 // dangerous characters.
-func isValidBranchName(branch string) bool {
+func IsValidBranchName(branch string) bool {
 	if branch == "" {
 		return false
 	}
@@ -787,7 +787,7 @@ func isValidBranchName(branch string) bool {
 // Returns 0, error for validation failures or parse errors.
 func (g *Git) GetUnpushedCommitCount(ctx context.Context, branch string) (int, error) {
 	// Validate branch name to prevent command injection
-	if !isValidBranchName(branch) {
+	if !IsValidBranchName(branch) {
 		return 0, fmt.Errorf("invalid branch name: %q", branch)
 	}
 
@@ -817,7 +817,7 @@ func (g *Git) GetUnpushedCommitCount(ctx context.Context, branch string) (int, e
 // Returns 0, error for validation failures or parse errors.
 func (g *Git) GetDivergedCommitCount(ctx context.Context, branch string) (int, error) {
 	// Validate branch name to prevent command injection
-	if !isValidBranchName(branch) {
+	if !IsValidBranchName(branch) {
 		return 0, fmt.Errorf("invalid branch name: %q", branch)
 	}
 

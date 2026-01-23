@@ -2,6 +2,7 @@ package gitproxy
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 )
@@ -25,7 +26,10 @@ func InjectProxyConfig(claudeDir string) error {
 	settings := make(map[string]interface{})
 
 	if data, err := os.ReadFile(settingsPath); err == nil {
-		_ = json.Unmarshal(data, &settings)
+		if unmarshalErr := json.Unmarshal(data, &settings); unmarshalErr != nil {
+			log.Printf("[gitproxy] Warning: failed to parse existing settings.json at %s: %v (starting fresh)", settingsPath, unmarshalErr)
+			settings = make(map[string]interface{})
+		}
 	}
 
 	// Merge our hooks with any existing hooks

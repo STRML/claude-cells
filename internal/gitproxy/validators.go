@@ -5,6 +5,8 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+
+	"github.com/STRML/claude-cells/internal/git"
 )
 
 // Validator validates an operation's arguments against workstream constraints.
@@ -73,6 +75,11 @@ func validatePush(args []string, ws WorkstreamInfo) error {
 	if branch == "" {
 		// No explicit branch - will push current branch, which should be correct
 		return nil
+	}
+
+	// Validate branch name is safe before using it
+	if !git.IsValidBranchName(branch) {
+		return fmt.Errorf("invalid branch name: %q", branch)
 	}
 
 	if branch != ws.Branch {
