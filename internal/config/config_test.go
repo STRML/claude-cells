@@ -161,3 +161,18 @@ func TestConfigDirCreatedOnSave(t *testing.T) {
 		t.Fatal("Config path is not a directory")
 	}
 }
+
+func TestLogsDir(t *testing.T) {
+	tmpHome := t.TempDir()
+	t.Setenv("HOME", tmpHome)
+
+	logsDir, err := LogsDir()
+	if err != nil {
+		t.Fatalf("LogsDir() error = %v", err)
+	}
+
+	expected := filepath.Join(tmpHome, configDir, "logs")
+	if logsDir != expected {
+		t.Errorf("LogsDir() = %s, want %s", logsDir, expected)
+	}
+}

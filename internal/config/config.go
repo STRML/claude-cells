@@ -51,6 +51,15 @@ func legacyConfigPath() (string, error) {
 	return filepath.Join(dir, legacyConfig), nil
 }
 
+// LogsDir returns the path to the ccells logs directory (~/.claude-cells/logs)
+func LogsDir() (string, error) {
+	dir, err := ConfigDir()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(dir, "logs"), nil
+}
+
 // Load loads the global application state from disk
 // Returns a default config if the file doesn't exist
 // Automatically migrates from legacy config.json if needed

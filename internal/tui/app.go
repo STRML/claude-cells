@@ -1046,7 +1046,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "E":
 			// Export system logs (when log panel is visible)
 			if m.logPanel != nil && m.logPanel.IsVisible() {
-				logsDir := filepath.Join(m.workingDir, "ccells-logs")
+				logsDir, err := config.LogsDir()
+				if err != nil {
+					m.toast = fmt.Sprintf("Export failed: %v", err)
+					m.toastExpiry = time.Now().Add(toastDuration * 2)
+					return m, nil
+				}
 				exportPath, err := m.logPanel.Export(logsDir)
 				if err != nil {
 					m.toast = fmt.Sprintf("Export failed: %v", err)
@@ -1134,8 +1139,13 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "e":
 			// Export logs for focused pane
 			if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
+				logsDir, err := config.LogsDir()
+				if err != nil {
+					m.toast = fmt.Sprintf("Export failed: %v", err)
+					m.toastExpiry = time.Now().Add(toastDuration * 2)
+					return m, nil
+				}
 				pane := &m.panes[m.focusedPane]
-				logsDir := filepath.Join(m.workingDir, "ccells-logs")
 				exportPath, err := pane.ExportLogs(logsDir)
 				if err != nil {
 					m.toast = fmt.Sprintf("Export failed: %v", err)

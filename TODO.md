@@ -127,7 +127,7 @@
 - Added keybinding `e` in nav mode to export logs
 - Combines scrollback buffer with current vterm content
 - Strips ANSI codes for clean text output
-- Saves to `ccells-logs/<branch>-<timestamp>.txt` in project directory
+- Saves to `~/.claude-cells/logs/<branch>-<timestamp>.txt`
 - Includes header with branch name, title, timestamp, and original prompt
 
 ---

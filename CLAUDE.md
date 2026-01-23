@@ -54,6 +54,7 @@ Before modifying code or answering questions about how the codebase works, read 
 
 - `~/.claude-cells/state/<repo-id>/state.json` - Per-repo workstream state (branches, container IDs, session IDs)
 - `~/.claude-cells/containers/<container-name>/` - Container-specific config files (credentials, .claude.json copies)
+- `~/.claude-cells/logs/` - Exported logs (pane logs and system logs)
 
 ### OAuth Credential Management
 

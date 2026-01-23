@@ -583,3 +583,4 @@ type DialogResult struct {
 | Git worktrees | `/tmp/ccells/worktrees/<branch>/` |
 | Container tracking | `~/.claude-cells/containers.json` |
 | Heartbeat | `~/.claude-cells/heartbeat` |
+| Exported logs | `~/.claude-cells/logs/` |

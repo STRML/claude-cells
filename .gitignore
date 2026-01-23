@@ -22,6 +22,3 @@ coverage.out
 coverage.html
 keytest
 .reports/
-
-# Claude cells logs
-ccells-logs/
