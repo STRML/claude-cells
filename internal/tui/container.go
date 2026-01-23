@@ -1656,7 +1656,7 @@ fi
 LATEST=""
 LATEST_TIME=0
 for dir in "$SESSION_DIR"/*/; do
-  for f in "$dir"*.jsonl 2>/dev/null; do
+  for f in "$dir"*.jsonl; do
     [ -f "$f" ] || continue
     if stat --version 2>/dev/null | grep -q GNU; then
       MTIME=$(stat -c %Y "$f" 2>/dev/null)
