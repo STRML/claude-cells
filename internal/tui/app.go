@@ -25,6 +25,7 @@ const escapeTimeout = 300 * time.Millisecond
 const toastDuration = 2 * time.Second
 
 const pairingHealthCheckInterval = 30 * time.Second
+const prStatusPollInterval = 5 * time.Minute
 
 // formatFileList formats a list of files for display
 func formatFileList(files []string) string {
@@ -242,6 +243,9 @@ type keyboardCheckMsg struct{}
 // pairingHealthTickMsg is sent periodically to check pairing sync health
 type pairingHealthTickMsg struct{}
 
+// prStatusPollTickMsg is sent periodically to refresh PR status for all workstreams
+type prStatusPollTickMsg struct{}
+
 // autoContinueMsg is sent when we need to auto-continue an interrupted session
 type autoContinueMsg struct {
 	WorkstreamID string
@@ -251,6 +255,13 @@ type autoContinueMsg struct {
 func pairingHealthTickCmd() tea.Cmd {
 	return tea.Tick(pairingHealthCheckInterval, func(t time.Time) tea.Msg {
 		return pairingHealthTickMsg{}
+	})
+}
+
+// prStatusPollTickCmd returns a command that sends a PR status poll tick after a delay
+func prStatusPollTickCmd() tea.Cmd {
+	return tea.Tick(prStatusPollInterval, func(t time.Time) tea.Msg {
+		return prStatusPollTickMsg{}
 	})
 }
 
@@ -374,11 +385,13 @@ func (m AppModel) Init() tea.Cmd {
 	// Try to load saved state on startup
 	// Cursor visibility is now controlled via View().Cursor
 	// Also schedule a check for Kitty keyboard protocol support
+	// Start periodic PR status polling (self-restarts on tick)
 	return tea.Batch(
 		LoadStateCmd(m.stateDir),
 		tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
 			return keyboardCheckMsg{}
 		}),
+		prStatusPollTickCmd(),
 	)
 }
 
@@ -1943,6 +1956,21 @@ Scroll Mode:
 					dialog := NewProgressDialog("Rebasing", fmt.Sprintf("Branch: %s\n\nFetching main and rebasing...", ws.BranchName), ws.ID)
 					m.panes[i].SetInPaneDialog(&dialog)
 					return m, FetchRebaseCmd(ws)
+				case MergeActionGHMergeSquash:
+					m.panes[i].AppendOutput("\nMerging PR via GitHub (squash)...\n")
+					dialog := NewProgressDialog("Merging PR", fmt.Sprintf("Branch: %s\n\nMerging PR via GitHub (squash)...", ws.BranchName), ws.ID)
+					m.panes[i].SetInPaneDialog(&dialog)
+					return m, GHMergePRCmd(ws, "squash")
+				case MergeActionGHMergeMerge:
+					m.panes[i].AppendOutput("\nMerging PR via GitHub (merge commit)...\n")
+					dialog := NewProgressDialog("Merging PR", fmt.Sprintf("Branch: %s\n\nMerging PR via GitHub (merge commit)...", ws.BranchName), ws.ID)
+					m.panes[i].SetInPaneDialog(&dialog)
+					return m, GHMergePRCmd(ws, "merge")
+				case MergeActionGHMergeRebase:
+					m.panes[i].AppendOutput("\nMerging PR via GitHub (rebase)...\n")
+					dialog := NewProgressDialog("Merging PR", fmt.Sprintf("Branch: %s\n\nMerging PR via GitHub (rebase)...", ws.BranchName), ws.ID)
+					m.panes[i].SetInPaneDialog(&dialog)
+					return m, GHMergePRCmd(ws, "rebase")
 				}
 				break
 			}
@@ -1959,6 +1987,22 @@ Scroll Mode:
 					m.panes[i].SetPRStatusLoading(false)
 				} else {
 					m.panes[i].SetPRStatus(msg.Status)
+				}
+				break
+			}
+		}
+		return m, nil
+
+	case PRStatusRefreshRequestMsg:
+		// Request to refresh PR status (e.g., after a push via git proxy)
+		for i := range m.panes {
+			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				ws := m.panes[i].Workstream()
+				// Check both PRNumber and PRURL - some saved states may only have URL
+				if ws.PRNumber > 0 || ws.PRURL != "" {
+					LogDebug("Refreshing PR status for workstream %s after push", msg.WorkstreamID)
+					m.panes[i].SetPRStatusLoading(true)
+					return m, FetchPRStatusCmd(ws)
 				}
 				break
 			}
@@ -2014,12 +2058,7 @@ Scroll Mode:
 				} else {
 					m.panes[i].AppendOutput(fmt.Sprintf("%s successful!\n", pushType))
 					// Mark branch as pushed - this enables force push option in merge dialog
-					// and signals to Claude not to use commit amend
 					ws.SetHasBeenPushed(true)
-					// Notify Claude Code about the push (don't press Enter - avoids submitting Claude's pending input)
-					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ Branch '%s' pushed to remote (avoid using commit --amend)", ws.BranchName), false); err != nil {
-						LogWarn("Failed to notify Claude about push for %s (pane %d): %v", ws.BranchName, i, err)
-					}
 					// Update in-pane progress dialog if open
 					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
 						dialog.SetComplete(fmt.Sprintf("%s successful!\n\nPress Enter or Esc to close.", pushType))
@@ -2045,10 +2084,6 @@ Scroll Mode:
 					// Store PR info and mark as pushed (PR creation pushes the branch)
 					ws.SetPRInfo(msg.PRNumber, msg.PRURL)
 					ws.SetHasBeenPushed(true)
-					// Notify Claude about the PR and amend prevention (don't press Enter - avoids submitting Claude's pending input)
-					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ PR #%d created: %s (avoid using commit --amend)", msg.PRNumber, msg.PRURL), false); err != nil {
-						LogWarn("Failed to notify Claude about PR creation for %s (pane %d): %v", ws.BranchName, i, err)
-					}
 					// Update in-pane progress dialog if open
 					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
 						dialog.SetComplete(fmt.Sprintf("Pull Request Created!\n\nPR #%d: %s\n\nPress Enter or Esc to close.", msg.PRNumber, msg.PRURL))
@@ -2101,6 +2136,31 @@ Scroll Mode:
 					// Notify Claude Code about the merge (don't press Enter - avoids submitting Claude's pending input)
 					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ Branch '%s' merged into main", ws.BranchName), false); err != nil {
 						LogWarn("Failed to notify Claude about merge for %s (pane %d): %v", ws.BranchName, i, err)
+					}
+					// Show post-merge destroy dialog in pane
+					dialog := NewPostMergeDestroyDialog(ws.BranchName, ws.ID)
+					m.panes[i].SetInPaneDialog(&dialog)
+				}
+				break
+			}
+		}
+		return m, nil
+
+	case GHMergePRResultMsg:
+		for i := range m.panes {
+			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				ws := m.panes[i].Workstream()
+				if msg.Error != nil {
+					m.panes[i].AppendOutput(fmt.Sprintf("GitHub PR merge failed: %v\n", msg.Error))
+					// Update in-pane progress dialog if open
+					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
+						dialog.SetComplete(fmt.Sprintf("PR Merge Failed\n\n%v", msg.Error))
+					}
+				} else {
+					m.panes[i].AppendOutput(fmt.Sprintf("PR merged via GitHub (%s) successfully!\n", msg.MergeMethod))
+					// Notify Claude Code about the merge (don't press Enter - avoids submitting Claude's pending input)
+					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ PR merged via GitHub (%s)", msg.MergeMethod), false); err != nil {
+						LogWarn("Failed to notify Claude about PR merge for %s (pane %d): %v", ws.BranchName, i, err)
 					}
 					// Show post-merge destroy dialog in pane
 					dialog := NewPostMergeDestroyDialog(ws.BranchName, ws.ID)
@@ -2403,6 +2463,23 @@ Scroll Mode:
 			m.toastExpiry = time.Now().Add(toastDuration * 2)
 		}
 		return m, nil
+
+	case prStatusPollTickMsg:
+		// Periodic PR status refresh for all workstreams with PRs
+		var cmds []tea.Cmd
+		cmds = append(cmds, prStatusPollTickCmd()) // Schedule next tick
+		for i := range m.panes {
+			ws := m.panes[i].Workstream()
+			// Check both PRNumber and PRURL - some saved states may only have URL
+			if ws.PRNumber > 0 || ws.PRURL != "" {
+				m.panes[i].SetPRStatusLoading(true)
+				cmds = append(cmds, FetchPRStatusCmd(ws))
+			}
+		}
+		if len(cmds) > 1 {
+			LogDebug("Polling PR status for %d workstreams", len(cmds)-1)
+		}
+		return m, tea.Batch(cmds...)
 	}
 
 	return m, nil

@@ -53,10 +53,11 @@ type CreateOptions struct {
 
 // CreateResult contains the result of workstream creation.
 type CreateResult struct {
-	ContainerID   string
-	ContainerName string
-	ConfigDir     string // Container config directory for credential registration
-	WorktreePath  string
+	ContainerID       string
+	ContainerName     string
+	ConfigDir         string // Container config directory for credential registration
+	WorktreePath      string
+	GitProxySocketDir string // Directory containing git.sock for git proxy
 }
 
 // DestroyOptions configures workstream destruction.

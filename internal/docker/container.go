@@ -39,6 +39,9 @@ type ContainerConfig struct {
 	ExtraEnv    map[string]string // Additional environment variables from devcontainer.json
 	ExtraMounts []mount.Mount     // Additional mounts from devcontainer.json
 
+	// Git proxy socket (for proxying git/gh commands to host)
+	GitProxySocketDir string // Path to directory containing git.sock (mounted at /var/run/ccells)
+
 	// Resource limits (optional - defaults applied if zero)
 	CPULimit    float64 // Number of CPUs (e.g., 2.0 for 2 CPUs)
 	MemoryLimit int64   // Memory limit in bytes (e.g., 4*1024*1024*1024 for 4GB)
@@ -160,6 +163,15 @@ func (c *Client) CreateContainer(ctx context.Context, cfg *ContainerConfig) (str
 			Source:   cfg.Credentials,
 			Target:   "/root/.claude-credentials",
 			ReadOnly: true, // Credentials should not be modified by container
+		})
+	}
+	// Mount git proxy socket directory for proxying git/gh commands to host
+	if cfg.GitProxySocketDir != "" {
+		mounts = append(mounts, mount.Mount{
+			Type:   mount.TypeBind,
+			Source: cfg.GitProxySocketDir,
+			Target: "/var/run/ccells",
+			// Not read-only: container needs to write to the socket
 		})
 	}
 

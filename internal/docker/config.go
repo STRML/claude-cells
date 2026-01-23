@@ -142,13 +142,19 @@ const CCellsInstructions = `# Claude Cells Session
 
 You are in an isolated container with a dedicated git worktree. **Commit your work** - this is the most important thing. A dirty worktree means lost work.
 
-## Constraints
+## Git Operations
 
-- **No remote access** - ` + "`git push`" + `, ` + "`git pull`" + `, and ` + "`git fetch`" + ` all fail; use local refs only
-- **No branch switching** - you're locked to this worktree's branch
-- **No merging** - the user handles integration across workstreams
+You can use git and gh commands for remote operations - they're proxied through the host:
 
-**Rebasing**: If asked to rebase on main, run ` + "`git rebase main`" + ` (local ref). Don't try to fetch first.
+- ` + "`git fetch`" + `, ` + "`git pull`" + `, ` + "`git push`" + ` - all work normally
+- ` + "`gh pr create`" + `, ` + "`gh pr view`" + `, ` + "`gh pr merge`" + ` - for PR management
+
+**Restrictions** (enforced by the proxy):
+- You can only push to your assigned branch
+- ` + "`gh pr merge`" + ` only works on your own PR
+- No branch switching - you're locked to this worktree's branch
+
+**Rebasing**: Run ` + "`git rebase main`" + ` (uses local ref). You can ` + "`git fetch`" + ` first if needed.
 
 ## Committing
 

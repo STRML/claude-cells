@@ -226,9 +226,16 @@ if app.dialog == nil {
 2. **God Objects**: AppModel (94 fields) and PaneModel (40+ fields) handle too many concerns. PaneModel could be split into PaneRenderer, ScrollController, AnimationController.
 3. **Global Mutable State**: `program`, `containerTracker`, `credentialRefresher` are package-level globals in tui package. Should be passed as AppModel fields for better testability.
 
-### Container Limitations
+### Git Proxy (Container Git Operations)
 
-- **No GitHub access from containers**: Containers cannot directly push to GitHub or create PRs. Use the host's `gh` CLI via pairing mode or push from the host after the container finishes work.
+Containers can now use `git` and `gh` commands for remote operations via a secure proxy:
+
+- **Supported operations**: `git fetch`, `git pull`, `git push`, `gh pr create`, `gh pr view`, `gh pr merge`
+- **Branch restriction**: Containers can only push to their assigned branch (prevents cross-contamination)
+- **PR restriction**: `gh pr merge` only works on the container's own PR
+- **Automatic status refresh**: PR status updates after pushes and polls every 5 minutes
+
+The proxy is transparent - Claude uses normal git/gh commands, which are intercepted by hooks and proxied through the host. See `internal/gitproxy/` for implementation details.
 
 ### Code Standards
 
