@@ -4,6 +4,9 @@
 #
 # Hook type: PreToolUse (receives JSON on stdin)
 # Exit 0 = allow, Exit non-zero = block
+#
+# Bypass: Create /tmp/.ccells-commit-active to allow commits
+# (used by /ccells-commit skill itself)
 
 # Read JSON input from stdin
 input=$(cat)
@@ -17,7 +20,12 @@ if [ "$tool_name" != "Bash" ]; then
     exit 0
 fi
 
-# Check if this is a git commit command (but not part of ccells-commit skill)
+# Check for bypass file (set by /ccells-commit skill)
+if [ -f /tmp/.ccells-commit-active ]; then
+    exit 0
+fi
+
+# Check if this is a git commit command
 # Match: git commit, git commit -m, git commit --amend, etc.
 if echo "$command" | grep -qE '(^|\s|&&|\||;)git\s+commit(\s|$)'; then
     cat <<'EOF'
@@ -30,7 +38,7 @@ Use /ccells-commit instead. This skill:
 
 To commit, simply run: /ccells-commit
 EOF
-    exit 1
+    exit 2
 fi
 
 exit 0

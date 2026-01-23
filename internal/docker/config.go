@@ -120,7 +120,19 @@ const CCellsCommitCommand = `You are running inside Claude Cells (ccells), a ter
 
 Please commit all changes in this repository with an appropriate commit message that summarizes what was done.
 
-After the commit is complete, inform the user:
+IMPORTANT: Before running any git commit command, you MUST first create a bypass file:
+` + "```bash" + `
+touch /tmp/.ccells-commit-active
+` + "```" + `
+
+This bypass file allows the commit to proceed (a PreToolUse hook blocks raw git commits otherwise).
+
+After the commit is complete (success or failure), remove the bypass file:
+` + "```bash" + `
+rm -f /tmp/.ccells-commit-active
+` + "```" + `
+
+Then inform the user:
 - Briefly summarize what was committed
 - Tell them they can press **Shift+Esc** (or **Ctrl+B Esc**) then **m** to open the merge dialog
 `
@@ -138,9 +150,13 @@ You are in an isolated container with a dedicated git worktree. **Commit your wo
 
 **Rebasing**: If asked to rebase on main, run ` + "`git rebase main`" + ` (local ref). Don't try to fetch first.
 
+## Committing
+
+**ALWAYS use ` + "`/ccells-commit`" + ` when committing.** This skill handles the commit workflow correctly. Never use raw ` + "`git commit`" + ` commands - a hook will block them.
+
 ## When Done
 
-Commit all changes, then provide:
+Commit all changes using ` + "`/ccells-commit`" + `, then provide:
 
 1. **Summary**: What you implemented/changed (2-3 sentences)
 2. **Status** (required): ` + "`Ready for merge`" + ` | ` + "`Needs review`" + ` | ` + "`Incomplete`" + ` (and why)
