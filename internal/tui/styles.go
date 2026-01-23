@@ -7,6 +7,7 @@ import (
 	"strconv"
 
 	"charm.land/lipgloss/v2"
+	"github.com/STRML/claude-cells/internal/sync"
 )
 
 // hexToRGB converts a hex color string to RGB values
@@ -197,7 +198,58 @@ const (
 
 	// Initializing/unfocused - purple (same as dialog for consistency)
 	ModeInitBadge = "#7C3AED" // Purple for initializing state
+
+	// Pairing status colors
+	ColorPairingSyncing  = "#FFD700" // Gold - syncing/scanning
+	ColorPairingSynced   = "#00FF88" // Bright green - watching/idle
+	ColorPairingConflict = "#FF4466" // Bright red - conflicts/error
+	ColorPairingStash    = "#FF66FF" // Bright magenta - stashed changes
 )
+
+// RenderSyncBadge renders a sync status badge based on the current sync status.
+// Returns an empty string if no badge should be shown.
+func RenderSyncBadge(status sync.SyncStatus, conflictCount int) string {
+	switch status {
+	case sync.SyncStatusSyncing, sync.SyncStatusScanning, sync.SyncStatusConnecting:
+		style := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ColorPairingSyncing)).
+			Bold(true)
+		return style.Render("[⟳ Syncing]")
+	case sync.SyncStatusWatching:
+		style := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ColorPairingSynced)).
+			Bold(true)
+		return style.Render("[✓ Synced]")
+	case sync.SyncStatusConflicted:
+		style := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ColorPairingConflict)).
+			Bold(true)
+		count := conflictCount
+		if count == 0 {
+			count = 1 // At least 1 if status says conflicted
+		}
+		plural := "conflicts"
+		if count == 1 {
+			plural = "conflict"
+		}
+		return style.Render(fmt.Sprintf("[⚠ %d %s]", count, plural))
+	case sync.SyncStatusError, sync.SyncStatusDisconnected:
+		style := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ColorPairingConflict)).
+			Bold(true)
+		return style.Render("[✗ Error]")
+	default:
+		return ""
+	}
+}
+
+// RenderStashBadge renders a stash indicator badge.
+func RenderStashBadge() string {
+	style := lipgloss.NewStyle().
+		Foreground(lipgloss.Color(ColorPairingStash)).
+		Bold(true)
+	return style.Render("[📦 Stashed]")
+}
 
 // Status indicators
 const (

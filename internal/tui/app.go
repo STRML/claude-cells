@@ -24,7 +24,7 @@ const escapeTimeout = 300 * time.Millisecond
 
 const toastDuration = 2 * time.Second
 
-const pairingHealthCheckInterval = 30 * time.Second
+const pairingHealthCheckInterval = 5 * time.Second
 const prStatusPollInterval = 5 * time.Minute
 
 // formatFileList formats a list of files for display
@@ -2528,6 +2528,18 @@ func (m AppModel) View() tea.View {
 	titleBar := m.renderTitleBar()
 	sections = append(sections, titleBar)
 
+	// Update panes with pairing state before rendering
+	pairingState := m.pairingOrchestrator.GetState()
+	for i := range m.panes {
+		ws := m.panes[i].Workstream()
+		if pairingState.Active && pairingState.ContainerID == ws.ContainerID {
+			// This pane is being paired
+			m.panes[i].SetPairingState(&pairingState)
+		} else {
+			m.panes[i].SetPairingState(nil)
+		}
+	}
+
 	// Panes section
 	logPanelH := m.logPanelHeight()
 	if len(m.panes) > 0 {
@@ -2555,10 +2567,12 @@ func (m AppModel) View() tea.View {
 	m.statusBar.SetInputMode(m.inputMode)
 	m.statusBar.SetLayoutName(m.layout.String())
 	m.statusBar.SetRepoPath(m.workingDir)
-	if pairing := m.manager.GetPairing(); pairing != nil {
-		m.statusBar.SetPairingBranch(pairing.BranchName)
+	if pairingState.Active {
+		m.statusBar.SetPairingBranch(pairingState.CurrentBranch)
+		m.statusBar.SetPairingStatus(pairingState.SyncStatus, pairingState.StashedChanges, len(pairingState.Conflicts))
 	} else {
 		m.statusBar.SetPairingBranch("")
+		m.statusBar.SetPairingStatus(sync.SyncStatusUnknown, false, 0)
 	}
 	sections = append(sections, m.statusBar.View())
 

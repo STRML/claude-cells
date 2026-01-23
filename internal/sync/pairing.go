@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // GitOperations defines git operations needed for pairing.
@@ -21,6 +22,7 @@ type MutagenOperations interface {
 	TerminateSession(ctx context.Context, branch string) error
 	SessionExists(ctx context.Context, branch string) (bool, error)
 	GetConflicts(ctx context.Context, branch string) ([]string, error)
+	GetSessionStatus(ctx context.Context, branch string) (*SessionStatus, error)
 }
 
 // Pairing orchestrates file sync between container and local.
@@ -38,6 +40,12 @@ type Pairing struct {
 	stashedChanges bool
 	syncHealthy    bool
 	lastConflicts  []string
+
+	// Enhanced sync status (Phase 1)
+	syncStatus     SyncStatus
+	syncStatusText string
+	problems       []string
+	lastUpdated    time.Time
 }
 
 // PairingState represents the current state of pairing mode.
@@ -49,6 +57,12 @@ type PairingState struct {
 	StashedChanges bool
 	SyncHealthy    bool
 	Conflicts      []string
+
+	// Enhanced sync status (Phase 1)
+	SyncStatus     SyncStatus
+	SyncStatusText string
+	Problems       []string
+	LastUpdated    time.Time
 }
 
 // NewPairing creates a new pairing orchestrator.
@@ -104,6 +118,10 @@ func (p *Pairing) GetState() PairingState {
 		StashedChanges: p.stashedChanges,
 		SyncHealthy:    p.syncHealthy,
 		Conflicts:      append([]string(nil), p.lastConflicts...),
+		SyncStatus:     p.syncStatus,
+		SyncStatusText: p.syncStatusText,
+		Problems:       append([]string(nil), p.problems...),
+		LastUpdated:    p.lastUpdated,
 	}
 }
 
@@ -139,39 +157,58 @@ func (p *Pairing) GetSyncHealth() (healthy bool, conflicts []string) {
 // CheckSyncHealth checks the health of the mutagen sync session.
 // Returns an error if the session is unhealthy or lost.
 func (p *Pairing) CheckSyncHealth(ctx context.Context) error {
+	// Take read lock to check active state and get branch name
+	p.mu.RLock()
+	if !p.active {
+		p.mu.RUnlock()
+		return nil
+	}
+	branch := p.currentBranch
+	p.mu.RUnlock()
+
+	// Get detailed session status (includes conflicts, problems, and sync state)
+	// This is an external subprocess call - don't hold lock during I/O
+	sessionStatus, err := p.mutagen.GetSessionStatus(ctx, branch)
+
+	// Re-acquire write lock to update state
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	if !p.active {
+	// Verify state hasn't changed while we were waiting
+	if !p.active || p.currentBranch != branch {
 		return nil
 	}
 
-	// Check if session still exists
-	exists, err := p.mutagen.SessionExists(ctx, p.currentBranch)
 	if err != nil {
 		p.syncHealthy = false
+		p.syncStatus = SyncStatusError
+		p.syncStatusText = err.Error()
+		p.lastUpdated = time.Now()
 		return fmt.Errorf("failed to check session: %w", err)
 	}
-	if !exists {
+
+	// Update sync status fields
+	p.syncStatus = sessionStatus.Status
+	p.syncStatusText = sessionStatus.StatusText
+	p.lastConflicts = sessionStatus.Conflicts
+	p.problems = sessionStatus.Problems
+	p.lastUpdated = sessionStatus.LastUpdate
+
+	// Determine health based on status
+	switch sessionStatus.Status {
+	case SyncStatusDisconnected:
 		p.syncHealthy = false
-		return fmt.Errorf("sync session lost for branch %s", p.currentBranch)
+		return fmt.Errorf("sync session lost for branch %s", branch)
+	case SyncStatusConflicted:
+		p.syncHealthy = false
+		return fmt.Errorf("sync has %d conflict(s)", len(sessionStatus.Conflicts))
+	case SyncStatusError:
+		p.syncHealthy = false
+		return fmt.Errorf("sync error: %s", sessionStatus.StatusText)
+	default:
+		p.syncHealthy = true
+		return nil
 	}
-
-	// Check for conflicts
-	conflicts, err := p.mutagen.GetConflicts(ctx, p.currentBranch)
-	if err != nil {
-		// Don't fail on conflict check error, just clear conflicts
-		p.lastConflicts = nil
-	} else {
-		p.lastConflicts = conflicts
-	}
-
-	p.syncHealthy = len(conflicts) == 0
-	if len(conflicts) > 0 {
-		return fmt.Errorf("sync has %d conflict(s)", len(conflicts))
-	}
-
-	return nil
 }
 
 // Enable starts pairing mode for a workstream.
@@ -215,6 +252,10 @@ func (p *Pairing) Enable(ctx context.Context, branchName, containerID, localPath
 	p.localPath = localPath
 	p.syncHealthy = true
 	p.lastConflicts = nil
+	p.syncStatus = SyncStatusWatching
+	p.syncStatusText = "Watching for changes"
+	p.problems = nil
+	p.lastUpdated = time.Now()
 
 	return nil
 }
@@ -245,6 +286,10 @@ func (p *Pairing) Disable(ctx context.Context) error {
 	p.containerID = ""
 	p.syncHealthy = false
 	p.lastConflicts = nil
+	p.syncStatus = SyncStatusUnknown
+	p.syncStatusText = ""
+	p.problems = nil
+	p.lastUpdated = time.Time{}
 
 	return nil
 }

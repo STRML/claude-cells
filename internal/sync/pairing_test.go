@@ -63,6 +63,7 @@ type MockMutagen struct {
 	checkInstalledErr error
 	sessionExists     bool
 	conflicts         []string
+	syncStatus        SyncStatus
 }
 
 func (m *MockMutagen) CheckInstalled(ctx context.Context) error {
@@ -85,6 +86,23 @@ func (m *MockMutagen) SessionExists(ctx context.Context, branch string) (bool, e
 
 func (m *MockMutagen) GetConflicts(ctx context.Context, branch string) ([]string, error) {
 	return m.conflicts, nil
+}
+
+func (m *MockMutagen) GetSessionStatus(ctx context.Context, branch string) (*SessionStatus, error) {
+	status := m.syncStatus
+	if status == SyncStatusUnknown && m.sessionExists {
+		status = SyncStatusWatching // Default to watching if session exists
+	}
+	if !m.sessionExists {
+		status = SyncStatusDisconnected
+	}
+	if len(m.conflicts) > 0 {
+		status = SyncStatusConflicted
+	}
+	return &SessionStatus{
+		Status:    status,
+		Conflicts: m.conflicts,
+	}, nil
 }
 
 func TestPairing_Enable_NoChanges(t *testing.T) {
@@ -245,5 +263,147 @@ func TestPairing_SyncHealth_DetectsConflicts(t *testing.T) {
 	}
 	if len(conflicts) != 2 {
 		t.Errorf("GetSyncHealth() conflicts = %d, want 2", len(conflicts))
+	}
+}
+
+func TestPairing_CheckSyncHealth_UpdatesEnhancedFields(t *testing.T) {
+	tests := []struct {
+		name           string
+		syncStatus     SyncStatus
+		sessionExists  bool
+		conflicts      []string
+		expectedStatus SyncStatus
+		expectHealthy  bool
+	}{
+		{
+			name:           "watching status is healthy",
+			syncStatus:     SyncStatusWatching,
+			sessionExists:  true,
+			expectedStatus: SyncStatusWatching,
+			expectHealthy:  true,
+		},
+		{
+			name:           "scanning status is healthy",
+			syncStatus:     SyncStatusScanning,
+			sessionExists:  true,
+			expectedStatus: SyncStatusScanning,
+			expectHealthy:  true,
+		},
+		{
+			name:           "syncing status is healthy",
+			syncStatus:     SyncStatusSyncing,
+			sessionExists:  true,
+			expectedStatus: SyncStatusSyncing,
+			expectHealthy:  true,
+		},
+		{
+			name:           "connecting status is healthy",
+			syncStatus:     SyncStatusConnecting,
+			sessionExists:  true,
+			expectedStatus: SyncStatusConnecting,
+			expectHealthy:  true,
+		},
+		{
+			name:           "conflicted status is unhealthy",
+			syncStatus:     SyncStatusConflicted,
+			sessionExists:  true,
+			conflicts:      []string{"file.go"},
+			expectedStatus: SyncStatusConflicted,
+			expectHealthy:  false,
+		},
+		{
+			name:           "error status is unhealthy",
+			syncStatus:     SyncStatusError,
+			sessionExists:  true,
+			expectedStatus: SyncStatusError,
+			expectHealthy:  false,
+		},
+		{
+			name:           "disconnected status is unhealthy",
+			syncStatus:     SyncStatusDisconnected,
+			sessionExists:  false,
+			expectedStatus: SyncStatusDisconnected,
+			expectHealthy:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			mutagen := &MockMutagen{
+				sessionExists: tt.sessionExists,
+				syncStatus:    tt.syncStatus,
+				conflicts:     tt.conflicts,
+			}
+			p := NewPairingWithMocks(&MockGit{}, mutagen)
+			ctx := context.Background()
+
+			// Enable pairing first (need session to exist during enable)
+			mutagen.sessionExists = true
+			if err := p.Enable(ctx, "feature-branch", "container-123", "/path/to/repo", "main"); err != nil {
+				t.Fatalf("Enable() failed: %v", err)
+			}
+
+			// Now set the test conditions
+			mutagen.sessionExists = tt.sessionExists
+			mutagen.syncStatus = tt.syncStatus
+			mutagen.conflicts = tt.conflicts
+
+			err := p.CheckSyncHealth(ctx)
+
+			// CheckSyncHealth returns errors for unhealthy states (conflicts, disconnected, error)
+			if tt.expectHealthy && err != nil {
+				t.Errorf("CheckSyncHealth() unexpected error for healthy state: %v", err)
+			}
+			if !tt.expectHealthy && err == nil {
+				t.Errorf("CheckSyncHealth() expected error for unhealthy state, got nil")
+			}
+
+			state := p.GetState()
+			if state.SyncStatus != tt.expectedStatus {
+				t.Errorf("SyncStatus = %v, want %v", state.SyncStatus, tt.expectedStatus)
+			}
+			if state.SyncHealthy != tt.expectHealthy {
+				t.Errorf("SyncHealthy = %v, want %v", state.SyncHealthy, tt.expectHealthy)
+			}
+		})
+	}
+}
+
+func TestPairing_Enable_SetsInitialSyncStatus(t *testing.T) {
+	mutagen := &MockMutagen{sessionExists: true}
+	p := NewPairingWithMocks(&MockGit{}, mutagen)
+	ctx := context.Background()
+
+	_ = p.Enable(ctx, "feature-branch", "container-123", "/path/to/repo", "main")
+
+	state := p.GetState()
+	if state.SyncStatus != SyncStatusWatching {
+		t.Errorf("Initial SyncStatus = %v, want %v", state.SyncStatus, SyncStatusWatching)
+	}
+	if state.SyncStatusText != "Watching for changes" {
+		t.Errorf("Initial SyncStatusText = %q, want %q", state.SyncStatusText, "Watching for changes")
+	}
+	if state.LastUpdated.IsZero() {
+		t.Error("LastUpdated should be set after Enable")
+	}
+}
+
+func TestPairing_Disable_ClearsSyncStatus(t *testing.T) {
+	mutagen := &MockMutagen{sessionExists: true}
+	p := NewPairingWithMocks(&MockGit{}, mutagen)
+	ctx := context.Background()
+
+	_ = p.Enable(ctx, "feature-branch", "container-123", "/path/to/repo", "main")
+	_ = p.Disable(ctx)
+
+	state := p.GetState()
+	if state.SyncStatus != SyncStatusUnknown {
+		t.Errorf("SyncStatus after Disable = %v, want %v", state.SyncStatus, SyncStatusUnknown)
+	}
+	if state.SyncStatusText != "" {
+		t.Errorf("SyncStatusText after Disable = %q, want empty", state.SyncStatusText)
+	}
+	if !state.LastUpdated.IsZero() {
+		t.Error("LastUpdated should be zero after Disable")
 	}
 }

@@ -12,6 +12,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"github.com/STRML/claude-cells/internal/git"
+	"github.com/STRML/claude-cells/internal/sync"
 	"github.com/STRML/claude-cells/internal/workstream"
 	"github.com/hinshun/vt10x"
 )
@@ -72,6 +73,9 @@ type PaneModel struct {
 
 	// Synopsis display
 	synopsisHidden bool // True to hide synopsis in header (app-level toggle)
+
+	// Pairing state (set by app from pairingOrchestrator)
+	pairingState *sync.PairingState
 }
 
 // Width returns the pane width
@@ -336,6 +340,25 @@ func (p PaneModel) View() string {
 		headerLeft = fmt.Sprintf("%s %s %s %s %s", indexLabel, modeIndicator, status, title, stateLabel)
 	} else {
 		headerLeft = fmt.Sprintf("%s %s %s %s", indexLabel, status, title, stateLabel)
+	}
+
+	// Pairing status badges (shown after state label when this pane is being paired)
+	if p.pairingState != nil && p.pairingState.Active {
+		// Pairing mode label
+		pairingLabelStyle := lipgloss.NewStyle().
+			Foreground(lipgloss.Color(ColorPairingSynced)).
+			Bold(true)
+		headerLeft += " " + pairingLabelStyle.Render("(pairing)")
+
+		// Sync status badge (uses helper from styles.go)
+		if syncBadge := RenderSyncBadge(p.pairingState.SyncStatus, len(p.pairingState.Conflicts)); syncBadge != "" {
+			headerLeft += " " + syncBadge
+		}
+
+		// Stash indicator
+		if p.pairingState.StashedChanges {
+			headerLeft += " " + RenderStashBadge()
+		}
 	}
 
 	// PR status badge (shown at top right when PR exists)
@@ -1394,6 +1417,23 @@ func (p *PaneModel) IsPRStatusLoading() bool {
 // SetSynopsisHidden sets whether the synopsis should be hidden in the header
 func (p *PaneModel) SetSynopsisHidden(hidden bool) {
 	p.synopsisHidden = hidden
+}
+
+// SetPairingState sets the pairing state for this pane.
+// Pass nil to clear pairing status (pane is not being paired).
+// Makes a defensive copy to avoid holding a pointer to caller's stack variable.
+func (p *PaneModel) SetPairingState(state *sync.PairingState) {
+	if state != nil {
+		copied := *state
+		p.pairingState = &copied
+	} else {
+		p.pairingState = nil
+	}
+}
+
+// GetPairingState returns the current pairing state, if any.
+func (p *PaneModel) GetPairingState() *sync.PairingState {
+	return p.pairingState
 }
 
 // IsClaudeWorking returns true if Claude appears to be actively working.
