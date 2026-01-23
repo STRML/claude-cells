@@ -199,7 +199,8 @@ func GenerateTitleCmd(ws *workstream.Workstream) tea.Cmd {
 Task: %s`, ws.Prompt)
 
 		// Use ephemeral query to avoid polluting the resume log
-		title, err := claude.QueryWithTimeout(prompt, claude.DefaultTimeout)
+		ctx := context.Background()
+		title, err := claude.QueryWithTimeout(ctx, prompt, claude.DefaultTimeout)
 		if err != nil {
 			return TitleGeneratedMsg{
 				WorkstreamID: ws.ID,

@@ -18,9 +18,6 @@ func TestQueryOptions_Defaults(t *testing.T) {
 	if opts.Timeout != 0 {
 		t.Errorf("Expected zero timeout, got %v", opts.Timeout)
 	}
-	if opts.OutputFormat != "" {
-		t.Errorf("Expected empty output format, got %q", opts.OutputFormat)
-	}
 	if opts.Model != "" {
 		t.Errorf("Expected empty model, got %q", opts.Model)
 	}
@@ -43,7 +40,7 @@ func TestDefaultTimeout_Is30Seconds(t *testing.T) {
 // =============================================================================
 
 func TestBuildQueryArgs_Basic(t *testing.T) {
-	args := buildQueryArgs("test prompt", "", "")
+	args := buildQueryArgs("test prompt", "")
 
 	// Check required flags are present
 	requiredFlags := []string{
@@ -53,6 +50,7 @@ func TestBuildQueryArgs_Basic(t *testing.T) {
 		"--disable-slash-commands",
 		"--strict-mcp-config",
 		"--system-prompt",
+		"--output-format", "json", // Always use JSON
 	}
 	for i := 0; i < len(requiredFlags); i++ {
 		found := false
@@ -69,7 +67,7 @@ func TestBuildQueryArgs_Basic(t *testing.T) {
 }
 
 func TestBuildQueryArgs_WithModel(t *testing.T) {
-	args := buildQueryArgs("test prompt", "", "haiku")
+	args := buildQueryArgs("test prompt", "haiku")
 
 	// Check --model haiku is present
 	modelIdx := indexOf(args, "--model")
@@ -78,33 +76,32 @@ func TestBuildQueryArgs_WithModel(t *testing.T) {
 	}
 }
 
-func TestBuildQueryArgs_WithOutputFormat(t *testing.T) {
-	args := buildQueryArgs("test prompt", "json", "")
+func TestBuildQueryArgs_AlwaysIncludesJSONOutput(t *testing.T) {
+	args := buildQueryArgs("test", "")
 
-	// Check --output-format json is present
+	// Should always have --output-format json
 	formatIdx := indexOf(args, "--output-format")
 	if formatIdx == -1 || formatIdx+1 >= len(args) || args[formatIdx+1] != "json" {
 		t.Errorf("Expected --output-format json in args, got %v", args)
 	}
 }
 
-func TestBuildQueryArgs_WithModelAndOutputFormat(t *testing.T) {
-	args := buildQueryArgs("test prompt", "json", "sonnet")
+func TestBuildQueryArgs_DisablesAllHooks(t *testing.T) {
+	args := buildQueryArgs("test", "")
 
-	// Check both are present
-	modelIdx := indexOf(args, "--model")
-	formatIdx := indexOf(args, "--output-format")
-
-	if modelIdx == -1 || modelIdx+1 >= len(args) || args[modelIdx+1] != "sonnet" {
-		t.Errorf("Expected --model sonnet in args, got %v", args)
+	// Should have --settings with disableAllHooks
+	settingsIdx := indexOf(args, "--settings")
+	if settingsIdx == -1 || settingsIdx+1 >= len(args) {
+		t.Fatalf("Expected --settings in args, got %v", args)
 	}
-	if formatIdx == -1 || formatIdx+1 >= len(args) || args[formatIdx+1] != "json" {
-		t.Errorf("Expected --output-format json in args, got %v", args)
+	settingsVal := args[settingsIdx+1]
+	if !strings.Contains(settingsVal, "disableAllHooks") || !strings.Contains(settingsVal, "true") {
+		t.Errorf("Expected --settings to contain disableAllHooks:true, got %q", settingsVal)
 	}
 }
 
 func TestBuildQueryArgs_AlwaysIncludesNoSessionPersistence(t *testing.T) {
-	args := buildQueryArgs("test", "", "")
+	args := buildQueryArgs("test", "")
 
 	found := false
 	for _, arg := range args {
@@ -126,7 +123,8 @@ func TestQueryWithExecutor_PassesCorrectArgs(t *testing.T) {
 	var capturedArgs []string
 	mockExecutor := func(ctx context.Context, args []string, env []string) (string, error) {
 		capturedArgs = args
-		return "Mock Response", nil
+		// Return JSON envelope format
+		return `{"type":"result","result":"Mock Response","is_error":false}`, nil
 	}
 
 	result, err := QueryWithExecutor(context.Background(), "test prompt", nil, mockExecutor)
@@ -160,7 +158,7 @@ func TestQueryWithExecutor_UsesDefaultModel(t *testing.T) {
 	var capturedArgs []string
 	mockExecutor := func(ctx context.Context, args []string, env []string) (string, error) {
 		capturedArgs = args
-		return "ok", nil
+		return `{"type":"result","result":"ok"}`, nil
 	}
 
 	_, _ = QueryWithExecutor(context.Background(), "test", nil, mockExecutor)
@@ -185,7 +183,7 @@ func TestQueryWithExecutor_CustomModel(t *testing.T) {
 	var capturedArgs []string
 	mockExecutor := func(ctx context.Context, args []string, env []string) (string, error) {
 		capturedArgs = args
-		return "ok", nil
+		return `{"type":"result","result":"ok"}`, nil
 	}
 
 	opts := &QueryOptions{Model: "opus"}
@@ -207,15 +205,15 @@ func TestQueryWithExecutor_CustomModel(t *testing.T) {
 	}
 }
 
-func TestQueryWithExecutor_OutputFormat(t *testing.T) {
+func TestQueryWithExecutor_AlwaysUsesJSONOutput(t *testing.T) {
 	var capturedArgs []string
 	mockExecutor := func(ctx context.Context, args []string, env []string) (string, error) {
 		capturedArgs = args
-		return "ok", nil
+		return `{"type":"result","result":"ok"}`, nil
 	}
 
-	opts := &QueryOptions{OutputFormat: "json"}
-	_, _ = QueryWithExecutor(context.Background(), "test", opts, mockExecutor)
+	// Even without any options, JSON output should be used
+	_, _ = QueryWithExecutor(context.Background(), "test", nil, mockExecutor)
 
 	// Should have --output-format json
 	formatIdx := -1
@@ -235,7 +233,7 @@ func TestQueryWithExecutor_OutputFormat(t *testing.T) {
 
 func TestQueryWithExecutor_TrimsOutput(t *testing.T) {
 	mockExecutor := func(ctx context.Context, args []string, env []string) (string, error) {
-		return "  response with whitespace  \n", nil
+		return `  {"type":"result","result":"  response with whitespace  "}  `, nil
 	}
 
 	result, _ := QueryWithExecutor(context.Background(), "test", nil, mockExecutor)
@@ -261,16 +259,15 @@ func TestQueryWithExecutor_SetsEnvironmentVariables(t *testing.T) {
 	var capturedEnv []string
 	mockExecutor := func(ctx context.Context, args []string, env []string) (string, error) {
 		capturedEnv = env
-		return "ok", nil
+		return `{"type":"result","result":"ok"}`, nil
 	}
 
 	_, _ = QueryWithExecutor(context.Background(), "test", nil, mockExecutor)
 
-	// Check for required env vars
+	// Check for required env vars (hooks disabled via --settings flag)
 	requiredVars := []string{
 		"DISABLE_TELEMETRY=1",
 		"DISABLE_ERROR_REPORTING=1",
-		"CLAUDE_SKIP_SESSION_LEARNINGS=1",
 	}
 
 	for _, required := range requiredVars {
@@ -299,7 +296,7 @@ func TestQueryWithExecutor_UsesTimeout(t *testing.T) {
 		if remaining < 4*time.Second || remaining > 6*time.Second {
 			t.Errorf("Expected ~5s timeout, got %v remaining", remaining)
 		}
-		return "ok", nil
+		return `{"type":"result","result":"ok"}`, nil
 	}
 
 	opts := &QueryOptions{Timeout: 5 * time.Second}
@@ -317,7 +314,7 @@ func TestQueryWithExecutor_DefaultTimeout(t *testing.T) {
 		if remaining < 29*time.Second || remaining > 31*time.Second {
 			t.Errorf("Expected ~30s timeout, got %v remaining", remaining)
 		}
-		return "ok", nil
+		return `{"type":"result","result":"ok"}`, nil
 	}
 
 	_, _ = QueryWithExecutor(context.Background(), "test", nil, mockExecutor)
@@ -327,7 +324,7 @@ func TestQueryWithExecutor_EmptyPrompt(t *testing.T) {
 	var capturedArgs []string
 	mockExecutor := func(ctx context.Context, args []string, env []string) (string, error) {
 		capturedArgs = args
-		return "ok", nil
+		return `{"type":"result","result":"ok"}`, nil
 	}
 
 	_, _ = QueryWithExecutor(context.Background(), "", nil, mockExecutor)
@@ -342,7 +339,7 @@ func TestQueryWithExecutor_PromptWithSpecialChars(t *testing.T) {
 	var capturedArgs []string
 	mockExecutor := func(ctx context.Context, args []string, env []string) (string, error) {
 		capturedArgs = args
-		return "ok", nil
+		return `{"type":"result","result":"ok"}`, nil
 	}
 
 	specialPrompt := `Quote: "test" and 'test' and $var`
@@ -357,7 +354,7 @@ func TestQueryWithExecutor_PromptWithNewlines(t *testing.T) {
 	var capturedArgs []string
 	mockExecutor := func(ctx context.Context, args []string, env []string) (string, error) {
 		capturedArgs = args
-		return "ok", nil
+		return `{"type":"result","result":"ok"}`, nil
 	}
 
 	multilinePrompt := "Line 1\nLine 2\nLine 3"
@@ -365,6 +362,80 @@ func TestQueryWithExecutor_PromptWithNewlines(t *testing.T) {
 
 	if len(capturedArgs) < 2 || capturedArgs[1] != multilinePrompt {
 		t.Errorf("Expected multiline prompt to be preserved, got %v", capturedArgs)
+	}
+}
+
+// =============================================================================
+// Tests for extractCLIResult
+// =============================================================================
+
+func TestExtractCLIResult_ValidEnvelope(t *testing.T) {
+	input := `{"type":"result","result":"Hello world","is_error":false}`
+	result := extractCLIResult(input)
+	if result != "Hello world" {
+		t.Errorf("Expected 'Hello world', got %q", result)
+	}
+}
+
+func TestExtractCLIResult_EmptyResult(t *testing.T) {
+	input := `{"type":"result","result":"","is_error":false}`
+	result := extractCLIResult(input)
+	// Empty result field returns empty string (valid envelope with empty response)
+	if result != "" {
+		t.Errorf("Expected empty string for empty result, got %q", result)
+	}
+}
+
+func TestExtractCLIResult_NotEnvelope(t *testing.T) {
+	input := "Just plain text"
+	result := extractCLIResult(input)
+	if result != input {
+		t.Errorf("Expected original input, got %q", result)
+	}
+}
+
+func TestExtractCLIResult_InvalidJSON(t *testing.T) {
+	input := "{invalid json"
+	result := extractCLIResult(input)
+	if result != input {
+		t.Errorf("Expected original input for invalid JSON, got %q", result)
+	}
+}
+
+func TestExtractCLIResult_WrongType(t *testing.T) {
+	input := `{"type":"other","result":"some value","is_error":false}`
+	result := extractCLIResult(input)
+	// type is "other" not "result", so returns original
+	if result != input {
+		t.Errorf("Expected original input for wrong type, got %q", result)
+	}
+}
+
+func TestExtractCLIResult_ErrorEnvelope(t *testing.T) {
+	input := `{"type":"result","result":"error details","is_error":true}`
+	result := extractCLIResult(input)
+	// is_error=true means we return original so callers can detect the error
+	if result != input {
+		t.Errorf("Expected original input for error envelope, got %q", result)
+	}
+}
+
+func TestExtractCLIResult_ValidEnvelopeExtractsResult(t *testing.T) {
+	// Valid JSON envelope extracts the result field correctly
+	input := `{"type":"result","result":"Actual response","is_error":false}`
+	result := extractCLIResult(input)
+	if result != "Actual response" {
+		t.Errorf("Expected 'Actual response', got %q", result)
+	}
+}
+
+func TestExtractCLIResult_HookOutputBeforeEnvelope(t *testing.T) {
+	// Hook output before envelope makes it unparseable - returns as-is
+	input := `Hook ran successfully
+{"type":"result","result":"Actual response","is_error":false}`
+	result := extractCLIResult(input)
+	if result != input {
+		t.Errorf("Expected original input when hook output precedes envelope, got %q", result)
 	}
 }
 

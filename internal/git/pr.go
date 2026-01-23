@@ -136,28 +136,6 @@ type prContentResponse struct {
 	Body  string `json:"body"`
 }
 
-// claudeCLIEnvelope is the JSON envelope returned by claude CLI with --output-format json.
-type claudeCLIEnvelope struct {
-	Type    string `json:"type"`
-	Result  string `json:"result"`
-	IsError bool   `json:"is_error"`
-}
-
-// extractCLIResult extracts the actual result from Claude CLI's JSON envelope.
-// When using --output-format json, the CLI wraps responses in an envelope like:
-// {"type":"result","result":"actual content here",...}
-func extractCLIResult(output string) string {
-	var envelope claudeCLIEnvelope
-	if err := json.Unmarshal([]byte(output), &envelope); err != nil {
-		// Not a CLI envelope, return as-is
-		return output
-	}
-	if envelope.Type == "result" && envelope.Result != "" {
-		return envelope.Result
-	}
-	return output
-}
-
 // stripMarkdownCodeBlock removes markdown code block fencing from a string.
 // Handles patterns like: ```json\n{...}\n``` or ```\n{...}\n```
 // Also handles cases where there's text before the code block.
@@ -208,18 +186,14 @@ func GeneratePRContent(ctx context.Context, gitClient GitClient, branchName, wor
 	// Build the prompt
 	prompt := buildPRPrompt(branchName, workstreamPrompt, commitLogs, branchInfo)
 
-	// Query Claude
+	// Query Claude (now always uses JSON output internally and extracts result)
 	result, err := claude.Query(ctx, prompt, &claude.QueryOptions{
-		OutputFormat: "json",
-		Timeout:      claude.DefaultTimeout,
+		Timeout: claude.DefaultTimeout,
 	})
 	if err != nil {
 		log.Printf("GeneratePRContent: Claude query failed: %v", err)
 		return defaultTitle, defaultBody
 	}
-
-	// Extract result from CLI envelope (--output-format json wraps in envelope)
-	result = extractCLIResult(result)
 
 	// Strip markdown code blocks if present (Claude often wraps JSON in ```json...```)
 	result = stripMarkdownCodeBlock(result)
