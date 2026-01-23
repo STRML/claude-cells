@@ -2465,17 +2465,17 @@ func (m AppModel) padToHeight(view string) string {
 
 // renderTitleBar renders the top title bar
 func (m AppModel) renderTitleBar() string {
-	// Determine bar color based on mode
+	// Determine bar color based on mode (use centralized colors from styles.go)
 	var barBg string
 	var modeName string
 	var badgeBg string
 	if m.inputMode {
-		barBg = "#047857"   // Darker green for whole bar
-		badgeBg = "#10B981" // Lighter green badge
+		barBg = ModeInputBar     // Darker cyan for whole bar
+		badgeBg = ModeInputBadge // Bright cyan badge
 		modeName = " INPUT "
 	} else {
-		barBg = "#5B21B6"   // Darker purple for whole bar
-		badgeBg = "#7C3AED" // Lighter purple badge
+		barBg = ModeNavBar     // Darker green for whole bar
+		badgeBg = ModeNavBadge // Bright green badge
 		modeName = " NAV "
 	}
 
@@ -2487,11 +2487,11 @@ func (m AppModel) renderTitleBar() string {
 		Padding(0, 1)
 	mode := badgeStyle.Render(modeName)
 
-	// Scroll mode indicator (orange badge)
+	// Scroll mode indicator (orange badge, uses centralized color)
 	var scrollIndicator string
 	if len(m.panes) > 0 && m.focusedPane < len(m.panes) && m.panes[m.focusedPane].IsScrollMode() {
 		scrollStyle := lipgloss.NewStyle().
-			Background(lipgloss.Color("#D97706")).
+			Background(lipgloss.Color(ModeScrollBadge)).
 			Foreground(lipgloss.Color("#FFFFFF")).
 			Bold(true).
 			Padding(0, 1)

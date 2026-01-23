@@ -238,14 +238,15 @@ func (p PaneModel) View() string {
 		return p.viewWithInPaneDialog()
 	}
 
-	// Color constants for animation
+	// Color constants for animation (use centralized mode colors from styles.go)
 	const (
-		colorPurple    = "#7C3AED" // Initializing state
-		colorCyan      = "#0891B2" // Input mode
-		colorGreen     = "#059669" // Nav mode
-		colorDarkGrey  = "#444444" // Initializing content / unfocused border
-		colorMidGrey   = "#555555" // Unfocused content
-		colorLightGrey = "#888888" // Nav mode content
+		colorPurple    = ModeInitBadge   // Initializing state
+		colorCyan      = ModeInputBadge  // Input mode
+		colorGreen     = ModeNavBadge    // Nav mode
+		colorOrange    = ModeScrollBadge // Scroll mode
+		colorDarkGrey  = "#444444"       // Initializing content / unfocused border
+		colorMidGrey   = "#555555"       // Unfocused content
+		colorLightGrey = "#888888"       // Nav mode content
 	)
 
 	// Determine target colors based on state
@@ -282,8 +283,7 @@ func (p PaneModel) View() string {
 	var modeIndicator string
 	if p.focused && !p.initializing {
 		if p.scrollMode {
-			// Scroll mode - orange background
-			colorOrange := "#D97706"
+			// Scroll mode - orange background (colorOrange defined above)
 			modeIndicator = lipgloss.NewStyle().
 				Background(lipgloss.Color(colorOrange)).
 				Foreground(lipgloss.Color("#FFFFFF")).
@@ -774,19 +774,17 @@ func (p *PaneModel) SetInputMode(inputMode bool) {
 
 // viewWithInPaneDialog renders the pane with the in-pane dialog filling the content area
 func (p PaneModel) viewWithInPaneDialog() string {
-	const colorPurple = "#A855F7"    // Dialog mode border (focused)
-	const colorPurpleDim = "#5B3A8C" // Dimmed purple for unfocused dialogs
-
+	// Use centralized dialog mode colors from styles.go
 	// Choose colors based on focus state
 	var borderColor, headerBgColor string
 	var borderStyle lipgloss.Border
 	if p.focused {
-		borderColor = colorPurple
-		headerBgColor = colorPurple
+		borderColor = ModeDialogBadge
+		headerBgColor = ModeDialogBadge
 		borderStyle = lipgloss.ThickBorder()
 	} else {
-		borderColor = colorPurpleDim
-		headerBgColor = colorPurpleDim
+		borderColor = ModeDialogDimmed
+		headerBgColor = ModeDialogDimmed
 		borderStyle = lipgloss.NormalBorder()
 	}
 
