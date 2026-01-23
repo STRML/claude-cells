@@ -486,7 +486,7 @@ func BuildEnhancedImage(ctx context.Context, baseImage, targetImage string, outp
 RUN command -v curl || (apt-get update && apt-get install -y curl bash && rm -rf /var/lib/apt/lists/*) || (apk add --no-cache curl bash) || true
 
 # Install Claude Code using native installer
-RUN curl -fsSL https://claude.ai/install.sh | sh
+RUN curl -fsSL https://claude.ai/install.sh | bash
 `, baseImage)
 
 	// Add injections from config
