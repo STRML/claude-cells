@@ -75,9 +75,12 @@ type AppModel struct {
 	mouseEnabled   bool                 // True when mouse capture is enabled (click-to-focus)
 	dragHintShown  bool                 // True if we've shown the drag modifier hint this session
 	ctrlVHintShown bool                 // True if we've shown the Ctrl+V paste hint this session
-	lastEscapeTime time.Time            // For double-escape quit detection in nav mode
-	toast          string               // Temporary notification message
-	toastExpiry    time.Time            // When toast should disappear
+	lastEscapeTime      time.Time // For double-escape quit detection in nav mode
+	inputModeEscCount   int       // Count of ESC presses in input mode (for hint)
+	inputModeEscTime    time.Time // Time of first ESC press in current window
+	inputModeEscHinted  bool      // True if we've shown the ESC hint this session
+	toast               string    // Temporary notification message
+	toastExpiry         time.Time // When toast should disappear
 	workingDir     string               // Current working directory (git repo path)
 	stateDir       string               // State file directory (~/.claude-cells/state/<repo-id>/)
 	repoInfo       *workstream.RepoInfo // Repo metadata for state file
@@ -491,6 +494,27 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.tmuxPrefix = false
+
+				// Track ESC presses in input mode - show hint after repeated presses
+				if !m.inputModeEscHinted {
+					const escHintWindow = 10 * time.Second
+					const escHintThreshold = 3
+					now := time.Now()
+					if now.Sub(m.inputModeEscTime) > escHintWindow {
+						// Reset window
+						m.inputModeEscCount = 1
+						m.inputModeEscTime = now
+					} else {
+						m.inputModeEscCount++
+					}
+					if m.inputModeEscCount >= escHintThreshold {
+						m.inputModeEscHinted = true
+						// Show hint with both keybinds
+						m.toast = "To exit input mode: Shift-Esc or Ctrl+B Esc"
+						m.toastExpiry = time.Now().Add(5 * time.Second)
+					}
+				}
+
 				// Forward Esc directly to the pane (for vim mode, etc.)
 				var cmd tea.Cmd
 				m.panes[m.focusedPane], cmd = m.panes[m.focusedPane].Update(msg)
@@ -2440,8 +2464,8 @@ func (m AppModel) renderTitleBar() string {
 
 	var hints string
 	if m.inputMode {
-		// Show Shift+Esc if terminal supports Kitty protocol, otherwise Ctrl+B Esc
-		navKey := "⇧Esc"
+		// Show Shift-Esc if terminal supports Kitty protocol, otherwise Ctrl+B Esc
+		navKey := "Shift-Esc"
 		if !m.keyboardEnhanced {
 			navKey = "Ctrl+B Esc"
 		}
