@@ -1946,9 +1946,23 @@ Scroll Mode:
 					return m, nil
 				case MergeActionPushToPR:
 					// Push into open PR - same as push but with different messaging
-					m.panes[i].AppendOutput("\nPushing into open PR...\n")
-					dialog := NewProgressDialog("Pushing to PR", fmt.Sprintf("Branch: %s\n\nPushing commits into open PR...", ws.BranchName), ws.ID)
-					m.panes[i].SetInPaneDialog(&dialog)
+					// Get commit count from PR status if available
+					prStatus := m.panes[i].GetPRStatus()
+					var commitMsg string
+					if prStatus != nil && prStatus.UnpushedCount > 0 {
+						if prStatus.UnpushedCount == 1 {
+							commitMsg = "1 commit"
+						} else {
+							commitMsg = fmt.Sprintf("%d commits", prStatus.UnpushedCount)
+						}
+						m.panes[i].AppendOutput(fmt.Sprintf("\nPushing %s into open PR...\n", commitMsg))
+						dialog := NewProgressDialog("Pushing to PR", fmt.Sprintf("Branch: %s\n\nPushing %s into open PR...", ws.BranchName, commitMsg), ws.ID)
+						m.panes[i].SetInPaneDialog(&dialog)
+					} else {
+						m.panes[i].AppendOutput("\nPushing into open PR...\n")
+						dialog := NewProgressDialog("Pushing to PR", fmt.Sprintf("Branch: %s\n\nPushing commits into open PR...", ws.BranchName), ws.ID)
+						m.panes[i].SetInPaneDialog(&dialog)
+					}
 					return m, PushBranchCmd(ws)
 				case MergeActionFetchRebase:
 					// Fetch main and rebase
@@ -2056,12 +2070,24 @@ Scroll Mode:
 						dialog.SetComplete(fmt.Sprintf("%s Failed\n\n%v", pushType, msg.Error))
 					}
 				} else {
-					m.panes[i].AppendOutput(fmt.Sprintf("%s successful!\n", pushType))
+					// Build message based on commit count
+					var successMsg, dialogMsg string
+					if msg.CommitsPushed == 0 {
+						successMsg = fmt.Sprintf("%s complete - already up to date\n", pushType)
+						dialogMsg = fmt.Sprintf("%s Complete\n\nAlready up to date (nothing to push).\nPress Enter or Esc to close.", pushType)
+					} else if msg.CommitsPushed == 1 {
+						successMsg = fmt.Sprintf("%s successful - 1 commit pushed\n", pushType)
+						dialogMsg = fmt.Sprintf("%s Successful\n\nPushed 1 commit.\nPress Enter or Esc to close.", pushType)
+					} else {
+						successMsg = fmt.Sprintf("%s successful - %d commits pushed\n", pushType, msg.CommitsPushed)
+						dialogMsg = fmt.Sprintf("%s Successful\n\nPushed %d commits.\nPress Enter or Esc to close.", pushType, msg.CommitsPushed)
+					}
+					m.panes[i].AppendOutput(successMsg)
 					// Mark branch as pushed - this enables force push option in merge dialog
 					ws.SetHasBeenPushed(true)
 					// Update in-pane progress dialog if open
 					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
-						dialog.SetComplete(fmt.Sprintf("%s successful!\n\nPress Enter or Esc to close.", pushType))
+						dialog.SetComplete(dialogMsg)
 					}
 				}
 				break

@@ -332,9 +332,10 @@ func TestUncommittedChangesMsg(t *testing.T) {
 
 func TestPushBranchResultMsg(t *testing.T) {
 	tests := []struct {
-		name    string
-		msg     PushBranchResultMsg
-		wantErr bool
+		name              string
+		msg               PushBranchResultMsg
+		wantErr           bool
+		wantCommitsPushed int
 	}{
 		{
 			name: "successful push",
@@ -342,7 +343,8 @@ func TestPushBranchResultMsg(t *testing.T) {
 				WorkstreamID: "ws-1",
 				Error:        nil,
 			},
-			wantErr: false,
+			wantErr:           false,
+			wantCommitsPushed: 0,
 		},
 		{
 			name: "failed push",
@@ -350,7 +352,29 @@ func TestPushBranchResultMsg(t *testing.T) {
 				WorkstreamID: "ws-1",
 				Error:        errors.New("push rejected"),
 			},
-			wantErr: true,
+			wantErr:           true,
+			wantCommitsPushed: 0,
+		},
+		{
+			name: "push with commit count",
+			msg: PushBranchResultMsg{
+				WorkstreamID:  "ws-1",
+				Error:         nil,
+				CommitsPushed: 3,
+			},
+			wantErr:           false,
+			wantCommitsPushed: 3,
+		},
+		{
+			name: "force push with commit count",
+			msg: PushBranchResultMsg{
+				WorkstreamID:  "ws-1",
+				Error:         nil,
+				ForcePush:     true,
+				CommitsPushed: 5,
+			},
+			wantErr:           false,
+			wantCommitsPushed: 5,
 		},
 	}
 
@@ -358,6 +382,9 @@ func TestPushBranchResultMsg(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if (tt.msg.Error != nil) != tt.wantErr {
 				t.Errorf("Error = %v, wantErr = %v", tt.msg.Error, tt.wantErr)
+			}
+			if tt.msg.CommitsPushed != tt.wantCommitsPushed {
+				t.Errorf("CommitsPushed = %d, want = %d", tt.msg.CommitsPushed, tt.wantCommitsPushed)
 			}
 		})
 	}

@@ -1180,9 +1180,10 @@ func ResumeContainerCmd(ws *workstream.Workstream, width, height int) tea.Cmd {
 
 // PushBranchResultMsg is sent when branch push completes.
 type PushBranchResultMsg struct {
-	WorkstreamID string
-	Error        error
-	ForcePush    bool // True if this was a force push
+	WorkstreamID  string
+	Error         error
+	ForcePush     bool // True if this was a force push
+	CommitsPushed int  // Number of commits that were pushed (0 if nothing to push)
 }
 
 // PushBranchCmd returns a command that pushes a branch to origin.
@@ -1198,11 +1199,15 @@ func PushBranchCmd(ws *workstream.Workstream) tea.Cmd {
 		}
 
 		gitRepo := GitClientFactory(worktreePath)
+
+		// Get the unpushed commit count BEFORE pushing so we know how many we pushed
+		unpushedCount, _ := gitRepo.GetUnpushedCommitCount(ctx, ws.BranchName)
+
 		if err := gitRepo.Push(ctx, ws.BranchName); err != nil {
 			return PushBranchResultMsg{WorkstreamID: ws.ID, Error: err}
 		}
 
-		return PushBranchResultMsg{WorkstreamID: ws.ID, Error: nil}
+		return PushBranchResultMsg{WorkstreamID: ws.ID, Error: nil, CommitsPushed: unpushedCount}
 	}
 }
 
@@ -1219,11 +1224,15 @@ func ForcePushBranchCmd(ws *workstream.Workstream) tea.Cmd {
 		}
 
 		gitRepo := GitClientFactory(worktreePath)
+
+		// Get the unpushed commit count BEFORE pushing so we know how many we pushed
+		unpushedCount, _ := gitRepo.GetUnpushedCommitCount(ctx, ws.BranchName)
+
 		if err := gitRepo.ForcePush(ctx, ws.BranchName); err != nil {
 			return PushBranchResultMsg{WorkstreamID: ws.ID, Error: err, ForcePush: true}
 		}
 
-		return PushBranchResultMsg{WorkstreamID: ws.ID, Error: nil, ForcePush: true}
+		return PushBranchResultMsg{WorkstreamID: ws.ID, Error: nil, ForcePush: true, CommitsPushed: unpushedCount}
 	}
 }
 
