@@ -35,18 +35,18 @@ func (s StatusBarModel) Update(msg tea.Msg) (StatusBarModel, tea.Cmd) {
 
 // View renders the status bar
 func (s StatusBarModel) View() string {
-	// Mode indicator
+	// Mode indicator (use centralized colors from styles.go)
 	var modeIndicator string
 	if s.inputMode {
 		inputStyle := lipgloss.NewStyle().
-			Background(lipgloss.Color("#00AA00")).
+			Background(lipgloss.Color(ModeInputBadge)).
 			Foreground(lipgloss.Color("#FFFFFF")).
 			Padding(0, 1).
 			Bold(true)
 		modeIndicator = inputStyle.Render("INPUT")
 	} else {
 		navStyle := lipgloss.NewStyle().
-			Background(lipgloss.Color("#0066CC")).
+			Background(lipgloss.Color(ModeNavBadge)).
 			Foreground(lipgloss.Color("#FFFFFF")).
 			Padding(0, 1).
 			Bold(true)

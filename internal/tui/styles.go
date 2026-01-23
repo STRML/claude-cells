@@ -177,6 +177,30 @@ var (
 	ColorFocus   = lipgloss.Color("#FFFFFF") // White
 )
 
+// Mode colors - unified across top bar, bottom bar, and panes
+// Each mode has a badge color (brighter) and bar color (darker) for title bar contrast
+const (
+	// INPUT mode - cyan
+	ModeInputBadge = "#0891B2" // Bright cyan for badges
+	ModeInputBar   = "#065F73" // Darker cyan for title bar background
+
+	// NAV mode - green
+	ModeNavBadge = "#059669" // Bright green for badges
+	ModeNavBar   = "#034D36" // Darker green for title bar background
+
+	// SCROLL mode - orange
+	ModeScrollBadge = "#D97706" // Bright orange for badges
+	ModeScrollBar   = "#8B4D04" // Darker orange for title bar background
+
+	// DIALOG mode - purple
+	ModeDialogBadge  = "#7C3AED" // Bright purple for badges (focused)
+	ModeDialogDimmed = "#5B3A8C" // Dimmed purple for unfocused dialogs
+	ModeDialogBar    = "#4C1D95" // Darker purple for title bar background
+
+	// Initializing/unfocused - purple (same as dialog for consistency)
+	ModeInitBadge = "#7C3AED" // Purple for initializing state
+)
+
 // Status indicators
 const (
 	IndicatorRunning = "●"
