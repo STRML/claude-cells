@@ -1586,7 +1586,7 @@ func TestCopyUntrackedFilesDialog_View(t *testing.T) {
 }
 
 func TestNewMergeDialog_NoPR(t *testing.T) {
-	d := NewMergeDialog("feature-branch", "ws-123", "1 commit ahead", false, "", nil)
+	d := NewMergeDialog("feature-branch", "ws-123", "1 commit ahead", "", false, "", nil)
 
 	if d.Type != DialogMerge {
 		t.Error("Type should be DialogMerge")
@@ -1608,7 +1608,7 @@ func TestNewMergeDialog_NoPR(t *testing.T) {
 }
 
 func TestNewMergeDialog_WithPR(t *testing.T) {
-	d := NewMergeDialog("feature-branch", "ws-123", "1 commit ahead", true, "https://github.com/foo/bar/pull/1", nil)
+	d := NewMergeDialog("feature-branch", "ws-123", "1 commit ahead", "", true, "https://github.com/foo/bar/pull/1", nil)
 
 	if d.Type != DialogMerge {
 		t.Error("Type should be DialogMerge")
@@ -1640,7 +1640,7 @@ func TestNewMergeDialog_WithPR(t *testing.T) {
 
 func TestMergeDialog_SeparatorSkipped(t *testing.T) {
 	// Create dialog with PR (which has separator)
-	d := NewMergeDialog("feature-branch", "ws-123", "1 commit ahead", true, "https://github.com/foo/bar/pull/1", nil)
+	d := NewMergeDialog("feature-branch", "ws-123", "1 commit ahead", "", true, "https://github.com/foo/bar/pull/1", nil)
 
 	// Find the separator index
 	separatorIdx := -1
@@ -1677,7 +1677,7 @@ func TestMergeDialog_SeparatorSkipped(t *testing.T) {
 }
 
 func TestMergeDialog_SeparatorNotRenderedWithArrow(t *testing.T) {
-	d := NewMergeDialog("feature-branch", "ws-123", "1 commit ahead", true, "https://github.com/foo/bar/pull/1", nil)
+	d := NewMergeDialog("feature-branch", "ws-123", "1 commit ahead", "", true, "https://github.com/foo/bar/pull/1", nil)
 	d.SetSize(60, 20)
 
 	view := d.View()

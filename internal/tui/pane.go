@@ -774,10 +774,24 @@ func (p *PaneModel) SetInputMode(inputMode bool) {
 
 // viewWithInPaneDialog renders the pane with the in-pane dialog filling the content area
 func (p PaneModel) viewWithInPaneDialog() string {
-	const colorPurple = "#A855F7" // Dialog mode border
+	const colorPurple = "#A855F7"    // Dialog mode border (focused)
+	const colorPurpleDim = "#5B3A8C" // Dimmed purple for unfocused dialogs
+
+	// Choose colors based on focus state
+	var borderColor, headerBgColor string
+	var borderStyle lipgloss.Border
+	if p.focused {
+		borderColor = colorPurple
+		headerBgColor = colorPurple
+		borderStyle = lipgloss.ThickBorder()
+	} else {
+		borderColor = colorPurpleDim
+		headerBgColor = colorPurpleDim
+		borderStyle = lipgloss.NormalBorder()
+	}
 
 	// Header with index, status, and branch name (same as normal view)
-	headerBg := lipgloss.Color(colorPurple)
+	headerBg := lipgloss.Color(headerBgColor)
 	indexStyle := lipgloss.NewStyle().
 		Background(headerBg).
 		Foreground(lipgloss.Color("#FFFFFF")).
@@ -791,7 +805,7 @@ func (p PaneModel) viewWithInPaneDialog() string {
 
 	// Mode indicator for dialog
 	modeIndicator := lipgloss.NewStyle().
-		Background(lipgloss.Color(colorPurple)).
+		Background(lipgloss.Color(headerBgColor)).
 		Foreground(lipgloss.Color("#FFFFFF")).
 		Bold(true).
 		Padding(0, 1).
@@ -805,10 +819,10 @@ func (p PaneModel) viewWithInPaneDialog() string {
 	// Combine header and dialog content
 	content := header + "\n\n" + dialogContent
 
-	// Apply border - purple border for dialog mode
+	// Apply border - bright purple when focused, dimmed purple when unfocused
 	style := lipgloss.NewStyle().
-		Border(lipgloss.ThickBorder()).
-		BorderForeground(lipgloss.Color(colorPurple)).
+		Border(borderStyle).
+		BorderForeground(lipgloss.Color(borderColor)).
 		Padding(0, 1). // 1 char padding on left and right for consistency
 		Width(p.width).
 		Height(p.height)

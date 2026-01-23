@@ -1538,3 +1538,60 @@ func TestPaneModel_View_PRStatusIndicator(t *testing.T) {
 		})
 	}
 }
+
+func TestPaneModel_InPaneDialog_FocusedUnfocusedBorders(t *testing.T) {
+	// Test that in-pane dialogs have different visual styles when focused vs unfocused
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24)
+
+	// Set up an in-pane dialog (e.g., a merge dialog)
+	dialog := NewMergeDialog("test-branch", ws.ID, "", "", false, "", nil)
+	pane.SetInPaneDialog(&dialog)
+
+	// Test focused state
+	pane.SetFocused(true)
+	focusedView := pane.View()
+
+	// The focused view should use thick border (which has doubled corners ╔╗╚╝)
+	if !strings.Contains(focusedView, "╔") && !strings.Contains(focusedView, "┏") {
+		t.Error("Focused in-pane dialog should use thick border style")
+	}
+
+	// Test unfocused state
+	pane.SetFocused(false)
+	unfocusedView := pane.View()
+
+	// The unfocused view should use normal border (which has single corners ┌┐└┘)
+	if !strings.Contains(unfocusedView, "┌") && !strings.Contains(unfocusedView, "─") {
+		t.Error("Unfocused in-pane dialog should use normal border style")
+	}
+
+	// The two views should be different (different border styles)
+	if focusedView == unfocusedView {
+		t.Error("Focused and unfocused in-pane dialog views should be different")
+	}
+}
+
+func TestPaneModel_InPaneDialog_BothHaveDialogLabel(t *testing.T) {
+	// Test that both focused and unfocused dialogs show the DIALOG mode indicator
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24)
+
+	dialog := NewProgressDialog("Testing", "Please wait", ws.ID)
+	pane.SetInPaneDialog(&dialog)
+
+	// Both focused and unfocused should show "DIALOG" indicator
+	pane.SetFocused(true)
+	focusedView := pane.View()
+	if !strings.Contains(focusedView, "DIALOG") {
+		t.Error("Focused in-pane dialog should show DIALOG mode indicator")
+	}
+
+	pane.SetFocused(false)
+	unfocusedView := pane.View()
+	if !strings.Contains(unfocusedView, "DIALOG") {
+		t.Error("Unfocused in-pane dialog should show DIALOG mode indicator")
+	}
+}
