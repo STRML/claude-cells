@@ -314,9 +314,9 @@ func NewMergeDialog(branchName, workstreamID, branchInfo, synopsis string, hasBe
 	if prURL != "" {
 		// PR exists - show PR-related tasks first
 		if prStatus != nil && prStatus.UnpushedCount > 0 {
-			menuItems = append(menuItems, fmt.Sprintf("Push to open PR (%d commit(s))", prStatus.UnpushedCount))
+			menuItems = append(menuItems, fmt.Sprintf("Push into open PR (%d commit(s))", prStatus.UnpushedCount))
 		} else {
-			menuItems = append(menuItems, "Push to open PR")
+			menuItems = append(menuItems, "Push into open PR")
 		}
 		// Always show rebase option for PR workflow
 		menuItems = append(menuItems, "Rebase on main (fetch first)")
@@ -861,7 +861,7 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 					action = MergeActionMergeMain
 				case strings.HasPrefix(selectedItem, "Create Pull Request"):
 					action = MergeActionCreatePR
-				case strings.HasPrefix(selectedItem, "Push to open PR"):
+				case strings.HasPrefix(selectedItem, "Push into open PR"):
 					action = MergeActionPushToPR
 				case strings.HasPrefix(selectedItem, "Push branch only"):
 					action = MergeActionPush

@@ -7,6 +7,15 @@
 #
 # Bypass: Create /tmp/.ccells-commit-active to allow commits
 # (used by /ccells-commit skill itself)
+#
+# NOTE: This hook only applies inside ccells containers (IS_SANDBOX=1).
+# When working on the host repo directly, git commit is allowed.
+
+# Only enforce this rule inside ccells containers
+# Containers have IS_SANDBOX=1 set in their environment
+if [ "$IS_SANDBOX" != "1" ]; then
+    exit 0
+fi
 
 # Read JSON input from stdin
 input=$(cat)

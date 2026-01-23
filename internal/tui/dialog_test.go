@@ -1618,8 +1618,8 @@ func TestNewMergeDialog_WithPR(t *testing.T) {
 	if len(d.MenuItems) != 7 {
 		t.Errorf("Should have 7 menu items with PR, got %d", len(d.MenuItems))
 	}
-	if !strings.Contains(d.MenuItems[0], "Push to open PR") {
-		t.Errorf("First item should be Push to open PR, got %s", d.MenuItems[0])
+	if !strings.Contains(d.MenuItems[0], "Push into open PR") {
+		t.Errorf("First item should be Push into open PR, got %s", d.MenuItems[0])
 	}
 	if !strings.Contains(d.MenuItems[1], "Rebase") {
 		t.Errorf("Second item should be Rebase, got %s", d.MenuItems[1])
