@@ -1530,8 +1530,58 @@ type ClaudeUsageMsg struct {
 	Error       error
 }
 
+// usageParseScript is a shell script that parses Claude session JSONL files
+// and sums up token usage. It finds the most recent session file and extracts
+// usage data from .message.usage fields. Uses portable grep/sed/awk (no gawk).
+const usageParseScript = `#!/bin/sh
+SESSION_DIR="$HOME/.claude/projects"
+if [ ! -d "$SESSION_DIR" ]; then
+  echo "No session data"
+  exit 0
+fi
+
+# Find most recently modified .jsonl file across all project dirs
+LATEST=""
+LATEST_TIME=0
+for dir in "$SESSION_DIR"/*/; do
+  for f in "$dir"*.jsonl 2>/dev/null; do
+    [ -f "$f" ] || continue
+    if stat --version 2>/dev/null | grep -q GNU; then
+      MTIME=$(stat -c %Y "$f" 2>/dev/null)
+    else
+      MTIME=$(stat -f %m "$f" 2>/dev/null)
+    fi
+    if [ -n "$MTIME" ] && [ "$MTIME" -gt "$LATEST_TIME" ] 2>/dev/null; then
+      LATEST_TIME=$MTIME
+      LATEST=$f
+    fi
+  done
+done
+
+if [ -z "$LATEST" ]; then
+  echo "No session files"
+  exit 0
+fi
+
+# Parse usage with portable grep/sed/awk (works with busybox)
+input=$(grep -o '"input_tokens":[0-9]*' "$LATEST" 2>/dev/null | sed 's/[^0-9]//g' | awk '{s+=$1} END {print s+0}')
+output=$(grep -o '"output_tokens":[0-9]*' "$LATEST" 2>/dev/null | sed 's/[^0-9]//g' | awk '{s+=$1} END {print s+0}')
+cache_create=$(grep -o '"cache_creation_input_tokens":[0-9]*' "$LATEST" 2>/dev/null | sed 's/[^0-9]//g' | awk '{s+=$1} END {print s+0}')
+cache_read=$(grep -o '"cache_read_input_tokens":[0-9]*' "$LATEST" 2>/dev/null | sed 's/[^0-9]//g' | awk '{s+=$1} END {print s+0}')
+
+total=$((input + output + cache_create))
+printf "Session Tokens\n"
+printf "----------------------\n"
+printf "Input:        %8d\n" "$input"
+printf "Output:       %8d\n" "$output"
+printf "Cache Create: %8d\n" "$cache_create"
+printf "Cache Read:   %8d\n" "$cache_read"
+printf "----------------------\n"
+printf "Total:        %8d\n" "$total"
+`
+
 // FetchClaudeUsageCmd returns a command that fetches Claude usage from a container.
-// It executes `claude -p "/usage"` inside the container.
+// It parses session JSONL files to extract and sum token usage.
 func FetchClaudeUsageCmd(containerID string) tea.Cmd {
 	return func() tea.Msg {
 		if containerID == "" {
@@ -1547,8 +1597,8 @@ func FetchClaudeUsageCmd(containerID string) tea.Cmd {
 		}
 		defer client.Close()
 
-		// Execute claude -p "/usage" in the container
-		usage, err := client.ExecInContainer(ctx, containerID, []string{"claude", "-p", "/usage"})
+		// Execute the usage parsing script in the container
+		usage, err := client.ExecInContainer(ctx, containerID, []string{"sh", "-c", usageParseScript})
 		if err != nil {
 			return ClaudeUsageMsg{ContainerID: containerID, Error: err}
 		}
