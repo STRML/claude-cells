@@ -315,7 +315,7 @@ func TestRenderSyncBadge(t *testing.T) {
 			name:          "conflicted with zero count shows 1",
 			status:        sync.SyncStatusConflicted,
 			conflictCount: 0,
-			contains:      "1 conflicts",
+			contains:      "1 conflict",
 		},
 		{
 			name:     "error status",

@@ -228,7 +228,11 @@ func RenderSyncBadge(status sync.SyncStatus, conflictCount int) string {
 		if count == 0 {
 			count = 1 // At least 1 if status says conflicted
 		}
-		return style.Render(fmt.Sprintf("[⚠ %d conflicts]", count))
+		plural := "conflicts"
+		if count == 1 {
+			plural = "conflict"
+		}
+		return style.Render(fmt.Sprintf("[⚠ %d %s]", count, plural))
 	case sync.SyncStatusError, sync.SyncStatusDisconnected:
 		style := lipgloss.NewStyle().
 			Foreground(lipgloss.Color(ColorPairingConflict)).

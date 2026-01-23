@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1201,7 +1202,12 @@ func PushBranchCmd(ws *workstream.Workstream) tea.Cmd {
 		gitRepo := GitClientFactory(worktreePath)
 
 		// Get the unpushed commit count BEFORE pushing so we know how many we pushed
-		unpushedCount, _ := gitRepo.GetUnpushedCommitCount(ctx, ws.BranchName)
+		// Log error if count fails but proceed with push anyway
+		unpushedCount, err := gitRepo.GetUnpushedCommitCount(ctx, ws.BranchName)
+		if err != nil {
+			log.Printf("Failed to get unpushed commit count for branch %s (workstream %s): %v", ws.BranchName, ws.ID, err)
+			unpushedCount = 0 // Default to 0 so UI isn't misled
+		}
 
 		if err := gitRepo.Push(ctx, ws.BranchName); err != nil {
 			return PushBranchResultMsg{WorkstreamID: ws.ID, Error: err}
@@ -1226,7 +1232,12 @@ func ForcePushBranchCmd(ws *workstream.Workstream) tea.Cmd {
 		gitRepo := GitClientFactory(worktreePath)
 
 		// Get the unpushed commit count BEFORE pushing so we know how many we pushed
-		unpushedCount, _ := gitRepo.GetUnpushedCommitCount(ctx, ws.BranchName)
+		// Log error if count fails but proceed with push anyway
+		unpushedCount, err := gitRepo.GetUnpushedCommitCount(ctx, ws.BranchName)
+		if err != nil {
+			log.Printf("Failed to get unpushed commit count for branch %s (workstream %s): %v", ws.BranchName, ws.ID, err)
+			unpushedCount = 0 // Default to 0 so UI isn't misled
+		}
 
 		if err := gitRepo.ForcePush(ctx, ws.BranchName); err != nil {
 			return PushBranchResultMsg{WorkstreamID: ws.ID, Error: err, ForcePush: true}
