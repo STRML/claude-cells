@@ -69,10 +69,17 @@ func Load() (*GlobalConfig, error) {
 		legacyPath, legacyErr := legacyConfigPath()
 		if legacyErr == nil {
 			legacyData, legacyReadErr := os.ReadFile(legacyPath)
-			if legacyReadErr == nil {
+			if legacyReadErr != nil {
+				// Only log if file exists but can't be read (not found is expected)
+				if !os.IsNotExist(legacyReadErr) {
+					log.Printf("config migration: failed to read legacy %s: %v", legacyPath, legacyReadErr)
+				}
+			} else {
 				// Migrate legacy config
 				var cfg GlobalConfig
-				if jsonErr := json.Unmarshal(legacyData, &cfg); jsonErr == nil {
+				if jsonErr := json.Unmarshal(legacyData, &cfg); jsonErr != nil {
+					log.Printf("config migration: failed to unmarshal legacy config %s: %v", legacyPath, jsonErr)
+				} else {
 					// Write to new location (log errors, will retry on next save)
 					saveData, marshalErr := json.MarshalIndent(&cfg, "", "  ")
 					if marshalErr != nil {
