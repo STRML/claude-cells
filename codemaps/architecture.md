@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Last updated: 2026-01-22 (Updated: PaneModel refactoring)
+Last updated: 2026-01-23 (Updated: cursor position fix)
 
 ## Architecture Assessment: 7.5/10
 
@@ -265,6 +265,12 @@ Panes embed a virtual terminal emulator to properly handle:
 - Scrollback buffer with color preservation
 - Cursor rendering for input feedback
 - Muted colors for unfocused panes
+
+### Cursor Position Calculation
+`GetCursorPosition()` must recalculate viewport offset rather than relying on `p.viewport.YOffset()` because:
+- `View()` uses a **value receiver**, so viewport modifications (like `GotoBottom()`) don't persist
+- `GetCursorPosition()` is called after `View()` renders, reading from the original (unmodified) pane
+- Fix: Calculate viewport offset using same logic as `View()` (assume at-bottom in normal mode)
 
 ### State Persistence
 - `PersistentManager` wraps `Manager` with auto-save

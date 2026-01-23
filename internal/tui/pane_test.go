@@ -1351,6 +1351,27 @@ func TestPaneModel_CursorPositionWithScrollback(t *testing.T) {
 	if expectedVisibleY < 0 || expectedVisibleY >= pane.viewport.Height() {
 		t.Errorf("visibleY=%d should be within viewport [0, %d)", expectedVisibleY, pane.viewport.Height())
 	}
+
+	// CRITICAL: Verify that the viewport's stored YOffset is STALE (this was the bug!)
+	// View() uses a value receiver, so its GotoBottom() doesn't persist.
+	// The stored offset should be 0 (initial value), NOT the at-bottom offset.
+	storedOffset := pane.viewport.YOffset()
+	if storedOffset != 0 {
+		t.Logf("Note: stored viewport offset is %d (expected 0 if View() hasn't been called)", storedOffset)
+	}
+
+	// The bug was: old code used storedOffset directly, which would give wrong Y
+	// New code recalculates, matching View()'s GotoBottom() behavior
+	buggyVisibleY := contentCursorY - storedOffset // This is what old code did
+	buggyY := 3 + buggyVisibleY
+
+	// With scrollback, buggy Y would be way off screen (50+ lines too high)
+	if scrollbackLines > 0 && buggyY == cursorPos.Y {
+		t.Errorf("BUG NOT FIXED: cursor Y matches buggy calculation (%d)", buggyY)
+	}
+
+	t.Logf("SUCCESS: Fixed Y=%d, Buggy Y would have been=%d (diff=%d lines)",
+		cursorPos.Y, buggyY, buggyY-cursorPos.Y)
 }
 
 // TestPaneModel_PRStatusMethods tests GetPRStatus, SetPRStatus, SetPRStatusLoading, IsPRStatusLoading

@@ -1,6 +1,6 @@
 # Data Models and Schemas
 
-Last updated: 2026-01-22 (Updated: orchestrator types)
+Last updated: 2026-01-23 (Updated: cursor position types)
 
 ## Overview
 
@@ -385,6 +385,19 @@ const (
     SummarizePhaseDone
 )
 ```
+
+### Cursor Position
+
+```go
+// tui/pane.go
+type CursorPosition struct {
+    X       int  // X position relative to content area (0-based)
+    Y       int  // Y position relative to content area (0-based)
+    Visible bool // Whether cursor should be visible
+}
+```
+
+**Note:** `GetCursorPosition()` recalculates viewport offset rather than using `p.viewport.YOffset()` because `View()` uses a value receiver, so its viewport modifications don't persist.
 
 ### Layout Types
 
