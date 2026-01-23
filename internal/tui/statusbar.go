@@ -5,6 +5,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"github.com/STRML/claude-cells/internal/sync"
 )
 
 // StatusBarModel represents the bottom status bar
@@ -16,6 +17,11 @@ type StatusBarModel struct {
 	inputMode       bool
 	layoutName      string
 	repoPath        string
+
+	// Enhanced pairing status (Phase 4)
+	syncStatus       sync.SyncStatus
+	pairingStashed   bool
+	pairingConflicts int
 }
 
 // NewStatusBarModel creates a new status bar
@@ -63,11 +69,21 @@ func (s StatusBarModel) View() string {
 		left += layoutStyle.Render(fmt.Sprintf(" [%s]", s.layoutName))
 	}
 
-	// Center section: pairing indicator
+	// Center section: pairing indicator with sync status
 	var center string
 	if s.pairingBranch != "" {
 		pairingStyle := lipgloss.NewStyle().Foreground(ColorPairing).Bold(true)
 		center = fmt.Sprintf(" | %s Pairing: %s", IndicatorPairing, pairingStyle.Render(s.pairingBranch))
+
+		// Sync status indicator (uses helper from styles.go)
+		if syncBadge := RenderSyncBadge(s.syncStatus, s.pairingConflicts); syncBadge != "" {
+			center += " " + syncBadge
+		}
+
+		// Stash indicator
+		if s.pairingStashed {
+			center += " " + RenderStashBadge()
+		}
 	}
 
 	// Right section: action key hints
@@ -118,6 +134,13 @@ func (s *StatusBarModel) SetWorkstreamCount(count int) {
 // SetPairingBranch sets the current pairing branch (empty string if none)
 func (s *StatusBarModel) SetPairingBranch(branch string) {
 	s.pairingBranch = branch
+}
+
+// SetPairingStatus sets the detailed pairing status for display.
+func (s *StatusBarModel) SetPairingStatus(status sync.SyncStatus, stashed bool, conflicts int) {
+	s.syncStatus = status
+	s.pairingStashed = stashed
+	s.pairingConflicts = conflicts
 }
 
 // SetShowHelp toggles help display

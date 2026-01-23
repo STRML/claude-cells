@@ -4,6 +4,8 @@ import (
 	"math"
 	"strings"
 	"testing"
+
+	"github.com/STRML/claude-cells/internal/sync"
 )
 
 func TestStatusStyle(t *testing.T) {
@@ -272,5 +274,88 @@ func TestLerpColor(t *testing.T) {
 				t.Error("LerpColor should return a color")
 			}
 		})
+	}
+}
+
+func TestRenderSyncBadge(t *testing.T) {
+	tests := []struct {
+		name          string
+		status        sync.SyncStatus
+		conflictCount int
+		contains      string
+		isEmpty       bool
+	}{
+		{
+			name:     "syncing status",
+			status:   sync.SyncStatusSyncing,
+			contains: "Syncing",
+		},
+		{
+			name:     "scanning status",
+			status:   sync.SyncStatusScanning,
+			contains: "Syncing",
+		},
+		{
+			name:     "connecting status",
+			status:   sync.SyncStatusConnecting,
+			contains: "Syncing",
+		},
+		{
+			name:     "watching status",
+			status:   sync.SyncStatusWatching,
+			contains: "Synced",
+		},
+		{
+			name:          "conflicted with count",
+			status:        sync.SyncStatusConflicted,
+			conflictCount: 3,
+			contains:      "3 conflicts",
+		},
+		{
+			name:          "conflicted with zero count shows 1",
+			status:        sync.SyncStatusConflicted,
+			conflictCount: 0,
+			contains:      "1 conflicts",
+		},
+		{
+			name:     "error status",
+			status:   sync.SyncStatusError,
+			contains: "Error",
+		},
+		{
+			name:     "disconnected status",
+			status:   sync.SyncStatusDisconnected,
+			contains: "Error",
+		},
+		{
+			name:    "unknown status returns empty",
+			status:  sync.SyncStatusUnknown,
+			isEmpty: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := RenderSyncBadge(tt.status, tt.conflictCount)
+			if tt.isEmpty {
+				if result != "" {
+					t.Errorf("Expected empty string, got %q", result)
+				}
+			} else {
+				if !strings.Contains(result, tt.contains) {
+					t.Errorf("RenderSyncBadge() = %q, should contain %q", result, tt.contains)
+				}
+			}
+		})
+	}
+}
+
+func TestRenderStashBadge(t *testing.T) {
+	result := RenderStashBadge()
+	if !strings.Contains(result, "Stashed") {
+		t.Errorf("RenderStashBadge() = %q, should contain 'Stashed'", result)
+	}
+	if !strings.Contains(result, "📦") {
+		t.Errorf("RenderStashBadge() = %q, should contain 📦 emoji", result)
 	}
 }

@@ -7,7 +7,58 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
+
+// SyncStatus represents the current state of a mutagen sync session.
+type SyncStatus int
+
+const (
+	SyncStatusUnknown SyncStatus = iota
+	SyncStatusDisconnected
+	SyncStatusConnecting
+	SyncStatusWatching   // Idle, watching for changes
+	SyncStatusScanning   // Scanning for changes
+	SyncStatusSyncing    // Staging/transferring files
+	SyncStatusConflicted // Has conflicts
+	SyncStatusError
+)
+
+// String returns a human-readable string for the status.
+func (s SyncStatus) String() string {
+	switch s {
+	case SyncStatusDisconnected:
+		return "Disconnected"
+	case SyncStatusConnecting:
+		return "Connecting"
+	case SyncStatusWatching:
+		return "Watching"
+	case SyncStatusScanning:
+		return "Scanning"
+	case SyncStatusSyncing:
+		return "Syncing"
+	case SyncStatusConflicted:
+		return "Conflicted"
+	case SyncStatusError:
+		return "Error"
+	default:
+		return "Unknown"
+	}
+}
+
+// IsActive returns true if the status indicates active sync work (scanning/syncing).
+func (s SyncStatus) IsActive() bool {
+	return s == SyncStatusScanning || s == SyncStatusSyncing || s == SyncStatusConnecting
+}
+
+// SessionStatus contains detailed status information from a mutagen session.
+type SessionStatus struct {
+	Status     SyncStatus
+	StatusText string
+	Conflicts  []string
+	Problems   []string
+	LastUpdate time.Time
+}
 
 // Mutagen manages file sync sessions with containers.
 type Mutagen struct{}
@@ -104,4 +155,105 @@ func (m *Mutagen) GetConflicts(ctx context.Context, branchName string) ([]string
 		}
 	}
 	return conflicts, nil
+}
+
+// GetSessionStatus returns detailed status information for a sync session.
+// It parses the output of `mutagen sync list --long` to determine the current state.
+func (m *Mutagen) GetSessionStatus(ctx context.Context, branchName string) (*SessionStatus, error) {
+	sessionName := SessionName(branchName)
+
+	cmd := exec.CommandContext(ctx, "mutagen", "sync", "list", "--long", sessionName)
+	output, err := cmd.Output()
+	if err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok && exitErr.ExitCode() == 1 {
+			// Session doesn't exist
+			return &SessionStatus{
+				Status:     SyncStatusDisconnected,
+				StatusText: "Session not found",
+				LastUpdate: time.Now(),
+			}, nil
+		}
+		return &SessionStatus{
+			Status:     SyncStatusError,
+			StatusText: err.Error(),
+			LastUpdate: time.Now(),
+		}, err
+	}
+
+	return parseSessionStatus(string(output)), nil
+}
+
+// parseSessionStatus extracts SyncStatus from mutagen sync list output.
+// Example output lines:
+//
+//	Status: Watching for changes
+//	Status: Scanning (alpha)
+//	Status: Staging files on beta
+//	Status: Reconciling changes
+//	Status: Connecting to beta
+func parseSessionStatus(output string) *SessionStatus {
+	status := &SessionStatus{
+		Status:     SyncStatusUnknown,
+		LastUpdate: time.Now(),
+	}
+
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Parse Status line
+		if strings.HasPrefix(line, "Status:") {
+			statusText := strings.TrimPrefix(line, "Status:")
+			statusText = strings.TrimSpace(statusText)
+			status.StatusText = statusText
+
+			// Determine SyncStatus from status text
+			lower := strings.ToLower(statusText)
+			switch {
+			case strings.Contains(lower, "watching"):
+				status.Status = SyncStatusWatching
+			case strings.Contains(lower, "scanning"):
+				status.Status = SyncStatusScanning
+			case strings.Contains(lower, "staging"),
+				strings.Contains(lower, "reconciling"),
+				strings.Contains(lower, "transferring"),
+				strings.Contains(lower, "applying"):
+				status.Status = SyncStatusSyncing
+			case strings.Contains(lower, "connecting"):
+				status.Status = SyncStatusConnecting
+			case strings.Contains(lower, "disconnected"):
+				status.Status = SyncStatusDisconnected
+			case strings.Contains(lower, "conflict"):
+				status.Status = SyncStatusConflicted
+			case strings.Contains(lower, "error"),
+				strings.Contains(lower, "problem"):
+				status.Status = SyncStatusError
+			}
+		}
+
+		// Parse Conflicts line
+		if strings.HasPrefix(line, "Conflicts:") {
+			conflictsText := strings.TrimPrefix(line, "Conflicts:")
+			conflictsText = strings.TrimSpace(conflictsText)
+			if conflictsText != "" && conflictsText != "0" && conflictsText != "None" {
+				// May contain count or list
+				status.Conflicts = append(status.Conflicts, conflictsText)
+				if status.Status != SyncStatusError {
+					status.Status = SyncStatusConflicted
+				}
+			}
+		}
+
+		// Parse Problems line
+		if strings.HasPrefix(line, "Problems:") || strings.HasPrefix(line, "Problem:") {
+			problemText := strings.TrimPrefix(line, "Problems:")
+			problemText = strings.TrimPrefix(problemText, "Problem:")
+			problemText = strings.TrimSpace(problemText)
+			if problemText != "" && problemText != "None" {
+				status.Problems = append(status.Problems, problemText)
+			}
+		}
+	}
+
+	return status
 }

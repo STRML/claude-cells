@@ -1559,9 +1559,12 @@ func DisablePairingCmd(orchestrator *sync.Pairing, ws *workstream.Workstream) te
 
 // PairingSyncHealthMsg is sent when pairing sync health is checked.
 type PairingSyncHealthMsg struct {
-	Healthy   bool
-	Conflicts []string
-	Error     error
+	Healthy    bool
+	SyncStatus sync.SyncStatus
+	StatusText string
+	Conflicts  []string
+	Problems   []string
+	Error      error
 }
 
 // CheckPairingSyncHealthCmd returns a command that checks pairing sync health.
@@ -1571,12 +1574,15 @@ func CheckPairingSyncHealthCmd(orchestrator *sync.Pairing) tea.Cmd {
 		defer cancel()
 
 		err := orchestrator.CheckSyncHealth(ctx)
-		healthy, conflicts := orchestrator.GetSyncHealth()
+		state := orchestrator.GetState()
 
 		return PairingSyncHealthMsg{
-			Healthy:   healthy,
-			Conflicts: conflicts,
-			Error:     err,
+			Healthy:    state.SyncHealthy,
+			SyncStatus: state.SyncStatus,
+			StatusText: state.SyncStatusText,
+			Conflicts:  state.Conflicts,
+			Problems:   state.Problems,
+			Error:      err,
 		}
 	}
 }
