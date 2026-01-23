@@ -395,3 +395,41 @@ Rules for body:
 
 	return sb.String()
 }
+
+// PRMergeOptions contains options for merging a PR via GitHub.
+type PRMergeOptions struct {
+	Method       string // "squash", "merge", or "rebase"
+	DeleteBranch bool   // Whether to delete the branch after merging
+}
+
+// MergePR merges the current branch's PR via GitHub using gh CLI.
+func (g *GH) MergePR(ctx context.Context, repoPath string, opts *PRMergeOptions) error {
+	args := []string{"pr", "merge"}
+
+	// Add merge method flag
+	switch opts.Method {
+	case "squash":
+		args = append(args, "--squash")
+	case "rebase":
+		args = append(args, "--rebase")
+	case "merge":
+		args = append(args, "--merge")
+	default:
+		// Default to squash if not specified
+		args = append(args, "--squash")
+	}
+
+	// Handle branch deletion
+	if opts.DeleteBranch {
+		args = append(args, "--delete-branch")
+	}
+
+	cmd := exec.CommandContext(ctx, "gh", args...)
+	cmd.Dir = repoPath
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("gh pr merge failed: %w: %s", err, out)
+	}
+
+	return nil
+}

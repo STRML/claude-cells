@@ -1334,6 +1334,42 @@ func MergeBranchWithOptionsCmd(ws *workstream.Workstream, squash bool) tea.Cmd {
 	}
 }
 
+// GHMergePRResultMsg is sent when a GitHub PR merge completes.
+type GHMergePRResultMsg struct {
+	WorkstreamID string
+	MergeMethod  string // "squash", "merge", or "rebase"
+	Error        error
+}
+
+// GHMergePRCmd returns a command that merges a PR via GitHub's gh CLI.
+// mergeMethod should be "squash", "merge", or "rebase".
+func GHMergePRCmd(ws *workstream.Workstream, mergeMethod string) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
+
+		// Use worktree path for git operations
+		worktreePath := resolveWorktreePath(ws)
+		if worktreePath == "" {
+			return GHMergePRResultMsg{WorkstreamID: ws.ID, MergeMethod: mergeMethod, Error: fmt.Errorf("no worktree path")}
+		}
+
+		gh := git.NewGH()
+
+		// Build merge options
+		opts := &git.PRMergeOptions{
+			Method:      mergeMethod,
+			DeleteBranch: false, // Don't delete - let the user decide via destroy dialog
+		}
+
+		if err := gh.MergePR(ctx, worktreePath, opts); err != nil {
+			return GHMergePRResultMsg{WorkstreamID: ws.ID, MergeMethod: mergeMethod, Error: err}
+		}
+
+		return GHMergePRResultMsg{WorkstreamID: ws.ID, MergeMethod: mergeMethod}
+	}
+}
+
 // RebaseBranchMsg is sent when a rebase completes.
 type RebaseBranchMsg struct {
 	WorkstreamID  string

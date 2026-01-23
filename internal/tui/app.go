@@ -1943,6 +1943,21 @@ Scroll Mode:
 					dialog := NewProgressDialog("Rebasing", fmt.Sprintf("Branch: %s\n\nFetching main and rebasing...", ws.BranchName), ws.ID)
 					m.panes[i].SetInPaneDialog(&dialog)
 					return m, FetchRebaseCmd(ws)
+				case MergeActionGHMergeSquash:
+					m.panes[i].AppendOutput("\nMerging PR via GitHub (squash)...\n")
+					dialog := NewProgressDialog("Merging PR", fmt.Sprintf("Branch: %s\n\nMerging PR via GitHub (squash)...", ws.BranchName), ws.ID)
+					m.panes[i].SetInPaneDialog(&dialog)
+					return m, GHMergePRCmd(ws, "squash")
+				case MergeActionGHMergeMerge:
+					m.panes[i].AppendOutput("\nMerging PR via GitHub (merge commit)...\n")
+					dialog := NewProgressDialog("Merging PR", fmt.Sprintf("Branch: %s\n\nMerging PR via GitHub (merge commit)...", ws.BranchName), ws.ID)
+					m.panes[i].SetInPaneDialog(&dialog)
+					return m, GHMergePRCmd(ws, "merge")
+				case MergeActionGHMergeRebase:
+					m.panes[i].AppendOutput("\nMerging PR via GitHub (rebase)...\n")
+					dialog := NewProgressDialog("Merging PR", fmt.Sprintf("Branch: %s\n\nMerging PR via GitHub (rebase)...", ws.BranchName), ws.ID)
+					m.panes[i].SetInPaneDialog(&dialog)
+					return m, GHMergePRCmd(ws, "rebase")
 				}
 				break
 			}
@@ -2101,6 +2116,31 @@ Scroll Mode:
 					// Notify Claude Code about the merge (don't press Enter - avoids submitting Claude's pending input)
 					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ Branch '%s' merged into main", ws.BranchName), false); err != nil {
 						LogWarn("Failed to notify Claude about merge for %s (pane %d): %v", ws.BranchName, i, err)
+					}
+					// Show post-merge destroy dialog in pane
+					dialog := NewPostMergeDestroyDialog(ws.BranchName, ws.ID)
+					m.panes[i].SetInPaneDialog(&dialog)
+				}
+				break
+			}
+		}
+		return m, nil
+
+	case GHMergePRResultMsg:
+		for i := range m.panes {
+			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				ws := m.panes[i].Workstream()
+				if msg.Error != nil {
+					m.panes[i].AppendOutput(fmt.Sprintf("GitHub PR merge failed: %v\n", msg.Error))
+					// Update in-pane progress dialog if open
+					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
+						dialog.SetComplete(fmt.Sprintf("PR Merge Failed\n\n%v", msg.Error))
+					}
+				} else {
+					m.panes[i].AppendOutput(fmt.Sprintf("PR merged via GitHub (%s) successfully!\n", msg.MergeMethod))
+					// Notify Claude Code about the merge (don't press Enter - avoids submitting Claude's pending input)
+					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ PR merged via GitHub (%s)", msg.MergeMethod), false); err != nil {
+						LogWarn("Failed to notify Claude about PR merge for %s (pane %d): %v", ws.BranchName, i, err)
 					}
 					// Show post-merge destroy dialog in pane
 					dialog := NewPostMergeDestroyDialog(ws.BranchName, ws.ID)
