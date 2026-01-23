@@ -1539,6 +1539,7 @@ func TestPaneModel_View_PRStatusIndicator(t *testing.T) {
 	}
 }
 
+
 func TestPaneModel_InPaneDialog_FocusedUnfocusedBorders(t *testing.T) {
 	// Test that in-pane dialogs have different visual styles when focused vs unfocused
 	ws := workstream.New("test")
