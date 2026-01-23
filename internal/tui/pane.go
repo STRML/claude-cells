@@ -20,6 +20,10 @@ import (
 // 5 minutes allows time for image builds and Claude Code installation
 const initTimeout = 5 * time.Minute
 
+// resizeSettleTime is how long to wait after resize before auto-scrolling.
+// This prevents scroll oscillation as the terminal redraws.
+const resizeSettleTime = 500 * time.Millisecond
+
 // PaneModel represents a single workstream pane
 type PaneModel struct {
 	workstream      *workstream.Workstream
@@ -444,7 +448,6 @@ func (p PaneModel) View() string {
 	// Restore scroll position or go to bottom
 	// After a resize, give the terminal time to settle before auto-scrolling,
 	// to prevent rapid scroll oscillation as the terminal redraws
-	const resizeSettleTime = 500 * time.Millisecond
 	isSettling := !p.resizeTime.IsZero() && time.Since(p.resizeTime) < resizeSettleTime
 
 	if p.scrollMode {
@@ -1496,16 +1499,27 @@ func (p *PaneModel) GetCursorPosition() CursorPosition {
 	// Calculate viewport Y offset using the same logic as View().
 	// IMPORTANT: View() uses a value receiver, so its viewport modifications don't persist.
 	// We must recalculate the offset here to match what View() used when rendering.
+	//
+	// View() logic:
+	//   if scrollMode       -> SetYOffset(yOffset)     // keep stored offset
+	//   else if isSettling  -> SetYOffset(yOffset)     // keep stored offset
+	//   else if wasAtBottom -> GotoBottom()            // go to bottom
+	//   else                -> (no change)             // keep stored offset
+	//
+	// The stored values (YOffset, AtBottom) reflect state BEFORE View() called SetContent().
 	viewportHeight := p.viewport.Height()
 	totalContentLines := scrollbackLines + vtermRows
 
+	isSettling := !p.resizeTime.IsZero() && time.Since(p.resizeTime) < resizeSettleTime
+	wasAtBottom := p.viewport.AtBottom()
+	storedYOffset := p.viewport.YOffset()
+
 	var viewportYOffset int
-	if p.scrollMode {
-		// In scroll mode - use the stored offset
-		viewportYOffset = p.viewport.YOffset()
+	if p.scrollMode || isSettling || !wasAtBottom {
+		// These cases all use the stored offset
+		viewportYOffset = storedYOffset
 	} else {
-		// Normal mode - viewport follows output and stays at bottom
-		// This matches View()'s GotoBottom() behavior when wasAtBottom is true
+		// wasAtBottom && !scrollMode && !isSettling: viewport follows output to bottom
 		viewportYOffset = totalContentLines - viewportHeight
 		if viewportYOffset < 0 {
 			viewportYOffset = 0

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/STRML/claude-cells/internal/git"
@@ -1282,9 +1283,7 @@ func TestPaneModel_CursorVisibleAfterVtermHidesCursor(t *testing.T) {
 }
 
 // TestPaneModel_CursorPositionWithScrollback verifies that cursor position is
-// calculated correctly when there's scrollback content.
-// This tests the fix for a bug where GetCursorPosition() used stale viewport
-// offset because View() uses a value receiver and its viewport changes don't persist.
+// calculated correctly when there's scrollback content and viewport is at bottom.
 func TestPaneModel_CursorPositionWithScrollback(t *testing.T) {
 	ws := workstream.New("test")
 	pane := NewPaneModel(ws)
@@ -1296,13 +1295,16 @@ func TestPaneModel_CursorPositionWithScrollback(t *testing.T) {
 	pane.SetPTY(mockPTY)
 
 	// Write lots of lines to create scrollback (lines scroll off top of vterm)
-	// With vterm height of 18, writing 50+ lines will create scrollback
 	for i := 0; i < 50; i++ {
 		pane.WritePTYOutput([]byte(fmt.Sprintf("line %d\r\n", i)))
 	}
 
 	// Write final prompt - cursor will be here
 	pane.WritePTYOutput([]byte("$ "))
+
+	// Call View() once to set up viewport state (simulates normal render cycle)
+	// This sets wasAtBottom state that GetCursorPosition relies on
+	_ = pane.View()
 
 	// Enter input mode
 	pane.SetInputMode(true)
@@ -1319,13 +1321,9 @@ func TestPaneModel_CursorPositionWithScrollback(t *testing.T) {
 	_, vtermRows := pane.vterm.Size()
 	scrollbackLines := len(pane.scrollback)
 
-	// The cursor Y should be relative to where it appears in the rendered viewport,
-	// not some stale offset. With scrollback, the viewport should be showing the
-	// bottom (vterm area), so the cursor Y should be reasonable.
+	// When wasAtBottom is true, cursor Y should be near viewport bottom
 	// Y = 3 (border + header + blank) + visibleY
-	// In normal mode (not scroll mode), viewport is at bottom
-
-	// Expected Y calculation (matching GetCursorPosition logic):
+	// In wasAtBottom mode, viewport is at bottom so cursor should be visible
 	totalContentLines := scrollbackLines + vtermRows
 	expectedViewportOffset := totalContentLines - pane.viewport.Height()
 	if expectedViewportOffset < 0 {
@@ -1346,32 +1344,252 @@ func TestPaneModel_CursorPositionWithScrollback(t *testing.T) {
 		t.Errorf("Cursor X = %d, expected %d", cursorPos.X, expectedX)
 	}
 
-	// Key validation: cursor.Y should be small (prompt is near bottom of vterm)
-	// and visibleY should also be small (cursor visible in viewport)
-	if expectedVisibleY < 0 || expectedVisibleY >= pane.viewport.Height() {
-		t.Errorf("visibleY=%d should be within viewport [0, %d)", expectedVisibleY, pane.viewport.Height())
+	t.Logf("SUCCESS: Cursor at Y=%d with scrollback=%d lines", cursorPos.Y, scrollbackLines)
+}
+
+// TestPaneModel_CursorPositionDuringResizeSettling verifies that cursor position
+// uses stored offset during the 500ms resize settling period.
+func TestPaneModel_CursorPositionDuringResizeSettling(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24) // viewport height = 18
+	pane.SetFocused(true)
+
+	mockPTY := &PTYSession{workstreamID: "test"}
+	pane.SetPTY(mockPTY)
+
+	// Write some content (enough for scrollback)
+	for i := 0; i < 30; i++ {
+		pane.WritePTYOutput([]byte(fmt.Sprintf("line %d\r\n", i)))
+	}
+	pane.WritePTYOutput([]byte("$ "))
+
+	// Call View() to establish viewport state at bottom
+	_ = pane.View()
+
+	// Enter input mode and get cursor position BEFORE resize
+	pane.SetInputMode(true)
+	cursorBeforeResize := pane.GetCursorPosition()
+	if !cursorBeforeResize.Visible {
+		t.Fatal("Cursor should be visible before resize")
 	}
 
-	// CRITICAL: Verify that the viewport's stored YOffset is STALE (this was the bug!)
-	// View() uses a value receiver, so its GotoBottom() doesn't persist.
-	// The stored offset should be 0 (initial value), NOT the at-bottom offset.
-	storedOffset := pane.viewport.YOffset()
-	if storedOffset != 0 {
-		t.Logf("Note: stored viewport offset is %d (expected 0 if View() hasn't been called)", storedOffset)
+	// Capture stored offset before resize
+	storedOffsetBeforeResize := pane.viewport.YOffset()
+
+	// Simulate resize (this sets resizeTime, triggering settling period)
+	pane.SetSize(80, 20) // viewport height = 14
+
+	// Verify we're in settling period
+	if pane.resizeTime.IsZero() {
+		t.Fatal("resizeTime should be set after SetSize")
 	}
 
-	// The bug was: old code used storedOffset directly, which would give wrong Y
-	// New code recalculates, matching View()'s GotoBottom() behavior
-	buggyVisibleY := contentCursorY - storedOffset // This is what old code did
-	buggyY := 3 + buggyVisibleY
+	// Get cursor position during settling period
+	cursorDuringSettling := pane.GetCursorPosition()
 
-	// With scrollback, buggy Y would be way off screen (50+ lines too high)
-	if scrollbackLines > 0 && buggyY == cursorPos.Y {
-		t.Errorf("BUG NOT FIXED: cursor Y matches buggy calculation (%d)", buggyY)
+	// During settling, GetCursorPosition should use stored offset (same as before resize)
+	// The cursor Y should be calculated based on the stored offset, not recalculated for bottom
+	cursor := pane.vterm.Cursor()
+	scrollbackLines := len(pane.scrollback)
+	contentCursorY := scrollbackLines + cursor.Y
+
+	// Expected Y during settling: uses stored offset from before resize
+	expectedVisibleY := contentCursorY - storedOffsetBeforeResize
+	expectedY := 3 + expectedVisibleY
+
+	// If cursor is within the NEW viewport height, it should be visible
+	newViewportHeight := pane.viewport.Height() // 14 after resize
+	if expectedVisibleY >= 0 && expectedVisibleY < newViewportHeight {
+		if !cursorDuringSettling.Visible {
+			t.Errorf("Cursor should be visible during settling (visibleY=%d within viewport height=%d)",
+				expectedVisibleY, newViewportHeight)
+		}
+		if cursorDuringSettling.Y != expectedY {
+			t.Errorf("Cursor Y during settling = %d, expected %d (using stored offset %d)",
+				cursorDuringSettling.Y, expectedY, storedOffsetBeforeResize)
+		}
+	} else {
+		// Cursor scrolled out of view due to resize - this is valid
+		if cursorDuringSettling.Visible {
+			t.Errorf("Cursor should NOT be visible during settling (visibleY=%d outside viewport height=%d)",
+				expectedVisibleY, newViewportHeight)
+		}
 	}
 
-	t.Logf("SUCCESS: Fixed Y=%d, Buggy Y would have been=%d (diff=%d lines)",
-		cursorPos.Y, buggyY, buggyY-cursorPos.Y)
+	t.Logf("SUCCESS: Cursor position during settling uses stored offset (%d)", storedOffsetBeforeResize)
+}
+
+// TestPaneModel_CursorPositionNotAtBottom verifies that cursor position uses
+// stored offset when viewport is not at bottom (user scrolled up).
+func TestPaneModel_CursorPositionNotAtBottom(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24) // viewport height = 18
+	pane.SetFocused(true)
+
+	mockPTY := &PTYSession{workstreamID: "test"}
+	pane.SetPTY(mockPTY)
+
+	// Write lots of content to enable scrolling
+	for i := 0; i < 50; i++ {
+		pane.WritePTYOutput([]byte(fmt.Sprintf("line %d\r\n", i)))
+	}
+	pane.WritePTYOutput([]byte("$ "))
+
+	// Call View() to establish viewport state at bottom
+	_ = pane.View()
+
+	// Enter scroll mode and scroll to top using public APIs
+	pane.EnterScrollMode()
+	pane.viewport.GotoTop()
+
+	// Enter input mode
+	pane.SetInputMode(true)
+
+	// Verify cursor is far below viewport when scrolled to top
+	cursor := pane.vterm.Cursor()
+	scrollbackLines := len(pane.scrollback)
+	contentCursorY := scrollbackLines + cursor.Y
+	viewportHeight := pane.viewport.Height()
+
+	// With viewport at offset 0 and cursor at bottom of 50+ lines of content,
+	// the cursor should be well outside the visible viewport
+	if contentCursorY < viewportHeight {
+		t.Fatalf("Test setup error: cursor at Y=%d should be beyond viewport height=%d",
+			contentCursorY, viewportHeight)
+	}
+
+	// Get cursor position
+	cursorPos := pane.GetCursorPosition()
+
+	// Cursor MUST be invisible - it's scrolled out of view
+	if cursorPos.Visible {
+		t.Errorf("Cursor should NOT be visible when viewport scrolled to top (cursor at content Y=%d, viewport showing Y=0 to %d)",
+			contentCursorY, viewportHeight-1)
+	}
+}
+
+// TestPaneModel_CursorPositionSmallContent verifies cursor positioning when
+// viewport is larger than content (tests the viewportYOffset < 0 guard).
+func TestPaneModel_CursorPositionSmallContent(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	// Start with small size so vterm is small
+	pane.SetSize(80, 16) // viewport height = 10, vterm = 10
+	pane.SetFocused(true)
+
+	mockPTY := &PTYSession{workstreamID: "test"}
+	pane.SetPTY(mockPTY)
+
+	// Write minimal content - just a prompt
+	pane.WritePTYOutput([]byte("$ "))
+
+	// Get vterm size BEFORE enlarging viewport
+	_, vtermRows := pane.vterm.Size()
+	scrollbackLines := len(pane.scrollback)
+	totalContentLines := scrollbackLines + vtermRows
+
+	// Direct viewport manipulation is necessary here because SetSize() keeps
+	// vterm and viewport in sync, making it impossible to test the edge case
+	// where viewport is larger than content through public APIs alone.
+	// This exercises the viewportYOffset < 0 guard in GetCursorPosition.
+	pane.viewport.SetHeight(totalContentLines + 10)
+	viewportHeight := pane.viewport.Height()
+
+	// Verify content is now smaller than viewport
+	if totalContentLines >= viewportHeight {
+		t.Fatalf("Test setup error: content (%d) should be < viewport (%d)",
+			totalContentLines, viewportHeight)
+	}
+
+	// Call View() to establish viewport state
+	_ = pane.View()
+
+	// Enter input mode
+	pane.SetInputMode(true)
+
+	// This exercises the viewportYOffset < 0 guard in GetCursorPosition
+	// (totalContentLines - viewportHeight would be negative without the guard)
+	cursorPos := pane.GetCursorPosition()
+
+	// Cursor should be visible near the top of the viewport
+	if !cursorPos.Visible {
+		t.Fatal("Cursor should be visible with small content")
+	}
+
+	// With small content and viewport at "bottom" (which is actually showing everything),
+	// cursor Y should be reasonable (not negative, within expected range)
+	cursor := pane.vterm.Cursor()
+	expectedY := 3 + scrollbackLines + cursor.Y // 3 = border + header + blank
+	if cursorPos.Y != expectedY {
+		t.Errorf("Cursor Y = %d, expected %d (scrollback=%d, cursor.Y=%d)",
+			cursorPos.Y, expectedY, scrollbackLines, cursor.Y)
+	}
+
+	// Y should be small since content is small
+	if cursorPos.Y > viewportHeight {
+		t.Errorf("Cursor Y = %d exceeds viewport height %d", cursorPos.Y, viewportHeight)
+	}
+}
+
+// TestPaneModel_CursorPositionAfterSettlingExpires verifies cursor positioning
+// after the 500ms resize settling period expires.
+func TestPaneModel_CursorPositionAfterSettlingExpires(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+	pane.SetSize(80, 24)
+	pane.SetFocused(true)
+
+	mockPTY := &PTYSession{workstreamID: "test"}
+	pane.SetPTY(mockPTY)
+
+	// Write content
+	for i := 0; i < 30; i++ {
+		pane.WritePTYOutput([]byte(fmt.Sprintf("line %d\r\n", i)))
+	}
+	pane.WritePTYOutput([]byte("$ "))
+
+	// Call View() to establish viewport state
+	_ = pane.View()
+
+	// Simulate resize
+	pane.SetSize(80, 20)
+
+	// Manually set resizeTime to the past (settling period + buffer has elapsed)
+	// Use resizeSettleTime constant to stay aligned if the value changes
+	pane.resizeTime = time.Now().Add(-(resizeSettleTime + 100*time.Millisecond))
+
+	// Enter input mode
+	pane.SetInputMode(true)
+
+	// Get cursor position - settling period has expired
+	cursorPos := pane.GetCursorPosition()
+
+	// After settling expires and wasAtBottom is true, cursor should use
+	// the go-to-bottom calculation, not the stored offset
+	cursor := pane.vterm.Cursor()
+	_, vtermRows := pane.vterm.Size()
+	scrollbackLines := len(pane.scrollback)
+	totalContentLines := scrollbackLines + vtermRows
+	viewportHeight := pane.viewport.Height()
+
+	// Calculate expected position using go-to-bottom logic
+	expectedViewportOffset := totalContentLines - viewportHeight
+	if expectedViewportOffset < 0 {
+		expectedViewportOffset = 0
+	}
+	contentCursorY := scrollbackLines + cursor.Y
+	expectedVisibleY := contentCursorY - expectedViewportOffset
+	expectedY := 3 + expectedVisibleY
+
+	if !cursorPos.Visible {
+		t.Fatal("Cursor should be visible after settling expires (wasAtBottom=true)")
+	}
+
+	if cursorPos.Y != expectedY {
+		t.Errorf("Cursor Y = %d, expected %d after settling expires", cursorPos.Y, expectedY)
+	}
 }
 
 // TestPaneModel_PRStatusMethods tests GetPRStatus, SetPRStatus, SetPRStatusLoading, IsPRStatusLoading
