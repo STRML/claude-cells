@@ -403,11 +403,20 @@ func TestExtractCLIResult_InvalidJSON(t *testing.T) {
 }
 
 func TestExtractCLIResult_WrongType(t *testing.T) {
-	input := `{"type":"error","result":"some error","is_error":true}`
+	input := `{"type":"other","result":"some value","is_error":false}`
 	result := extractCLIResult(input)
-	// type is "error" not "result", so returns original
+	// type is "other" not "result", so returns original
 	if result != input {
 		t.Errorf("Expected original input for wrong type, got %q", result)
+	}
+}
+
+func TestExtractCLIResult_ErrorEnvelope(t *testing.T) {
+	input := `{"type":"result","result":"error details","is_error":true}`
+	result := extractCLIResult(input)
+	// is_error=true means we return original so callers can detect the error
+	if result != input {
+		t.Errorf("Expected original input for error envelope, got %q", result)
 	}
 }
 

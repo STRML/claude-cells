@@ -41,10 +41,16 @@ type cliEnvelope struct {
 // extractCLIResult extracts the actual result from Claude CLI's JSON envelope.
 // When using --output-format json, the CLI wraps responses in an envelope like:
 // {"type":"result","result":"actual content here",...}
+// If the envelope indicates an error (IsError=true), returns original output
+// so callers can detect and handle the error.
 func extractCLIResult(output string) string {
 	var envelope cliEnvelope
 	if err := json.Unmarshal([]byte(output), &envelope); err != nil {
 		// Not a CLI envelope, return as-is
+		return output
+	}
+	// Error envelopes should be returned as-is so callers can detect them
+	if envelope.IsError {
 		return output
 	}
 	if envelope.Type == "result" {
