@@ -360,8 +360,8 @@ func TestCLIResponseProcessing(t *testing.T) {
 		shouldParse   bool
 	}{
 		{
-			name: "real CLI envelope with markdown-wrapped JSON",
-			cliOutput: `{"type":"result","subtype":"success","result":"` + "```json\\n{\\\"title\\\":\\\"Add user authentication\\\",\\\"body\\\":\\\"## Summary\\\\n- Added login feature\\\"}\\n```" + `"}`,
+			name:          "real CLI envelope with markdown-wrapped JSON",
+			cliOutput:     `{"type":"result","subtype":"success","result":"` + "```json\\n{\\\"title\\\":\\\"Add user authentication\\\",\\\"body\\\":\\\"## Summary\\\\n- Added login feature\\\"}\\n```" + `"}`,
 			expectedTitle: "Add user authentication",
 			expectedBody:  "## Summary\n- Added login feature",
 			shouldParse:   true,
