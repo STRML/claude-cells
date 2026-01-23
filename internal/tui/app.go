@@ -97,6 +97,8 @@ type AppModel struct {
 	keyboardEnhanced bool // True if terminal supports enhanced keyboard (shift+enter, etc.)
 	// Orchestrator for workstream lifecycle operations
 	orchestrator *orchestrator.Orchestrator
+	// Synopsis display toggle
+	synopsisHidden bool // True to hide synopsis in pane headers
 }
 
 const tmuxPrefixTimeout = 2 * time.Second
@@ -955,7 +957,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					logContent = "(No output captured yet)"
 				}
 
-				dialog := NewLogDialog(ws.BranchName, logContent)
+				dialog := NewLogDialog(ws.BranchName, ws.GetSynopsis(), logContent)
 				dialog.SetSize(m.width-10, m.height-6)
 				m.dialog = &dialog
 			}
@@ -966,6 +968,21 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.setLayout(m.layout.Next())
 			m.updateLayout()
 			m.toast = fmt.Sprintf("Layout: %s", m.layout.String())
+			m.toastExpiry = time.Now().Add(toastDuration)
+			return m, nil
+
+		case "y":
+			// Toggle synopsis visibility in pane headers
+			m.synopsisHidden = !m.synopsisHidden
+			// Propagate to all panes
+			for i := range m.panes {
+				m.panes[i].SetSynopsisHidden(m.synopsisHidden)
+			}
+			if m.synopsisHidden {
+				m.toast = "Synopsis: hidden"
+			} else {
+				m.toast = "Synopsis: visible"
+			}
 			m.toastExpiry = time.Now().Add(toastDuration)
 			return m, nil
 
@@ -1073,12 +1090,22 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 
-		case "r":
-			// Resource usage dialog
+		case "u":
+			// Usage dialog (resource usage + Claude usage)
 			dialog := NewResourceUsageDialog(false) // Start with project view
 			dialog.SetSize(65, 30)                  // Taller to accommodate disk usage section
 			m.dialog = &dialog
-			return m, FetchResourceStatsCmd(false, m.getContainerIDs())
+			// Fetch both resource stats and Claude usage for focused pane
+			var cmds []tea.Cmd
+			cmds = append(cmds, FetchResourceStatsCmd(false, m.getContainerIDs()))
+			// Fetch Claude usage from focused container
+			if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
+				ws := m.panes[m.focusedPane].Workstream()
+				if ws.ContainerID != "" {
+					cmds = append(cmds, FetchClaudeUsageCmd(ws.ContainerID))
+				}
+			}
+			return m, tea.Batch(cmds...)
 
 		case "s":
 			// Settings dialog - first get container count
@@ -1111,7 +1138,8 @@ Navigation Mode:
   d           Destroy workstream
   m           Merge/PR options
   p           Toggle pairing mode
-  r           Resource usage (CPU/memory)
+  u           Usage (CPU/memory/tokens)
+  y           Toggle synopsis display
   s           Settings
   l           Show logs
   e           Export logs to file
@@ -1143,7 +1171,7 @@ Input Mode:
 Scroll Mode:
   PgUp/PgDn   Continue scrolling
   Esc         Exit scroll mode (return to live)`, versionInfo, commitHash)
-			dialog := NewLogDialog("Help", helpText)
+			dialog := NewLogDialog("Help", "", helpText)
 			dialog.SetSize(60, 40)
 			m.dialog = &dialog
 			return m, nil
@@ -1436,6 +1464,20 @@ Scroll Mode:
 		}
 		return m, nil
 
+	case SynopsisGeneratedMsg:
+		// Synopsis generated after session ends
+		for i := range m.panes {
+			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				ws := m.panes[i].Workstream()
+				if msg.Error == nil && msg.Synopsis != "" {
+					ws.SetSynopsis(msg.Synopsis)
+					m.manager.UpdateWorkstream(ws.ID)
+				}
+				break
+			}
+		}
+		return m, nil
+
 	case UncommittedChangesMsg:
 		// Result of checking for uncommitted changes before merge
 		for i := range m.panes {
@@ -1443,7 +1485,7 @@ Scroll Mode:
 				ws := m.panes[i].Workstream()
 				if msg.Error != nil {
 					// Error checking - just show merge dialog anyway
-					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo, ws.GetHasBeenPushed(), ws.PRURL, m.panes[i].GetPRStatus())
+					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo, ws.GetSynopsis(), ws.GetHasBeenPushed(), ws.PRURL, m.panes[i].GetPRStatus())
 					m.panes[i].SetInPaneDialog(&dialog)
 				} else if msg.HasChanges {
 					// Has uncommitted changes - ask if user wants to commit first
@@ -1451,7 +1493,7 @@ Scroll Mode:
 					m.panes[i].SetInPaneDialog(&dialog)
 				} else {
 					// No uncommitted changes - show merge dialog directly
-					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo, ws.GetHasBeenPushed(), ws.PRURL, m.panes[i].GetPRStatus())
+					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo, ws.GetSynopsis(), ws.GetHasBeenPushed(), ws.PRURL, m.panes[i].GetPRStatus())
 					m.panes[i].SetInPaneDialog(&dialog)
 				}
 				break
@@ -1480,7 +1522,7 @@ Scroll Mode:
 					// Don't show merge dialog yet - user can press 'm' again after commit
 				case CommitBeforeMergeNo:
 					// Continue to merge dialog without committing (in-pane)
-					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo, ws.GetHasBeenPushed(), ws.PRURL, m.panes[i].GetPRStatus())
+					dialog := NewMergeDialog(ws.BranchName, ws.ID, msg.BranchInfo, ws.GetSynopsis(), ws.GetHasBeenPushed(), ws.PRURL, m.panes[i].GetPRStatus())
 					m.panes[i].SetInPaneDialog(&dialog)
 				}
 				break
@@ -1697,11 +1739,14 @@ Scroll Mode:
 				} else {
 					m.panes[i].AppendOutput("\nSession ended.\n")
 				}
+				// Generate synopsis after session ends
+				var cmds []tea.Cmd
+				cmds = append(cmds, GenerateSynopsisCmd(ws))
 				// Start fade animation if needed
 				if m.panes[i].IsFading() {
-					return m, fadeTickCmd()
+					cmds = append(cmds, fadeTickCmd())
 				}
-				break
+				return m, tea.Batch(cmds...)
 			}
 		}
 		return m, nil
@@ -1761,7 +1806,7 @@ Scroll Mode:
 			}
 			// Extract branch name from existing title (strip "Logs: " prefix)
 			branchName := strings.TrimPrefix(m.dialog.Title, "Logs: ")
-			dialog := NewLogDialog(branchName, logContent)
+			dialog := NewLogDialog(branchName, "", logContent) // No synopsis for container logs
 			dialog.SetSize(m.width-10, m.height-6)
 			m.dialog = &dialog
 			return m, nil
@@ -2175,6 +2220,15 @@ Scroll Mode:
 		}
 		return m, nil
 
+	case ClaudeUsageMsg:
+		// Update resource dialog with Claude usage
+		if m.dialog != nil && m.dialog.Type == DialogResourceUsage {
+			if msg.Error == nil && msg.Usage != "" {
+				m.dialog.SetClaudeUsage(msg.Usage)
+			}
+		}
+		return m, nil
+
 	case PromptMsg:
 		// Handle prompt from pane
 		for i := range m.panes {
@@ -2214,6 +2268,7 @@ Scroll Mode:
 			ws.ContainerID = saved.ContainerID
 			ws.CreatedAt = saved.CreatedAt
 			ws.Title = saved.Title                     // Restore generated title
+			ws.Synopsis = saved.Synopsis               // Restore synopsis
 			ws.ClaudeSessionID = saved.ClaudeSessionID // Restore session ID for --resume
 			ws.WasInterrupted = saved.WasInterrupted   // Restore interrupted state for auto-continue
 			ws.HasBeenPushed = saved.HasBeenPushed     // Restore push status

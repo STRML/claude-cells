@@ -62,6 +62,7 @@ type DialogModel struct {
 	isGlobalView bool   // True for global (all ccells), false for project only
 	statsLoading bool   // True while fetching stats
 	statsError   string // Error message if stats fetch failed
+	claudeUsage  string // Claude token usage information
 }
 
 // NewDestroyDialog creates a destroy confirmation dialog
@@ -247,9 +248,14 @@ func NewBranchConflictDialog(branchName, workstreamID, branchInfo string) Dialog
 }
 
 // NewMergeDialog creates a merge/PR menu dialog
-func NewMergeDialog(branchName, workstreamID, branchInfo string, hasBeenPushed bool, prURL string, prStatus *git.PRStatusInfo) DialogModel {
+func NewMergeDialog(branchName, workstreamID, branchInfo, synopsis string, hasBeenPushed bool, prURL string, prStatus *git.PRStatusInfo) DialogModel {
 	var body strings.Builder
 	body.WriteString(fmt.Sprintf("Branch: %s\n", branchName))
+
+	// Show synopsis at the top if available
+	if synopsis != "" {
+		body.WriteString(fmt.Sprintf("Status: %s\n", synopsis))
+	}
 
 	if prURL != "" {
 		body.WriteString(fmt.Sprintf("PR: %s\n", prURL))
@@ -641,9 +647,18 @@ func NewResourceUsageDialog(isGlobal bool) DialogModel {
 }
 
 // NewLogDialog creates a log viewer dialog with scrollable content
-func NewLogDialog(branchName string, logContent string) DialogModel {
+func NewLogDialog(branchName, synopsis, logContent string) DialogModel {
+	// Build body with synopsis header if available
+	var body strings.Builder
+	if synopsis != "" {
+		body.WriteString(fmt.Sprintf("Status: %s\n\n", synopsis))
+		body.WriteString("─────────────────────────────────────\n\n")
+	}
+	body.WriteString(logContent)
+	fullContent := body.String()
+
 	// Calculate scroll max based on content lines
-	lines := strings.Split(logContent, "\n")
+	lines := strings.Split(fullContent, "\n")
 	scrollMax := 0
 	if len(lines) > 20 { // Assume 20 visible lines
 		scrollMax = len(lines) - 20
@@ -652,7 +667,7 @@ func NewLogDialog(branchName string, logContent string) DialogModel {
 	return DialogModel{
 		Type:      DialogLog,
 		Title:     fmt.Sprintf("Logs: %s", branchName),
-		Body:      logContent,
+		Body:      fullContent,
 		scrollMax: scrollMax,
 	}
 }
@@ -691,6 +706,11 @@ func (d *DialogModel) SetStatsError(err string) {
 	d.Body = "Error: " + err
 	d.statsLoading = false
 	d.statsError = err
+}
+
+// SetClaudeUsage updates the resource dialog with Claude token usage
+func (d *DialogModel) SetClaudeUsage(usage string) {
+	d.claudeUsage = usage
 }
 
 // IsGlobalView returns whether the dialog shows global (all ccells) or project stats
@@ -1092,6 +1112,15 @@ func (d DialogModel) View() string {
 
 		// Body contains the stats table (or loading/error message)
 		content.WriteString(d.Body)
+
+		// Add Claude usage section if available
+		if d.claudeUsage != "" {
+			content.WriteString("\n\n")
+			content.WriteString("Claude Usage (focused pane)\n")
+			content.WriteString(strings.Repeat("─", 56))
+			content.WriteString("\n")
+			content.WriteString(d.claudeUsage)
+		}
 		content.WriteString("\n\n")
 
 		// Footer hints

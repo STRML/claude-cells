@@ -61,6 +61,9 @@ type Workstream struct {
 
 	// Auto-continue support
 	WasInterrupted bool // True if Claude was actively working when session ended
+
+	// Synopsis - brief description of what was accomplished
+	Synopsis string // Generated after session ends to summarize work done
 }
 
 // New creates a new workstream from a prompt.
@@ -234,4 +237,18 @@ func (w *Workstream) GetPRInfo() (int, string) {
 	w.mu.RLock()
 	defer w.mu.RUnlock()
 	return w.PRNumber, w.PRURL
+}
+
+// SetSynopsis sets the synopsis (brief description of work done).
+func (w *Workstream) SetSynopsis(synopsis string) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	w.Synopsis = synopsis
+}
+
+// GetSynopsis returns the synopsis (thread-safe).
+func (w *Workstream) GetSynopsis() string {
+	w.mu.RLock()
+	defer w.mu.RUnlock()
+	return w.Synopsis
 }

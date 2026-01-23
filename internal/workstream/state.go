@@ -82,7 +82,8 @@ type SavedWorkstream struct {
 	ID              string    `json:"id"`
 	BranchName      string    `json:"branch_name"`
 	Prompt          string    `json:"prompt"`
-	Title           string    `json:"title,omitempty"` // Short summary title
+	Title           string    `json:"title,omitempty"`    // Short summary title
+	Synopsis        string    `json:"synopsis,omitempty"` // Brief description of work accomplished
 	ContainerID     string    `json:"container_id"`
 	ClaudeSessionID string    `json:"claude_session_id,omitempty"` // Claude Code session ID for --resume
 	WasInterrupted  bool      `json:"was_interrupted,omitempty"`   // True if Claude was working when session ended
@@ -152,6 +153,7 @@ func SaveStateWithRepoInfo(dir string, workstreams []*Workstream, focusedIndex i
 			BranchName:      ws.BranchName,
 			Prompt:          ws.Prompt,
 			Title:           ws.Title,
+			Synopsis:        ws.Synopsis,
 			ContainerID:     ws.ContainerID,
 			ClaudeSessionID: ws.ClaudeSessionID,
 			WasInterrupted:  ws.WasInterrupted,
