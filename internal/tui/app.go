@@ -60,33 +60,33 @@ func dragModifier() string {
 
 // AppModel is the main application model
 type AppModel struct {
-	ctx            context.Context // App-level context for cancellation
-	manager        *workstream.PersistentManager
-	panes          []PaneModel
-	focusedPane    int
-	nextPaneIndex  int        // Counter for assigning permanent pane indices
-	layout         LayoutType // Current pane layout
-	statusBar      StatusBarModel
-	dialog         *DialogModel
-	width          int
-	height         int
-	quitting       bool
-	inputMode      bool                 // True when input is being routed to focused pane
-	mouseEnabled   bool                 // True when mouse capture is enabled (click-to-focus)
-	dragHintShown  bool                 // True if we've shown the drag modifier hint this session
-	ctrlVHintShown bool                 // True if we've shown the Ctrl+V paste hint this session
-	lastEscapeTime      time.Time // For double-escape quit detection in nav mode
-	inputModeEscCount   int       // Count of ESC presses in input mode (for hint)
-	inputModeEscTime    time.Time // Time of first ESC press in current window
-	inputModeEscHinted  bool      // True if we've shown the ESC hint this session
-	toast               string    // Temporary notification message
-	toastExpiry         time.Time // When toast should disappear
-	workingDir     string               // Current working directory (git repo path)
-	stateDir       string               // State file directory (~/.claude-cells/state/<repo-id>/)
-	repoInfo       *workstream.RepoInfo // Repo metadata for state file
-	resuming       bool                 // True if resuming from saved state
-	tmuxPrefix     bool                 // True after ctrl-b is pressed (tmux-style prefix)
-	tmuxPrefixTime time.Time            // When prefix was pressed
+	ctx                context.Context // App-level context for cancellation
+	manager            *workstream.PersistentManager
+	panes              []PaneModel
+	focusedPane        int
+	nextPaneIndex      int        // Counter for assigning permanent pane indices
+	layout             LayoutType // Current pane layout
+	statusBar          StatusBarModel
+	dialog             *DialogModel
+	width              int
+	height             int
+	quitting           bool
+	inputMode          bool                 // True when input is being routed to focused pane
+	mouseEnabled       bool                 // True when mouse capture is enabled (click-to-focus)
+	dragHintShown      bool                 // True if we've shown the drag modifier hint this session
+	ctrlVHintShown     bool                 // True if we've shown the Ctrl+V paste hint this session
+	lastEscapeTime     time.Time            // For double-escape quit detection in nav mode
+	inputModeEscCount  int                  // Count of ESC presses in input mode (for hint)
+	inputModeEscTime   time.Time            // Time of first ESC press in current window
+	inputModeEscHinted bool                 // True if we've shown the ESC hint this session
+	toast              string               // Temporary notification message
+	toastExpiry        time.Time            // When toast should disappear
+	workingDir         string               // Current working directory (git repo path)
+	stateDir           string               // State file directory (~/.claude-cells/state/<repo-id>/)
+	repoInfo           *workstream.RepoInfo // Repo metadata for state file
+	resuming           bool                 // True if resuming from saved state
+	tmuxPrefix         bool                 // True after ctrl-b is pressed (tmux-style prefix)
+	tmuxPrefixTime     time.Time            // When prefix was pressed
 	// Pairing mode orchestrator (single source of truth)
 	pairingOrchestrator *sync.Pairing
 	// Pane swap state
@@ -1905,8 +1905,8 @@ Scroll Mode:
 					}
 				} else {
 					m.panes[i].AppendOutput("Rebase successful!\n")
-					// Notify Claude about the rebase
-					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ Rebased '%s' onto main", ws.BranchName), true); err != nil {
+					// Notify Claude about the rebase (don't press Enter - avoids submitting Claude's pending input)
+					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ Rebased '%s' onto main", ws.BranchName), false); err != nil {
 						LogWarn("Failed to notify Claude about rebase for %s (pane %d): %v", ws.BranchName, i, err)
 					}
 					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
@@ -1937,8 +1937,8 @@ Scroll Mode:
 					// Mark branch as pushed - this enables force push option in merge dialog
 					// and signals to Claude not to use commit amend
 					ws.SetHasBeenPushed(true)
-					// Notify Claude Code about the push (uses Kitty Enter)
-					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ Branch '%s' pushed to remote (avoid using commit --amend)", ws.BranchName), true); err != nil {
+					// Notify Claude Code about the push (don't press Enter - avoids submitting Claude's pending input)
+					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ Branch '%s' pushed to remote (avoid using commit --amend)", ws.BranchName), false); err != nil {
 						LogWarn("Failed to notify Claude about push for %s (pane %d): %v", ws.BranchName, i, err)
 					}
 					// Update in-pane progress dialog if open
@@ -1966,8 +1966,8 @@ Scroll Mode:
 					// Store PR info and mark as pushed (PR creation pushes the branch)
 					ws.SetPRInfo(msg.PRNumber, msg.PRURL)
 					ws.SetHasBeenPushed(true)
-					// Notify Claude about the PR and amend prevention
-					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ PR #%d created: %s\n\nIMPORTANT: Never use `git commit --amend` after a PR has been pushed. Create new commits instead.", msg.PRNumber, msg.PRURL), true); err != nil {
+					// Notify Claude about the PR and amend prevention (don't press Enter - avoids submitting Claude's pending input)
+					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ PR #%d created: %s (avoid using commit --amend)", msg.PRNumber, msg.PRURL), false); err != nil {
 						LogWarn("Failed to notify Claude about PR creation for %s (pane %d): %v", ws.BranchName, i, err)
 					}
 					// Update in-pane progress dialog if open
@@ -2000,8 +2000,8 @@ Scroll Mode:
 					}
 				} else {
 					m.panes[i].AppendOutput("Branch merged into main successfully!\n")
-					// Notify Claude Code about the merge (uses Kitty Enter)
-					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ Branch '%s' merged into main", ws.BranchName), true); err != nil {
+					// Notify Claude Code about the merge (don't press Enter - avoids submitting Claude's pending input)
+					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ Branch '%s' merged into main", ws.BranchName), false); err != nil {
 						LogWarn("Failed to notify Claude about merge for %s (pane %d): %v", ws.BranchName, i, err)
 					}
 					// Show post-merge destroy dialog in pane
@@ -2019,9 +2019,9 @@ Scroll Mode:
 				ws := m.panes[i].Workstream()
 				if msg.Error != nil {
 					if len(msg.ConflictFiles) > 0 {
-						// Rebase has conflicts - notify Claude to resolve (uses Kitty Enter)
+						// Rebase has conflicts - notify Claude to resolve (don't press Enter - avoids submitting Claude's pending input)
 						m.panes[i].AppendOutput("Rebase has conflicts. Resolve in container and run 'git rebase --continue'\n")
-						if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ⚠ Rebase has conflicts. Please resolve the following files and run 'git rebase --continue': %s", formatFileList(msg.ConflictFiles)), true); err != nil {
+						if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ⚠ Rebase has conflicts. Please resolve the following files and run 'git rebase --continue': %s", formatFileList(msg.ConflictFiles)), false); err != nil {
 							LogWarn("Failed to notify Claude about rebase conflicts for %s (pane %d): %v", ws.BranchName, i, err)
 						}
 					} else {
@@ -2029,8 +2029,8 @@ Scroll Mode:
 					}
 				} else {
 					m.panes[i].AppendOutput("Rebase successful! Branch is now up to date with main.\n")
-					// Notify Claude Code about the rebase (uses Kitty Enter)
-					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ Branch '%s' rebased onto main. You can now try merging again.", ws.BranchName), true); err != nil {
+					// Notify Claude Code about the rebase (don't press Enter - avoids submitting Claude's pending input)
+					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ Branch '%s' rebased onto main. You can now try merging again.", ws.BranchName), false); err != nil {
 						LogWarn("Failed to notify Claude about rebase for %s (pane %d): %v", ws.BranchName, i, err)
 					}
 					m.toast = "Rebase successful"
