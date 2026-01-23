@@ -1872,7 +1872,9 @@ Scroll Mode:
 				} else {
 					m.panes[i].AppendOutput("Rebase successful!\n")
 					// Notify Claude about the rebase
-					_ = m.panes[i].SendToPTYWithEnter(fmt.Sprintf("[ccells] ✓ Rebased '%s' onto main", ws.BranchName))
+					if err := m.panes[i].SendToPTYWithEnter(fmt.Sprintf("[ccells] ✓ Rebased '%s' onto main", ws.BranchName)); err != nil {
+						LogWarn("Failed to notify Claude about rebase for %s (pane %d): %v", ws.BranchName, i, err)
+					}
 					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
 						dialog.SetComplete("Rebase successful!\n\nBranch is now up-to-date with main.\nPress Enter or Esc to close.")
 					}
@@ -1902,7 +1904,9 @@ Scroll Mode:
 					// and signals to Claude not to use commit amend
 					ws.SetHasBeenPushed(true)
 					// Notify Claude Code about the push (uses Kitty Enter)
-					_ = m.panes[i].SendToPTYWithEnter(fmt.Sprintf("[ccells] ✓ Branch '%s' pushed to remote (avoid using commit --amend)", ws.BranchName))
+					if err := m.panes[i].SendToPTYWithEnter(fmt.Sprintf("[ccells] ✓ Branch '%s' pushed to remote (avoid using commit --amend)", ws.BranchName)); err != nil {
+						LogWarn("Failed to notify Claude about push for %s (pane %d): %v", ws.BranchName, i, err)
+					}
 					// Update in-pane progress dialog if open
 					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
 						dialog.SetComplete(fmt.Sprintf("%s successful!\n\nPress Enter or Esc to close.", pushType))
@@ -1929,7 +1933,9 @@ Scroll Mode:
 					ws.SetPRInfo(msg.PRNumber, msg.PRURL)
 					ws.SetHasBeenPushed(true)
 					// Notify Claude about the PR and amend prevention
-					_ = m.panes[i].SendToPTYWithEnter(fmt.Sprintf("[ccells] ✓ PR #%d created: %s\n\nIMPORTANT: Never use `git commit --amend` after a PR has been pushed. Create new commits instead.", msg.PRNumber, msg.PRURL))
+					if err := m.panes[i].SendToPTYWithEnter(fmt.Sprintf("[ccells] ✓ PR #%d created: %s\n\nIMPORTANT: Never use `git commit --amend` after a PR has been pushed. Create new commits instead.", msg.PRNumber, msg.PRURL)); err != nil {
+						LogWarn("Failed to notify Claude about PR creation for %s (pane %d): %v", ws.BranchName, i, err)
+					}
 					// Update in-pane progress dialog if open
 					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
 						dialog.SetComplete(fmt.Sprintf("Pull Request Created!\n\nPR #%d: %s\n\nPress Enter or Esc to close.", msg.PRNumber, msg.PRURL))

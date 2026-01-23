@@ -202,13 +202,17 @@ func (g *GH) GetPRStatus(ctx context.Context, repoPath string, gitClient GitClie
 	if gitClient != nil && resp.HeadRefName != "" {
 		// Get unpushed commits: commits in local branch but not in origin/<branch>
 		unpushed, err := gitClient.GetUnpushedCommitCount(ctx, resp.HeadRefName)
-		if err == nil {
+		if err != nil {
+			log.Printf("GetPRStatus: failed to get unpushed commit count for %s: %v", resp.HeadRefName, err)
+		} else {
 			status.UnpushedCount = unpushed
 		}
 
 		// Get diverged commits: commits in origin/<branch> but not in local
 		diverged, err := gitClient.GetDivergedCommitCount(ctx, resp.HeadRefName)
-		if err == nil {
+		if err != nil {
+			log.Printf("GetPRStatus: failed to get diverged commit count for %s: %v", resp.HeadRefName, err)
+		} else {
 			status.DivergedCount = diverged
 			status.IsDiverged = diverged > 0
 		}

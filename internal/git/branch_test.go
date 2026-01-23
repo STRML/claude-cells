@@ -1305,3 +1305,104 @@ func TestGit_MergeBranchWithOptions_AutoRebaseWithRealConflicts(t *testing.T) {
 		t.Errorf("Repository should be clean after aborted merge, got: %s", string(out))
 	}
 }
+
+func TestIsValidBranchName(t *testing.T) {
+	tests := []struct {
+		name     string
+		branch   string
+		expected bool
+	}{
+		{"valid simple name", "feature", true},
+		{"valid with slash", "feature/add-auth", true},
+		{"valid ccells prefix", "ccells/my-feature", true},
+		{"valid with numbers", "fix-123", true},
+		{"empty string", "", false},
+		{"starts with dash", "-all", false},
+		{"starts with double dash", "--all", false},
+		{"contains double dot", "feature..main", false},
+		{"contains null byte", "feature\x00name", false},
+		{"contains newline", "feature\nname", false},
+		{"contains tab", "feature\tname", false},
+		{"contains carriage return", "feature\rname", false},
+		{"starts with dash option-like", "-f", false},
+		{"valid with dash in middle", "my-feature", true},
+		{"valid with underscore", "my_feature", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isValidBranchName(tt.branch)
+			if result != tt.expected {
+				t.Errorf("isValidBranchName(%q) = %v, want %v", tt.branch, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestGetUnpushedCommitCount_Validation(t *testing.T) {
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// Test that invalid branch names are rejected
+	tests := []struct {
+		name    string
+		branch  string
+		wantErr bool
+	}{
+		{"valid branch", "feature/test", false}, // Will fail because no remote, but validation passes
+		{"starts with dash", "--all", true},
+		{"empty", "", true},
+		{"contains double dot", "bad..branch", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := g.GetUnpushedCommitCount(ctx, tt.branch)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error for branch %q, got nil", tt.branch)
+				} else if !strings.Contains(err.Error(), "invalid branch name") {
+					t.Errorf("expected 'invalid branch name' error, got: %v", err)
+				}
+			}
+			// For valid branches, we don't check the error because the remote doesn't exist
+		})
+	}
+}
+
+func TestGetDivergedCommitCount_Validation(t *testing.T) {
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// Test that invalid branch names are rejected
+	tests := []struct {
+		name    string
+		branch  string
+		wantErr bool
+	}{
+		{"valid branch", "feature/test", false}, // Will fail because no remote, but validation passes
+		{"starts with dash", "--all", true},
+		{"empty", "", true},
+		{"contains double dot", "bad..branch", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := g.GetDivergedCommitCount(ctx, tt.branch)
+			if tt.wantErr {
+				if err == nil {
+					t.Errorf("expected error for branch %q, got nil", tt.branch)
+				} else if !strings.Contains(err.Error(), "invalid branch name") {
+					t.Errorf("expected 'invalid branch name' error, got: %v", err)
+				}
+			}
+			// For valid branches, we don't check the error because the remote doesn't exist
+		})
+	}
+}
