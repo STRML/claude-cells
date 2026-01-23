@@ -50,6 +50,11 @@ func ctrlKey(r rune) tea.KeyPressMsg {
 	return tea.KeyPressMsg{Code: r, Mod: tea.ModCtrl}
 }
 
+// shiftKey creates a KeyPressMsg for Shift+key combinations
+func shiftKey(code rune) tea.KeyPressMsg {
+	return tea.KeyPressMsg{Code: code, Mod: tea.ModShift}
+}
+
 func TestNewAppModel(t *testing.T) {
 	app := NewAppModel(context.Background())
 
@@ -695,7 +700,7 @@ func TestAppModel_InputMode(t *testing.T) {
 		t.Error("InputMode() should return true")
 	}
 
-	// Press Escape twice to exit input mode (single escape sends to pane, double exits)
+	// Single escape should be forwarded to pane (for vim mode, etc.), not exit input mode
 	msg = specialKey(tea.KeyEscape)
 	model, _ = app.Update(msg)
 	app = model.(AppModel)
@@ -704,13 +709,13 @@ func TestAppModel_InputMode(t *testing.T) {
 		t.Error("Single escape should NOT exit input mode (it sends to pane)")
 	}
 
-	// Second escape within timeout should exit input mode
-	msg = specialKey(tea.KeyEscape)
+	// Shift+Esc should exit input mode
+	msg = shiftKey(tea.KeyEscape)
 	model, _ = app.Update(msg)
 	app = model.(AppModel)
 
 	if app.inputMode {
-		t.Error("Double escape should exit input mode")
+		t.Error("Shift+Escape should exit input mode")
 	}
 }
 
@@ -1138,7 +1143,7 @@ func TestAppModel_InputMode_CtrlC(t *testing.T) {
 	}
 }
 
-func TestAppModel_InputMode_EscapeToNavMode(t *testing.T) {
+func TestAppModel_InputMode_ShiftEscapeToNavMode(t *testing.T) {
 	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
@@ -1150,24 +1155,24 @@ func TestAppModel_InputMode_EscapeToNavMode(t *testing.T) {
 	// Enter input mode
 	app.inputMode = true
 
-	// Single escape should NOT exit (sends to pane)
+	// Single escape should NOT exit (it's forwarded to pane for vim mode, etc.)
 	model, _ = app.Update(specialKey(tea.KeyEscape))
 	app = model.(AppModel)
 
 	if !app.inputMode {
-		t.Error("Single escape should NOT exit input mode (it sends to pane)")
+		t.Error("Single escape should NOT exit input mode (it forwards to pane)")
 	}
 
-	// Double escape should exit to nav mode
-	model, _ = app.Update(specialKey(tea.KeyEscape))
+	// Shift+Escape should exit to nav mode
+	model, _ = app.Update(shiftKey(tea.KeyEscape))
 	app = model.(AppModel)
 
 	if app.inputMode {
-		t.Error("Double escape should exit input mode")
+		t.Error("Shift+Escape should exit input mode")
 	}
 }
 
-func TestAppModel_InputMode_DeferredEscape(t *testing.T) {
+func TestAppModel_InputMode_CtrlBEscapeToNavMode(t *testing.T) {
 	app := NewAppModel(context.Background())
 	app.width = 100
 	app.height = 40
@@ -1179,93 +1184,19 @@ func TestAppModel_InputMode_DeferredEscape(t *testing.T) {
 	// Enter input mode
 	app.inputMode = true
 
-	// Single escape should set pendingEscape but NOT immediately send to pane
-	model, cmd := app.Update(specialKey(tea.KeyEscape))
+	// Ctrl+B followed by Escape should exit to nav mode (tmux-style)
+	model, _ = app.Update(ctrlKey('b'))
 	app = model.(AppModel)
 
 	if !app.inputMode {
-		t.Error("Single escape should NOT exit input mode")
+		t.Error("Ctrl+B alone should not exit input mode")
 	}
-	if !app.pendingEscape {
-		t.Error("Single escape should set pendingEscape")
-	}
-	if cmd == nil {
-		t.Error("Single escape should return a timer command")
-	}
-
-	// Double escape should exit WITHOUT triggering the deferred escape
-	model, _ = app.Update(specialKey(tea.KeyEscape))
-	app = model.(AppModel)
-
-	if app.inputMode {
-		t.Error("Double escape should exit input mode")
-	}
-	if app.pendingEscape {
-		t.Error("Double escape should clear pendingEscape")
-	}
-}
-
-func TestAppModel_InputMode_EscapeTimeoutSendsToPane(t *testing.T) {
-	app := NewAppModel(context.Background())
-	app.width = 100
-	app.height = 40
-
-	// Create a workstream
-	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
-	app = model.(AppModel)
-
-	// Enter input mode
-	app.inputMode = true
-
-	// Single escape - sets pending
-	escTime := time.Now()
-	app.lastEscapeTime = escTime
-	app.pendingEscape = true
-
-	// Simulate timeout firing with matching timestamp
-	model, _ = app.Update(escapeTimeoutMsg{timestamp: escTime})
-	app = model.(AppModel)
-
-	// Should still be in input mode (Esc was forwarded to pane, not used for exit)
-	if !app.inputMode {
-		t.Error("Escape timeout should NOT exit input mode")
-	}
-	if app.pendingEscape {
-		t.Error("Escape timeout should clear pendingEscape")
-	}
-}
-
-func TestAppModel_InputMode_EscapeTimeoutIgnoredAfterDoubleTap(t *testing.T) {
-	app := NewAppModel(context.Background())
-	app.width = 100
-	app.height = 40
-
-	// Create a workstream
-	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test"})
-	app = model.(AppModel)
-
-	// Enter input mode
-	app.inputMode = true
-
-	// Press Esc twice to exit (double tap)
-	model, _ = app.Update(specialKey(tea.KeyEscape))
-	app = model.(AppModel)
-	escTime := app.lastEscapeTime
 
 	model, _ = app.Update(specialKey(tea.KeyEscape))
 	app = model.(AppModel)
 
 	if app.inputMode {
-		t.Error("Double escape should exit input mode")
-	}
-
-	// Now simulate the stale timeout arriving (should be ignored)
-	model, _ = app.Update(escapeTimeoutMsg{timestamp: escTime})
-	app = model.(AppModel)
-
-	// Should still be in nav mode (timeout was ignored)
-	if app.inputMode {
-		t.Error("Stale escape timeout should not re-enter input mode")
+		t.Error("Ctrl+B Escape should exit input mode")
 	}
 }
 
@@ -1482,10 +1413,8 @@ func TestAppModel_InputMode_WithDialog(t *testing.T) {
 	// Enter input mode
 	app.inputMode = true
 
-	// Open dialog (press escape twice to exit input mode, then 'n')
-	model, _ = app.Update(specialKey(tea.KeyEscape))
-	app = model.(AppModel)
-	model, _ = app.Update(specialKey(tea.KeyEscape)) // Second escape to exit
+	// Exit input mode with Shift+Esc, then open dialog with 'n'
+	model, _ = app.Update(shiftKey(tea.KeyEscape))
 	app = model.(AppModel)
 	model, _ = app.Update(keyPress('n'))
 	app = model.(AppModel)

@@ -876,7 +876,7 @@ func TestCCellsCommitCommand(t *testing.T) {
 	}{
 		{"Claude Cells", "should mention Claude Cells"},
 		{"commit all changes", "should instruct to commit changes"},
-		{"Esc Esc m", "should mention the merge shortcut"},
+		{"Shift+Esc", "should mention the Shift+Esc shortcut"},
 		{"merge dialog", "should mention the merge dialog"},
 	}
 
