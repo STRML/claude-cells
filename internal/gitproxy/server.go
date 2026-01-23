@@ -17,13 +17,18 @@ import (
 // The callback should update the workstream state with the PR info.
 type PRUpdateCallback func(workstreamID string, prNumber int, prURL string)
 
+// PushCompleteCallback is called when a git push completes successfully.
+// This can be used to trigger PR status refresh.
+type PushCompleteCallback func(workstreamID string)
+
 // Server manages git proxy sockets for all containers.
 type Server struct {
-	mu          sync.RWMutex
-	sockets     map[string]*socketHandler // containerID -> handler
-	executor    *Executor
-	onPRCreated PRUpdateCallback
-	baseDir     string // Base directory for sockets
+	mu             sync.RWMutex
+	sockets        map[string]*socketHandler // containerID -> handler
+	executor       *Executor
+	onPRCreated    PRUpdateCallback
+	onPushComplete PushCompleteCallback
+	baseDir        string // Base directory for sockets
 }
 
 // NewServer creates a new git proxy server.
@@ -34,6 +39,13 @@ func NewServer(onPRCreated PRUpdateCallback) *Server {
 		onPRCreated: onPRCreated,
 		baseDir:     "/tmp/ccells/gitproxy",
 	}
+}
+
+// SetPushCompleteCallback sets the callback for successful push events.
+func (s *Server) SetPushCompleteCallback(cb PushCompleteCallback) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onPushComplete = cb
 }
 
 // socketHandler manages a single socket for a container.
@@ -251,6 +263,18 @@ func (h *socketHandler) handleConnection(conn net.Conn) {
 			h.server.onPRCreated(wsID, prResult.Number, prResult.URL)
 		}
 		log.Printf("[gitproxy] PR #%d created for %s", prResult.Number, ws.Branch)
+	}
+
+	// If push completed successfully, trigger PR status refresh
+	if req.Operation == OpGitPush && resp.ExitCode == 0 {
+		h.server.mu.RLock()
+		cb := h.server.onPushComplete
+		h.server.mu.RUnlock()
+
+		if cb != nil {
+			cb(ws.ID)
+			log.Printf("[gitproxy] Push complete for %s, triggering PR status refresh", ws.Branch)
+		}
 	}
 
 	// Send response

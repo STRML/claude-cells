@@ -250,6 +250,10 @@ func main() {
 		// server's internal workstream tracking (UpdateWorkstream method).
 		tui.LogDebug("PR #%d created for workstream %s: %s", prNumber, workstreamID, prURL)
 	})
+	// Set callback to refresh PR status after successful push
+	gitProxyServer.SetPushCompleteCallback(func(workstreamID string) {
+		tui.RequestPRStatusRefresh(workstreamID)
+	})
 	defer gitProxyServer.Shutdown()
 	tui.SetGitProxyServer(gitProxyServer)
 

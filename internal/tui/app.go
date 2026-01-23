@@ -25,6 +25,7 @@ const escapeTimeout = 300 * time.Millisecond
 const toastDuration = 2 * time.Second
 
 const pairingHealthCheckInterval = 30 * time.Second
+const prStatusPollInterval = 5 * time.Minute
 
 // formatFileList formats a list of files for display
 func formatFileList(files []string) string {
@@ -242,6 +243,9 @@ type keyboardCheckMsg struct{}
 // pairingHealthTickMsg is sent periodically to check pairing sync health
 type pairingHealthTickMsg struct{}
 
+// prStatusPollTickMsg is sent periodically to refresh PR status for all workstreams
+type prStatusPollTickMsg struct{}
+
 // autoContinueMsg is sent when we need to auto-continue an interrupted session
 type autoContinueMsg struct {
 	WorkstreamID string
@@ -251,6 +255,13 @@ type autoContinueMsg struct {
 func pairingHealthTickCmd() tea.Cmd {
 	return tea.Tick(pairingHealthCheckInterval, func(t time.Time) tea.Msg {
 		return pairingHealthTickMsg{}
+	})
+}
+
+// prStatusPollTickCmd returns a command that sends a PR status poll tick after a delay
+func prStatusPollTickCmd() tea.Cmd {
+	return tea.Tick(prStatusPollInterval, func(t time.Time) tea.Msg {
+		return prStatusPollTickMsg{}
 	})
 }
 
@@ -374,11 +385,13 @@ func (m AppModel) Init() tea.Cmd {
 	// Try to load saved state on startup
 	// Cursor visibility is now controlled via View().Cursor
 	// Also schedule a check for Kitty keyboard protocol support
+	// Start periodic PR status polling (self-restarts on tick)
 	return tea.Batch(
 		LoadStateCmd(m.stateDir),
 		tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
 			return keyboardCheckMsg{}
 		}),
+		prStatusPollTickCmd(),
 	)
 }
 
@@ -1980,6 +1993,21 @@ Scroll Mode:
 		}
 		return m, nil
 
+	case PRStatusRefreshRequestMsg:
+		// Request to refresh PR status (e.g., after a push via git proxy)
+		for i := range m.panes {
+			if m.panes[i].Workstream().ID == msg.WorkstreamID {
+				ws := m.panes[i].Workstream()
+				if ws.PRNumber > 0 {
+					LogDebug("Refreshing PR status for workstream %s after push", msg.WorkstreamID)
+					m.panes[i].SetPRStatusLoading(true)
+					return m, FetchPRStatusCmd(ws)
+				}
+				break
+			}
+		}
+		return m, nil
+
 	case FetchRebaseResultMsg:
 		// Handle fetch-and-rebase result
 		for i := range m.panes {
@@ -2443,6 +2471,22 @@ Scroll Mode:
 			m.toastExpiry = time.Now().Add(toastDuration * 2)
 		}
 		return m, nil
+
+	case prStatusPollTickMsg:
+		// Periodic PR status refresh for all workstreams with PRs
+		var cmds []tea.Cmd
+		cmds = append(cmds, prStatusPollTickCmd()) // Schedule next tick
+		for i := range m.panes {
+			ws := m.panes[i].Workstream()
+			if ws.PRNumber > 0 {
+				m.panes[i].SetPRStatusLoading(true)
+				cmds = append(cmds, FetchPRStatusCmd(ws))
+			}
+		}
+		if len(cmds) > 1 {
+			LogDebug("Polling PR status for %d workstreams", len(cmds)-1)
+		}
+		return m, tea.Batch(cmds...)
 	}
 
 	return m, nil

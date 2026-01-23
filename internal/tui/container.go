@@ -64,6 +64,19 @@ func GetGitProxyServer() *gitproxy.Server {
 	return services.gitProxy
 }
 
+// PRStatusRefreshRequestMsg requests a PR status refresh for a workstream.
+// This is used by the git proxy to trigger a refresh after a successful push.
+type PRStatusRefreshRequestMsg struct {
+	WorkstreamID string
+}
+
+// RequestPRStatusRefresh sends a message to request PR status refresh for a workstream.
+// This can be called from any goroutine (e.g., git proxy callback).
+// Returns true if the message was sent, false if the program is not available.
+func RequestPRStatusRefresh(workstreamID string) bool {
+	return sendMsg(PRStatusRefreshRequestMsg{WorkstreamID: workstreamID})
+}
+
 // trackContainer adds a container to the tracker if available
 func trackContainer(containerID, workstreamID, branchName, repoPath string) {
 	if services.tracker != nil {
