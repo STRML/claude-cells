@@ -1455,3 +1455,86 @@ func TestPaneModel_RenderPRFooter(t *testing.T) {
 		})
 	}
 }
+
+func TestPaneModel_View_PRStatusIndicator(t *testing.T) {
+	tests := []struct {
+		name     string
+		prURL    string
+		status   *git.PRStatusInfo
+		contains []string
+		excludes []string
+	}{
+		{
+			name:  "no PR - no indicator",
+			prURL: "",
+			status: &git.PRStatusInfo{
+				UnpushedCount: 5,
+			},
+			contains: []string{},
+			excludes: []string{"↑5"},
+		},
+		{
+			name:  "PR with unpushed commits shows indicator",
+			prURL: "https://github.com/foo/bar/pull/1",
+			status: &git.PRStatusInfo{
+				UnpushedCount: 3,
+				CheckStatus:   git.PRCheckStatusSuccess,
+			},
+			contains: []string{"↑3"},
+			excludes: []string{},
+		},
+		{
+			name:  "PR with failing checks shows failure indicator",
+			prURL: "https://github.com/foo/bar/pull/1",
+			status: &git.PRStatusInfo{
+				CheckStatus: git.PRCheckStatusFailure,
+			},
+			contains: []string{"✗"},
+			excludes: []string{},
+		},
+		{
+			name:  "PR with pending checks shows pending indicator",
+			prURL: "https://github.com/foo/bar/pull/1",
+			status: &git.PRStatusInfo{
+				CheckStatus: git.PRCheckStatusPending,
+			},
+			contains: []string{"⏳"},
+			excludes: []string{},
+		},
+		{
+			name:  "PR with diverged branch shows warning",
+			prURL: "https://github.com/foo/bar/pull/1",
+			status: &git.PRStatusInfo{
+				IsDiverged:    true,
+				DivergedCount: 2,
+			},
+			contains: []string{"⚠", "↓2"},
+			excludes: []string{},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ws := workstream.New("test")
+			ws.PRURL = tt.prURL
+			pane := NewPaneModel(ws)
+			pane.SetSize(80, 24)
+			pane.SetPRStatus(tt.status)
+
+			view := pane.View()
+			stripped := stripANSI(view)
+
+			for _, want := range tt.contains {
+				if !strings.Contains(stripped, want) {
+					t.Errorf("View() should contain %q, got %q", want, stripped)
+				}
+			}
+
+			for _, exclude := range tt.excludes {
+				if strings.Contains(stripped, exclude) {
+					t.Errorf("View() should not contain %q, got %q", exclude, stripped)
+				}
+			}
+		})
+	}
+}

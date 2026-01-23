@@ -323,11 +323,50 @@ func (p PaneModel) View() string {
 	title := PaneTitle.Render(p.workstream.GetTitle())
 	stateLabel := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render(fmt.Sprintf("(%s)", p.workstream.GetState()))
 
+	// PR status indicator (shown when PR exists)
+	var prIndicator string
+	if p.workstream.PRURL != "" && p.prStatus != nil {
+		var parts []string
+
+		// Unpushed commits indicator
+		if p.prStatus.UnpushedCount > 0 {
+			unpushedStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#F59E0B")). // Amber/orange for attention
+				Bold(true)
+			parts = append(parts, unpushedStyle.Render(fmt.Sprintf("↑%d", p.prStatus.UnpushedCount)))
+		}
+
+		// Check status indicator
+		switch p.prStatus.CheckStatus {
+		case git.PRCheckStatusSuccess:
+			checkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")) // Green
+			parts = append(parts, checkStyle.Render("✓"))
+		case git.PRCheckStatusPending:
+			checkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")) // Amber
+			parts = append(parts, checkStyle.Render("⏳"))
+		case git.PRCheckStatusFailure:
+			checkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")) // Red
+			parts = append(parts, checkStyle.Render("✗"))
+		}
+
+		// Divergence warning
+		if p.prStatus.IsDiverged {
+			divergedStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#EF4444")). // Red for warning
+				Bold(true)
+			parts = append(parts, divergedStyle.Render(fmt.Sprintf("⚠↓%d", p.prStatus.DivergedCount)))
+		}
+
+		if len(parts) > 0 {
+			prIndicator = " " + strings.Join(parts, " ")
+		}
+	}
+
 	var header string
 	if p.focused && modeIndicator != "" {
-		header = fmt.Sprintf("%s %s %s %s %s", indexLabel, modeIndicator, status, title, stateLabel)
+		header = fmt.Sprintf("%s %s %s %s %s%s", indexLabel, modeIndicator, status, title, stateLabel, prIndicator)
 	} else {
-		header = fmt.Sprintf("%s %s %s %s", indexLabel, status, title, stateLabel)
+		header = fmt.Sprintf("%s %s %s %s%s", indexLabel, status, title, stateLabel, prIndicator)
 	}
 
 	// Output content - use virtual terminal if PTY is active
@@ -648,9 +687,9 @@ func (p PaneModel) View() string {
 		}
 	}
 
-	// PR status footer (only show when not in scroll mode and we have PR status)
+	// PR status footer (only show when not in scroll mode, we have a PR, and we have status)
 	var prFooter string
-	if !p.scrollMode && p.prStatus != nil {
+	if !p.scrollMode && p.workstream.PRURL != "" && p.prStatus != nil {
 		prFooter = p.renderPRFooter()
 	}
 
