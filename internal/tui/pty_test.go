@@ -166,17 +166,45 @@ func TestPTYSession_Close(t *testing.T) {
 
 func TestSetProgram(t *testing.T) {
 	// Store original
-	original := program
+	sender.mu.Lock()
+	original := sender.program
+	sender.mu.Unlock()
 
 	// Reset after test
 	defer func() {
-		program = original
+		sender.mu.Lock()
+		sender.program = original
+		sender.mu.Unlock()
 	}()
 
 	// Test setting nil
 	SetProgram(nil)
-	if program != nil {
-		t.Error("program should be nil")
+	sender.mu.RLock()
+	p := sender.program
+	sender.mu.RUnlock()
+	if p != nil {
+		t.Error("sender.program should be nil")
+	}
+}
+
+func TestSendMsg_NilProgram(t *testing.T) {
+	// Store original
+	sender.mu.Lock()
+	original := sender.program
+	sender.mu.Unlock()
+	defer func() {
+		sender.mu.Lock()
+		sender.program = original
+		sender.mu.Unlock()
+	}()
+
+	// Set nil program
+	SetProgram(nil)
+
+	// sendMsg should return false when program is nil
+	result := sendMsg(PTYOutputMsg{WorkstreamID: "test", Output: []byte("hello")})
+	if result {
+		t.Error("sendMsg should return false when program is nil")
 	}
 }
 
@@ -556,15 +584,22 @@ func BenchmarkPTYSessionWrite(b *testing.B) {
 
 func TestSetProgram_WithValue(t *testing.T) {
 	// Store original
-	original := program
+	sender.mu.Lock()
+	original := sender.program
+	sender.mu.Unlock()
 	defer func() {
-		program = original
+		sender.mu.Lock()
+		sender.program = original
+		sender.mu.Unlock()
 	}()
 
 	// Set nil
 	SetProgram(nil)
-	if program != nil {
-		t.Error("program should be nil after SetProgram(nil)")
+	sender.mu.RLock()
+	p := sender.program
+	sender.mu.RUnlock()
+	if p != nil {
+		t.Error("sender.program should be nil after SetProgram(nil)")
 	}
 }
 

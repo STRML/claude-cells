@@ -54,8 +54,15 @@ func escapeShellArg(s string) string {
 	return s
 }
 
-// program holds the tea.Program reference for sending messages from goroutines
-var program *tea.Program
+// programSender holds the tea.Program reference for sending messages from goroutines.
+// This is set once at startup via SetProgram and is read-only thereafter.
+// Thread-safe: the sync package ensures safe concurrent access.
+type programSender struct {
+	mu      sync.RWMutex
+	program *tea.Program
+}
+
+var sender programSender
 
 // containerSetupScript is the shell script that runs inside containers to set up
 // the Claude Code environment. It's exported as a package-level variable for testing.
@@ -131,9 +138,26 @@ log "Starting Claude Code..."
 printf '\033[2J\033[H'
 `
 
-// SetProgram sets the program reference for PTY sessions to use
+// SetProgram sets the program reference for PTY sessions to use.
+// Thread-safe: can be called concurrently with sendMsg.
 func SetProgram(p *tea.Program) {
-	program = p
+	sender.mu.Lock()
+	defer sender.mu.Unlock()
+	sender.program = p
+}
+
+// sendMsg sends a message to the tea.Program if available.
+// Thread-safe: can be called from any goroutine.
+func sendMsg(msg tea.Msg) bool {
+	sender.mu.RLock()
+	p := sender.program
+	sender.mu.RUnlock()
+
+	if p != nil {
+		p.Send(msg)
+		return true
+	}
+	return false
 }
 
 // PTYSession manages a PTY session inside a Docker container.
@@ -385,12 +409,10 @@ func (p *PTYSession) StartReadLoop() {
 				default:
 				}
 
-				if program != nil {
-					program.Send(PTYClosedMsg{
-						WorkstreamID: p.workstreamID,
-						Error:        result.err,
-					})
-				} else {
+				if !sendMsg(PTYClosedMsg{
+					WorkstreamID: p.workstreamID,
+					Error:        result.err,
+				}) {
 					LogWarn("PTY cannot send close message: program is nil for %s", p.workstreamID)
 				}
 				return
@@ -440,25 +462,21 @@ func (p *PTYSession) StartReadLoop() {
 						if matches := sessionIDRegex.FindStringSubmatch(content); len(matches) > 1 {
 							sessionID := matches[1]
 							sessionIDCaptured = true
-							if program != nil {
-								program.Send(SessionIDCapturedMsg{
-									WorkstreamID: p.workstreamID,
-									SessionID:    sessionID,
-								})
-							}
+							sendMsg(SessionIDCapturedMsg{
+								WorkstreamID: p.workstreamID,
+								SessionID:    sessionID,
+							})
 						}
 					}
 				}
 
-				if program != nil {
-					// Make a copy of the buffer to send
-					output := make([]byte, result.n)
-					copy(output, buf[:result.n])
-					program.Send(PTYOutputMsg{
-						WorkstreamID: p.workstreamID,
-						Output:       output,
-					})
-				} else if bytesRead == result.n {
+				// Make a copy of the buffer to send
+				output := make([]byte, result.n)
+				copy(output, buf[:result.n])
+				if !sendMsg(PTYOutputMsg{
+					WorkstreamID: p.workstreamID,
+					Output:       output,
+				}) && bytesRead == result.n {
 					// Only warn on first read to avoid spam
 					LogWarn("PTY cannot send output: program is nil for %s", p.workstreamID)
 				}

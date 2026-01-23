@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Last updated: 2026-01-22 (Updated: orchestrator extraction)
+Last updated: 2026-01-22 (Updated: PaneModel refactoring)
 
 ## Architecture Assessment: 7.5/10
 
@@ -328,25 +328,41 @@ Container orchestration logic has been extracted to `internal/orchestrator` pack
 
 **Impact:** Core business logic is now testable without TUI. ~300 lines extracted.
 
-### 2. God Objects
+### 2. God Objects (Improved)
 
 | Object | File | Lines | Fields | Issue |
 |--------|------|-------|--------|-------|
 | AppModel | app.go | 2000+ | 94 | Main event loop - acceptable for Bubble Tea |
-| PaneModel | pane.go | 1701 | 40+ | Mixes rendering, PTY, scrolling, animations |
+| PaneModel | pane.go | 1321 | 40+ | Core pane logic (reduced from 1701 lines) |
 
-**Recommendation:** Split PaneModel into PaneRenderer, ScrollController, AnimationController.
+**PaneModel refactoring completed:** Split into focused files:
+- `pane.go` (1321 lines) - Core struct, View, Update, vterm rendering
+- `pane_colors.go` (164 lines) - ANSI color utilities (`muteANSI`, `stripANSI`, `color256ToRGB`)
+- `pane_scroll.go` (77 lines) - Scroll methods (`ScrollPageUp`, `ScrollToBottom`, etc.)
+- `pane_animation.go` (172 lines) - Animation state (`SummarizePhase`, fade/init methods)
 
-### 3. Global Mutable State
+### 3. Global Mutable State (Improved)
+
+Package-level state now uses encapsulated structs with thread-safety:
 
 ```go
-var program *tea.Program           // pty.go:58
-var containerTracker *...          // container.go:23
-var credentialRefresher *...       // container.go:26
+// container.go:26-32 - Services struct (set once at startup)
+type containerServices struct {
+    tracker   *docker.ContainerTracker
+    refresher *docker.CredentialRefresher
+}
+var services containerServices
+
+// pty.go:60-65 - Mutex-protected program sender
+type programSender struct {
+    mu      sync.RWMutex
+    program *tea.Program
+}
+var sender programSender
 ```
 
-**Impact:** Breaks testability, risks data races.
-**Fix:** Pass as AppModel fields.
+**Current state:** Thread-safe (mutex protection, set-once patterns). Tests pass with `-race`.
+**Remaining improvement:** Could move to AppModel fields for true dependency injection, but current pattern is acceptable.
 
 ## Design Patterns
 
@@ -359,7 +375,6 @@ var credentialRefresher *...       // container.go:26
 
 ### Anti-Patterns Present
 - **Anemic Domain Model** - Workstream is mostly getters/setters
-- **God Object** - PaneModel handles too many concerns
 
 ## Layer Boundaries
 
@@ -394,19 +409,74 @@ var credentialRefresher *...       // container.go:26
 
 ## Improvement Roadmap
 
-### High Priority
-1. **Extract Orchestration Layer** ✅ Completed (PR #8)
+### Completed
+1. **Extract Orchestration Layer** ✅ (PR #8)
    - `internal/orchestrator` package with full `WorkstreamOrchestrator` interface
    - Complete operations: `CreateWorkstream`, `PauseWorkstream`, `ResumeWorkstream`, `DestroyWorkstream`, `RebuildWorkstream`, `CheckBranchConflict`
    - Image resolution: auto-detect from devcontainer, build with devcontainer CLI, fallback to default
    - Container config: credentials, git identity, timezone, extra env vars
    - Worktree management: create, cleanup on error, branch sanitization
    - AppModel uses orchestrator via `Orchestrator()` getter
-   - **Next steps:** Move container tracking and credential refresh registration into orchestrator
+
+2. **Global State Thread-Safety** ✅
+   - `containerServices` struct encapsulates tracker/refresher (set-once pattern)
+   - `programSender` uses `sync.RWMutex` for concurrent PTY goroutine access
+   - All tests pass with `-race` detector
+
+3. **Refactor PaneModel** ✅
+   - Split 1700-line file into focused components:
+   - `pane_colors.go` (164 lines) - ANSI color utilities
+   - `pane_scroll.go` (77 lines) - Scroll methods
+   - `pane_animation.go` (172 lines) - Animation state/methods
+   - Core `pane.go` reduced to 1321 lines
+
+## Next Steps (Prioritized)
+
+### High Priority
+
+4. **Reduce AppModel Field Count**
+   - **Problem:** AppModel has ~94 fields, making it hard to reason about state
+   - **Fix:** Group related fields into sub-structs:
+     - `LayoutState` - width, height, layout mode, pane dimensions
+     - `FocusState` - focused pane index, input mode, scroll mode
+     - `DialogState` - current dialog, dialog history
+   - **Acceptance:** AppModel has <50 direct fields; related state is co-located
+   - **Dependencies:** None - can start immediately
+
+5. **Extract TUI Business Logic from container.go**
+   - **Problem:** `container.go` still contains ~1356 lines mixing TUI commands with business logic
+   - **Fix:** Move to orchestrator or new packages:
+     - PTY session management → `internal/tui/pty_manager.go` or orchestrator
+     - Pairing mode integration → `internal/sync/`
+     - Container tracking/credential registration → orchestrator
+   - **Acceptance:** `container.go` contains only Bubble Tea message types and thin command wrappers (<500 lines)
+   - **Dependencies:** Builds on orchestrator extraction (completed)
 
 ### Medium Priority
-2. **Refactor PaneModel** - Split into focused components
-3. **Eliminate Global State** - Pass dependencies via AppModel
+
+6. **Further Refactor PaneModel**
+   - **Problem:** `pane.go` still has 1321 lines and 40+ fields
+   - **Fix:**
+     - Extract `PaneRenderer` - View() logic, border/header rendering
+     - Group fields into sub-structs: `VTermState`, `DialogState`
+   - **Acceptance:** `pane.go` <800 lines; PaneModel has <25 direct fields
+   - **Dependencies:** None, but lower impact than AppModel refactoring
+
+7. **Add Observability**
+   - **Problem:** No metrics or tracing for debugging production issues
+   - **Fix:**
+     - Add structured logging with levels (debug/info/warn/error)
+     - Add timing metrics for container operations
+     - Consider OpenTelemetry spans for distributed tracing
+   - **Acceptance:** Can diagnose slow container starts and credential refresh issues from logs
+   - **Dependencies:** None
+
+### Low Priority (Deferred)
+
+8. **Move Global State to AppModel Fields**
+   - Pass `containerServices` via AppModel fields
+   - Pass `programSender` through PTYSession constructor
+   - **Note:** Current encapsulated pattern is thread-safe and acceptable; defer unless causing test issues
 
 ### Future Vision
 ```
