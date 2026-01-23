@@ -11,24 +11,24 @@
 # Read JSON input from stdin
 input=$(cat)
 
-# Extract tool name and command
-tool_name=$(echo "$input" | jq -r '.tool_name // empty')
-command=$(echo "$input" | jq -r '.tool_input.command // empty')
-
-# Only check Bash tool calls
-if [ "$tool_name" != "Bash" ]; then
+# Check for bypass file first (set by /ccells-commit skill)
+if [ -f /tmp/.ccells-commit-active ]; then
     exit 0
 fi
 
-# Check for bypass file (set by /ccells-commit skill)
-if [ -f /tmp/.ccells-commit-active ]; then
+# Extract command using grep/sed (more portable than jq)
+# Look for "command": "..." pattern in JSON
+command=$(echo "$input" | grep -o '"command"[[:space:]]*:[[:space:]]*"[^"]*"' | sed 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+
+# If no command found, allow (not a Bash tool call or different format)
+if [ -z "$command" ]; then
     exit 0
 fi
 
 # Check if this is a git commit command
 # Match: git commit, git commit -m, git commit --amend, etc.
 if echo "$command" | grep -qE '(^|\s|&&|\||;)git\s+commit(\s|$)'; then
-    cat <<'EOF'
+    cat >&2 <<'EOF'
 BLOCKED: Raw "git commit" is not allowed in ccells containers.
 
 Use /ccells-commit instead. This skill:

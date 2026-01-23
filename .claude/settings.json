@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/block-raw-git-commit.sh"
+            "command": ".claude/hooks/block-raw-git-commit.sh"
           }
         ]
       }
