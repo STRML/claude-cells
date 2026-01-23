@@ -9,8 +9,12 @@ import (
 	"strings"
 
 	"github.com/STRML/claude-cells/internal/docker"
+	"github.com/STRML/claude-cells/internal/gitproxy"
 	"github.com/STRML/claude-cells/internal/workstream"
 )
+
+// DefaultGitProxyBaseDir is the base directory for git proxy sockets.
+const DefaultGitProxyBaseDir = "/tmp/ccells/gitproxy"
 
 // DefaultWorktreeBaseDir is the default directory for git worktrees.
 // Can be overridden via Orchestrator.WorktreeBaseDir for testing.
@@ -71,19 +75,23 @@ func (o *Orchestrator) CreateWorkstream(ctx context.Context, ws *workstream.Work
 	}
 
 	// Step 5: Build container config with credentials
-	cfg, configDir, err := o.buildFullContainerConfig(ws, worktreePath, imageName, opts)
+	cfgResult, err := o.buildFullContainerConfig(ws, worktreePath, imageName, opts)
 	if err != nil {
 		o.cleanupWorktree(ctx, ws.BranchName)
 		return nil, fmt.Errorf("build container config: %w", err)
 	}
 
 	// Step 6: Create and start container
-	containerID, err := o.createAndStartContainer(ctx, cfg)
+	containerID, err := o.createAndStartContainer(ctx, cfgResult.config)
 	if err != nil {
 		o.cleanupWorktree(ctx, ws.BranchName)
 		// Also clean up container config on failure
-		if configDir != "" {
-			_ = docker.CleanupContainerConfig(cfg.Name)
+		if cfgResult.configDir != "" {
+			_ = docker.CleanupContainerConfig(cfgResult.config.Name)
+		}
+		// Clean up git proxy socket directory
+		if cfgResult.gitProxySocketDir != "" {
+			_ = os.RemoveAll(cfgResult.gitProxySocketDir)
 		}
 		return nil, fmt.Errorf("create container: %w", err)
 	}
@@ -91,10 +99,11 @@ func (o *Orchestrator) CreateWorkstream(ctx context.Context, ws *workstream.Work
 	ws.ContainerID = containerID
 
 	return &CreateResult{
-		ContainerID:   containerID,
-		ContainerName: cfg.Name,
-		ConfigDir:     configDir,
-		WorktreePath:  worktreePath,
+		ContainerID:       containerID,
+		ContainerName:     cfgResult.config.Name,
+		ConfigDir:         cfgResult.configDir,
+		WorktreePath:      worktreePath,
+		GitProxySocketDir: cfgResult.gitProxySocketDir,
 	}, nil
 }
 
@@ -233,7 +242,14 @@ func (o *Orchestrator) resolveImage(ctx context.Context, opts CreateOptions) (st
 	return imageName, nil
 }
 
-func (o *Orchestrator) buildFullContainerConfig(ws *workstream.Workstream, worktreePath, imageName string, opts CreateOptions) (*docker.ContainerConfig, string, error) {
+// containerConfigResult holds the result of building container config
+type containerConfigResult struct {
+	config            *docker.ContainerConfig
+	configDir         string
+	gitProxySocketDir string
+}
+
+func (o *Orchestrator) buildFullContainerConfig(ws *workstream.Workstream, worktreePath, imageName string, opts CreateOptions) (*containerConfigResult, error) {
 	cfg := docker.NewContainerConfig(ws.BranchName, worktreePath)
 	cfg.HostGitDir = filepath.Join(o.repoPath, ".git")
 	cfg.Image = imageName
@@ -241,7 +257,7 @@ func (o *Orchestrator) buildFullContainerConfig(ws *workstream.Workstream, workt
 	// Load devcontainer config for extra env vars
 	devCfg, err := docker.LoadDevcontainerConfig(o.repoPath)
 	if err != nil {
-		return nil, "", fmt.Errorf("load devcontainer config: %w", err)
+		return nil, fmt.Errorf("load devcontainer config: %w", err)
 	}
 	if devCfg != nil && devCfg.ContainerEnv != nil {
 		cfg.ExtraEnv = devCfg.ContainerEnv
@@ -250,7 +266,7 @@ func (o *Orchestrator) buildFullContainerConfig(ws *workstream.Workstream, workt
 	// Create per-container isolated config directory
 	configPaths, err := docker.CreateContainerConfig(cfg.Name)
 	if err != nil {
-		return nil, "", fmt.Errorf("create container config: %w", err)
+		return nil, fmt.Errorf("create container config: %w", err)
 	}
 
 	cfg.ClaudeCfg = configPaths.ClaudeDir
@@ -260,10 +276,28 @@ func (o *Orchestrator) buildFullContainerConfig(ws *workstream.Workstream, workt
 	cfg.Credentials = configPaths.Credentials
 	cfg.Timezone = docker.GetHostTimezone()
 
+	// Create git proxy socket directory
+	// The socket itself is created later by the TUI's gitproxy server
+	gitProxySocketDir := filepath.Join(DefaultGitProxyBaseDir, cfg.Name)
+	if err := os.MkdirAll(gitProxySocketDir, 0755); err != nil {
+		return nil, fmt.Errorf("create git proxy socket dir: %w", err)
+	}
+	cfg.GitProxySocketDir = gitProxySocketDir
+
+	// Inject git proxy script into container's Claude settings
+	if err := gitproxy.InjectProxyConfig(configPaths.ClaudeDir); err != nil {
+		// Non-fatal - just log and continue without proxy
+		// (The container will work but won't have git proxy)
+	}
+
 	// Return config dir (parent of ClaudeDir) for credential registration
 	configDir := filepath.Dir(configPaths.ClaudeDir)
 
-	return cfg, configDir, nil
+	return &containerConfigResult{
+		config:            cfg,
+		configDir:         configDir,
+		gitProxySocketDir: gitProxySocketDir,
+	}, nil
 }
 
 func (o *Orchestrator) createAndStartContainer(ctx context.Context, cfg *docker.ContainerConfig) (string, error) {

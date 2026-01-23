@@ -14,6 +14,7 @@ import (
 	"github.com/STRML/claude-cells/internal/claude"
 	"github.com/STRML/claude-cells/internal/docker"
 	"github.com/STRML/claude-cells/internal/git"
+	"github.com/STRML/claude-cells/internal/gitproxy"
 	"github.com/STRML/claude-cells/internal/orchestrator"
 	"github.com/STRML/claude-cells/internal/sync"
 	"github.com/STRML/claude-cells/internal/workstream"
@@ -27,6 +28,7 @@ import (
 type containerServices struct {
 	tracker   *docker.ContainerTracker
 	refresher *docker.CredentialRefresher
+	gitProxy  *gitproxy.Server
 }
 
 // services holds the global container services instance
@@ -50,6 +52,16 @@ func GetContainerTracker() *docker.ContainerTracker {
 // GetCredentialRefresher returns the credential refresher
 func GetCredentialRefresher() *docker.CredentialRefresher {
 	return services.refresher
+}
+
+// SetGitProxyServer sets the git proxy server for proxying git/gh commands
+func SetGitProxyServer(server *gitproxy.Server) {
+	services.gitProxy = server
+}
+
+// GetGitProxyServer returns the git proxy server
+func GetGitProxyServer() *gitproxy.Server {
+	return services.gitProxy
 }
 
 // trackContainer adds a container to the tracker if available
@@ -77,6 +89,45 @@ func registerContainerCredentials(containerID, containerName, configDir string) 
 func unregisterContainerCredentials(containerID string) {
 	if services.refresher != nil {
 		services.refresher.UnregisterContainer(containerID)
+	}
+}
+
+// startGitProxySocket starts a git proxy socket for a container
+func startGitProxySocket(ctx context.Context, containerID string, ws *workstream.Workstream) string {
+	if services.gitProxy == nil {
+		return ""
+	}
+	wsInfo := gitproxy.WorkstreamInfo{
+		ID:           ws.ID,
+		Branch:       ws.BranchName,
+		PRNumber:     ws.PRNumber,
+		WorktreePath: ws.WorktreePath,
+	}
+	socketPath, err := services.gitProxy.StartSocket(ctx, containerID, wsInfo)
+	if err != nil {
+		LogWarn("Failed to start git proxy socket: %v", err)
+		return ""
+	}
+	return socketPath
+}
+
+// stopGitProxySocket stops the git proxy socket for a container
+func stopGitProxySocket(containerID string) {
+	if services.gitProxy != nil {
+		services.gitProxy.StopSocket(containerID)
+	}
+}
+
+// updateGitProxyWorkstream updates the workstream info for a container's git proxy
+func updateGitProxyWorkstream(containerID string, ws *workstream.Workstream) {
+	if services.gitProxy != nil {
+		wsInfo := gitproxy.WorkstreamInfo{
+			ID:           ws.ID,
+			Branch:       ws.BranchName,
+			PRNumber:     ws.PRNumber,
+			WorktreePath: ws.WorktreePath,
+		}
+		services.gitProxy.UpdateWorkstream(containerID, wsInfo)
 	}
 }
 
@@ -475,6 +526,11 @@ func RebuildContainerCmd(ws *workstream.Workstream) tea.Cmd {
 		// Register for credential refresh
 		registerContainerCredentials(result.ContainerID, result.ContainerName, result.ConfigDir)
 
+		// Start git proxy socket for this container
+		if result.GitProxySocketDir != "" {
+			startGitProxySocket(ctx, result.ContainerID, ws)
+		}
+
 		// Return with IsResume=true so PTY uses --continue
 		return ContainerStartedMsg{
 			WorkstreamID: ws.ID,
@@ -660,6 +716,12 @@ func startContainerWithFullOptions(ws *workstream.Workstream, useExistingBranch 
 		// Register for credential refresh
 		registerContainerCredentials(result.ContainerID, result.ContainerName, result.ConfigDir)
 
+		// Start git proxy socket for this container
+		// The socket directory was created by the orchestrator, now we start the listener
+		if result.GitProxySocketDir != "" {
+			startGitProxySocket(ctx, result.ContainerID, ws)
+		}
+
 		return ContainerStartedMsg{
 			WorkstreamID: ws.ID,
 			ContainerID:  result.ContainerID,
@@ -779,6 +841,7 @@ func StopContainerCmd(ws *workstream.Workstream) tea.Cmd {
 		if ws.ContainerID != "" {
 			untrackContainer(ws.ContainerID)
 			unregisterContainerCredentials(ws.ContainerID)
+			stopGitProxySocket(ws.ContainerID)
 		}
 
 		LogDebug("StopContainerCmd completed for %s", ws.BranchName)
@@ -1101,6 +1164,10 @@ func ResumeContainerCmd(ws *workstream.Workstream, width, height int) tea.Cmd {
 		// Track the resumed container for crash recovery
 		repoPath, _ := os.Getwd()
 		trackContainer(ws.ContainerID, ws.ID, ws.BranchName, repoPath)
+
+		// Start git proxy socket for the resumed container
+		// (The server may have restarted, so we need to re-establish the socket)
+		startGitProxySocket(ctx, ws.ContainerID, ws)
 
 		// Container is running, notify success (resuming existing session)
 		return ContainerStartedMsg{

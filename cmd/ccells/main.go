@@ -15,6 +15,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"github.com/STRML/claude-cells/internal/docker"
 	"github.com/STRML/claude-cells/internal/git"
+	"github.com/STRML/claude-cells/internal/gitproxy"
 	"github.com/STRML/claude-cells/internal/tui"
 	"github.com/STRML/claude-cells/internal/workstream"
 )
@@ -241,6 +242,16 @@ func main() {
 	credRefresher.Start()
 	defer credRefresher.Stop()
 	tui.SetCredentialRefresher(credRefresher)
+
+	// Start git proxy server for proxying git/gh commands from containers
+	gitProxyServer := gitproxy.NewServer(func(workstreamID string, prNumber int, prURL string) {
+		// Callback when a PR is created via the proxy
+		// This updates the workstream state with the PR info
+		// The TUI will pick this up on next state save
+		tui.LogDebug("PR #%d created for workstream %s: %s", prNumber, workstreamID, prURL)
+	})
+	defer gitProxyServer.Shutdown()
+	tui.SetGitProxyServer(gitProxyServer)
 
 	// Set version info for display in help dialog
 	tui.SetVersionInfo(Version, CommitHash)
