@@ -3384,6 +3384,165 @@ func TestAppModel_Update_PRStatusMsg(t *testing.T) {
 	}
 }
 
+// TestAppModel_Update_PRStatusRefreshRequestMsg tests handling of PR status refresh request messages
+func TestAppModel_Update_PRStatusRefreshRequestMsg(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test feature"})
+	app = model.(AppModel)
+
+	if len(app.panes) != 1 {
+		t.Fatal("Should have created a workstream")
+	}
+
+	wsID := app.panes[0].Workstream().ID
+
+	t.Run("no refresh when no PR", func(t *testing.T) {
+		// Without PR number or URL, should not trigger refresh
+		model, cmd := app.Update(PRStatusRefreshRequestMsg{WorkstreamID: wsID})
+		app = model.(AppModel)
+
+		if cmd != nil {
+			t.Error("Should not return command when no PR exists")
+		}
+		if app.panes[0].IsPRStatusLoading() {
+			t.Error("Should not be loading when no PR exists")
+		}
+	})
+
+	t.Run("refresh when PR number exists", func(t *testing.T) {
+		// Set PR number on workstream
+		ws := app.panes[0].Workstream()
+		ws.PRNumber = 42
+		app.panes[0].workstream = ws
+
+		model, cmd := app.Update(PRStatusRefreshRequestMsg{WorkstreamID: wsID})
+		app = model.(AppModel)
+
+		if cmd == nil {
+			t.Error("Should return FetchPRStatusCmd when PR exists")
+		}
+		if !app.panes[0].IsPRStatusLoading() {
+			t.Error("Should set loading state when triggering refresh")
+		}
+		app.panes[0].SetPRStatusLoading(false) // Reset for next test
+	})
+
+	t.Run("refresh when PRURL exists", func(t *testing.T) {
+		// Set only PRURL (no PRNumber)
+		ws := app.panes[0].Workstream()
+		ws.PRNumber = 0
+		ws.PRURL = "https://github.com/owner/repo/pull/123"
+		app.panes[0].workstream = ws
+
+		model, cmd := app.Update(PRStatusRefreshRequestMsg{WorkstreamID: wsID})
+		app = model.(AppModel)
+
+		if cmd == nil {
+			t.Error("Should return FetchPRStatusCmd when PRURL exists")
+		}
+		if !app.panes[0].IsPRStatusLoading() {
+			t.Error("Should set loading state when triggering refresh")
+		}
+	})
+
+	t.Run("non-existent workstream", func(t *testing.T) {
+		model, cmd := app.Update(PRStatusRefreshRequestMsg{WorkstreamID: "non-existent"})
+		app = model.(AppModel)
+
+		if cmd != nil {
+			t.Error("Should not return command for non-existent workstream")
+		}
+	})
+}
+
+// TestAppModel_Update_PRStatusPollTick tests handling of PR status poll tick messages
+func TestAppModel_Update_PRStatusPollTick(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	t.Run("tick reschedules itself with no panes", func(t *testing.T) {
+		model, cmd := app.Update(prStatusPollTickMsg{})
+		app = model.(AppModel)
+
+		// Should always reschedule tick
+		if cmd == nil {
+			t.Error("Should return command to reschedule tick")
+		}
+	})
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test feature"})
+	app = model.(AppModel)
+
+	if len(app.panes) != 1 {
+		t.Fatal("Should have created a workstream")
+	}
+
+	t.Run("tick does not refresh panes without PRs", func(t *testing.T) {
+		// Pane has no PR
+		model, cmd := app.Update(prStatusPollTickMsg{})
+		app = model.(AppModel)
+
+		// Should return tick command only (not FetchPRStatusCmd)
+		if cmd == nil {
+			t.Error("Should return command to reschedule tick")
+		}
+		if app.panes[0].IsPRStatusLoading() {
+			t.Error("Should not be loading when no PR exists")
+		}
+	})
+
+	t.Run("tick refreshes panes with PRNumber", func(t *testing.T) {
+		// Set PR number
+		ws := app.panes[0].Workstream()
+		ws.PRNumber = 42
+		app.panes[0].workstream = ws
+
+		model, cmd := app.Update(prStatusPollTickMsg{})
+		app = model.(AppModel)
+
+		if cmd == nil {
+			t.Error("Should return batched commands")
+		}
+		if !app.panes[0].IsPRStatusLoading() {
+			t.Error("Should set loading state when polling")
+		}
+		app.panes[0].SetPRStatusLoading(false)
+	})
+
+	t.Run("tick refreshes panes with PRURL only", func(t *testing.T) {
+		// Set PRURL but not PRNumber
+		ws := app.panes[0].Workstream()
+		ws.PRNumber = 0
+		ws.PRURL = "https://github.com/owner/repo/pull/99"
+		app.panes[0].workstream = ws
+
+		model, cmd := app.Update(prStatusPollTickMsg{})
+		app = model.(AppModel)
+
+		if cmd == nil {
+			t.Error("Should return batched commands")
+		}
+		if !app.panes[0].IsPRStatusLoading() {
+			t.Error("Should set loading state when polling with PRURL")
+		}
+	})
+}
+
+// TestPRStatusPollTickCmd tests that the tick command function works
+func TestPRStatusPollTickCmd(t *testing.T) {
+	// Verify the function returns a non-nil command
+	cmd := prStatusPollTickCmd()
+	if cmd == nil {
+		t.Error("prStatusPollTickCmd should return a command")
+	}
+}
+
 // TestAppModel_Update_FetchRebaseResultMsg tests handling of fetch-rebase result messages
 func TestAppModel_Update_FetchRebaseResultMsg(t *testing.T) {
 	app := NewAppModel(context.Background())

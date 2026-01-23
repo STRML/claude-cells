@@ -21,11 +21,16 @@ type PRUpdateCallback func(workstreamID string, prNumber int, prURL string)
 // This can be used to trigger PR status refresh.
 type PushCompleteCallback func(workstreamID string)
 
+// CommandExecutor defines the interface for executing commands.
+type CommandExecutor interface {
+	Execute(ctx context.Context, op Operation, args []string, ws WorkstreamInfo) (*Response, *PRCreateResult)
+}
+
 // Server manages git proxy sockets for all containers.
 type Server struct {
 	mu             sync.RWMutex
 	sockets        map[string]*socketHandler // containerID -> handler
-	executor       *Executor
+	executor       CommandExecutor
 	onPRCreated    PRUpdateCallback
 	onPushComplete PushCompleteCallback
 	baseDir        string // Base directory for sockets
@@ -46,6 +51,20 @@ func (s *Server) SetPushCompleteCallback(cb PushCompleteCallback) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.onPushComplete = cb
+}
+
+// SetExecutor replaces the executor (for testing).
+func (s *Server) SetExecutor(e CommandExecutor) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.executor = e
+}
+
+// SetBaseDir sets the base directory for sockets (for testing).
+func (s *Server) SetBaseDir(dir string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.baseDir = dir
 }
 
 // socketHandler manages a single socket for a container.
@@ -94,8 +113,16 @@ func (s *Server) StartSocket(ctx context.Context, containerID string, ws Workstr
 		return "", fmt.Errorf("failed to create socket: %w", err)
 	}
 
-	// Make socket world-writable so container can connect
-	if err := os.Chmod(socketPath, 0666); err != nil {
+	// Set restrictive permissions on socket.
+	// Containers run as root (UID 0), so we try to chown to root:root.
+	// The socket directory is already container-specific, providing isolation.
+	// Use 0660 to allow owner and group access.
+	if err := os.Chown(socketPath, 0, 0); err != nil {
+		// Chown may fail if we're not root on the host - that's OK,
+		// the socket will be owned by the current user which Docker can access.
+		log.Printf("[gitproxy] Could not chown socket to root (non-fatal): %v", err)
+	}
+	if err := os.Chmod(socketPath, 0660); err != nil {
 		listener.Close()
 		return "", fmt.Errorf("failed to chmod socket: %w", err)
 	}

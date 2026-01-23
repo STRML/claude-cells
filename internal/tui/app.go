@@ -1998,7 +1998,8 @@ Scroll Mode:
 		for i := range m.panes {
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
 				ws := m.panes[i].Workstream()
-				if ws.PRNumber > 0 {
+				// Check both PRNumber and PRURL - some saved states may only have URL
+				if ws.PRNumber > 0 || ws.PRURL != "" {
 					LogDebug("Refreshing PR status for workstream %s after push", msg.WorkstreamID)
 					m.panes[i].SetPRStatusLoading(true)
 					return m, FetchPRStatusCmd(ws)
@@ -2478,7 +2479,8 @@ Scroll Mode:
 		cmds = append(cmds, prStatusPollTickCmd()) // Schedule next tick
 		for i := range m.panes {
 			ws := m.panes[i].Workstream()
-			if ws.PRNumber > 0 {
+			// Check both PRNumber and PRURL - some saved states may only have URL
+			if ws.PRNumber > 0 || ws.PRURL != "" {
 				m.panes[i].SetPRStatusLoading(true)
 				cmds = append(cmds, FetchPRStatusCmd(ws))
 			}
