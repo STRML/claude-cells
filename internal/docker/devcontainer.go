@@ -299,9 +299,12 @@ func computeConfigHash(projectPath string) string {
 	}
 
 	// Include dockerfile injection config so changes trigger rebuilds
+	// Use newline delimiter between commands to prevent collisions
+	// (e.g., ["ab","c"] vs ["a","bc"] should produce different hashes)
 	dfCfg := LoadDockerfileConfig(projectPath)
 	for _, cmd := range dfCfg.Inject {
 		hashInput = append(hashInput, []byte(cmd)...)
+		hashInput = append(hashInput, '\n')
 	}
 
 	hash := sha256.Sum256(hashInput)

@@ -2,6 +2,7 @@ package config
 
 import (
 	"encoding/json"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -72,11 +73,20 @@ func Load() (*GlobalConfig, error) {
 				// Migrate legacy config
 				var cfg GlobalConfig
 				if jsonErr := json.Unmarshal(legacyData, &cfg); jsonErr == nil {
-					// Write to new location (ignore save error, will retry on next save)
-					saveData, _ := json.MarshalIndent(&cfg, "", "  ")
-					_ = os.WriteFile(path, saveData, 0644)
+					// Write to new location (log errors, will retry on next save)
+					saveData, marshalErr := json.MarshalIndent(&cfg, "", "  ")
+					if marshalErr != nil {
+						log.Printf("config migration: failed to marshal config: %v", marshalErr)
+						return &cfg, nil // Return parsed config even if save fails
+					}
+					if writeErr := os.WriteFile(path, saveData, 0644); writeErr != nil {
+						log.Printf("config migration: failed to write %s: %v", path, writeErr)
+						return &cfg, nil // Return parsed config even if save fails
+					}
 					// Remove legacy file
-					_ = os.Remove(legacyPath)
+					if removeErr := os.Remove(legacyPath); removeErr != nil {
+						log.Printf("config migration: failed to remove legacy %s: %v", legacyPath, removeErr)
+					}
 					return &cfg, nil
 				}
 			}

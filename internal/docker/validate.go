@@ -278,10 +278,13 @@ func GetBaseImageName() string {
 	}
 
 	// Combine base Dockerfile hash with injection config
+	// Use newline delimiter between commands to prevent collisions
+	// (e.g., ["ab","c"] vs ["a","bc"] should produce different hashes)
 	h := sha256.New()
 	h.Write([]byte(baseHash))
 	for _, cmd := range dfCfg.Inject {
 		h.Write([]byte(cmd))
+		h.Write([]byte{'\n'})
 	}
 	combinedHash := hex.EncodeToString(h.Sum(nil))[:12]
 
