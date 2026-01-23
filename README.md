@@ -229,7 +229,7 @@ dockerfile:
     - "pip install ipython"
 ```
 
-Project-specific config in `.claude-cells/config.yaml` overrides global settings.
+Project-specific `.claude-cells/config.yaml` with `dockerfile.inject` replaces (not merges with) the global inject list.
 
 ## Troubleshooting
 
