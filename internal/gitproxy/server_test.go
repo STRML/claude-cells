@@ -14,14 +14,14 @@ import (
 
 // mockExecutor is a test double for CommandExecutor.
 type mockExecutor struct {
-	mu         sync.Mutex
-	response   *Response
-	prResult   *PRCreateResult
-	callCount  int
-	lastOp     Operation
-	lastArgs   []string
-	lastWS     WorkstreamInfo
-	executeFn  func(ctx context.Context, op Operation, args []string, ws WorkstreamInfo) (*Response, *PRCreateResult)
+	mu        sync.Mutex
+	response  *Response
+	prResult  *PRCreateResult
+	callCount int
+	lastOp    Operation
+	lastArgs  []string
+	lastWS    WorkstreamInfo
+	executeFn func(ctx context.Context, op Operation, args []string, ws WorkstreamInfo) (*Response, *PRCreateResult)
 }
 
 func (m *mockExecutor) Execute(ctx context.Context, op Operation, args []string, ws WorkstreamInfo) (*Response, *PRCreateResult) {

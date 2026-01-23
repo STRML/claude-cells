@@ -2058,12 +2058,7 @@ Scroll Mode:
 				} else {
 					m.panes[i].AppendOutput(fmt.Sprintf("%s successful!\n", pushType))
 					// Mark branch as pushed - this enables force push option in merge dialog
-					// and signals to Claude not to use commit amend
 					ws.SetHasBeenPushed(true)
-					// Notify Claude Code about the push (don't press Enter - avoids submitting Claude's pending input)
-					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ Branch '%s' pushed to remote (avoid using commit --amend)", ws.BranchName), false); err != nil {
-						LogWarn("Failed to notify Claude about push for %s (pane %d): %v", ws.BranchName, i, err)
-					}
 					// Update in-pane progress dialog if open
 					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
 						dialog.SetComplete(fmt.Sprintf("%s successful!\n\nPress Enter or Esc to close.", pushType))
@@ -2089,10 +2084,6 @@ Scroll Mode:
 					// Store PR info and mark as pushed (PR creation pushes the branch)
 					ws.SetPRInfo(msg.PRNumber, msg.PRURL)
 					ws.SetHasBeenPushed(true)
-					// Notify Claude about the PR and amend prevention (don't press Enter - avoids submitting Claude's pending input)
-					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ PR #%d created: %s (avoid using commit --amend)", msg.PRNumber, msg.PRURL), false); err != nil {
-						LogWarn("Failed to notify Claude about PR creation for %s (pane %d): %v", ws.BranchName, i, err)
-					}
 					// Update in-pane progress dialog if open
 					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
 						dialog.SetComplete(fmt.Sprintf("Pull Request Created!\n\nPR #%d: %s\n\nPress Enter or Esc to close.", msg.PRNumber, msg.PRURL))
