@@ -1071,12 +1071,23 @@ func TestPaneModel_ViewportFillHeight(t *testing.T) {
 // TestPaneModel_CursorVisibleInInputMode verifies that the cursor is visible
 // when in input mode, regardless of the vterm's cursor visibility state.
 // This tests the fix for cursor visibility when Claude Code hides the cursor.
+//
+// Note: These tests use direct method calls (SetFocused, SetInputMode, WritePTYOutput)
+// rather than message-passing because:
+// 1. Focus and input mode are managed by the parent AppModel, not via messages to PaneModel
+// 2. PaneModel.Update handles viewport/scroll behavior; focus/mode are set externally
+// 3. WritePTYOutput simulates raw PTY data which has no message equivalent
+// 4. This is a unit test for internal state logic, not integration behavior
 func TestPaneModel_CursorVisibleInInputMode(t *testing.T) {
 	ws := workstream.New("test")
 	pane := NewPaneModel(ws)
 	pane.SetSize(80, 24)
 	pane.SetFocused(true)
 	pane.SetInputMode(true)
+
+	// Set up a mock PTY session (required for cursor to be visible)
+	mockPTY := &PTYSession{workstreamID: "test"}
+	pane.SetPTY(mockPTY)
 
 	// Write some content to establish vterm state
 	pane.WritePTYOutput([]byte("Hello, World!\r\n"))
@@ -1098,6 +1109,7 @@ func TestPaneModel_CursorVisibleInInputMode(t *testing.T) {
 
 // TestPaneModel_CursorHiddenWhenNotInInputMode verifies that the cursor
 // respects vterm visibility when NOT in input mode.
+// See TestPaneModel_CursorVisibleInInputMode for rationale on direct method calls.
 func TestPaneModel_CursorHiddenWhenNotInInputMode(t *testing.T) {
 	ws := workstream.New("test")
 	pane := NewPaneModel(ws)
@@ -1117,6 +1129,7 @@ func TestPaneModel_CursorHiddenWhenNotInInputMode(t *testing.T) {
 
 // TestPaneModel_CursorNotVisibleWhenUnfocused verifies the cursor is hidden
 // when the pane is not focused.
+// See TestPaneModel_CursorVisibleInInputMode for rationale on direct method calls.
 func TestPaneModel_CursorNotVisibleWhenUnfocused(t *testing.T) {
 	ws := workstream.New("test")
 	pane := NewPaneModel(ws)
@@ -1135,6 +1148,7 @@ func TestPaneModel_CursorNotVisibleWhenUnfocused(t *testing.T) {
 
 // TestPaneModel_SoftwareCursorInInputMode verifies that the software cursor
 // (inverse video) is rendered when focused and in input mode.
+// See TestPaneModel_CursorVisibleInInputMode for rationale on direct method calls.
 func TestPaneModel_SoftwareCursorInInputMode(t *testing.T) {
 	ws := workstream.New("test")
 	pane := NewPaneModel(ws)
@@ -1157,6 +1171,7 @@ func TestPaneModel_SoftwareCursorInInputMode(t *testing.T) {
 
 // TestPaneModel_NoSoftwareCursorWhenNotFocused verifies that the software
 // cursor is not rendered when the pane is not focused.
+// See TestPaneModel_CursorVisibleInInputMode for rationale on direct method calls.
 func TestPaneModel_NoSoftwareCursorWhenNotFocused(t *testing.T) {
 	ws := workstream.New("test")
 	pane := NewPaneModel(ws)
@@ -1177,11 +1192,16 @@ func TestPaneModel_NoSoftwareCursorWhenNotFocused(t *testing.T) {
 // TestPaneModel_CursorVisibleAfterVtermHidesCursor verifies that entering
 // input mode shows the cursor even after the vterm received a hide cursor
 // escape sequence.
+// See TestPaneModel_CursorVisibleInInputMode for rationale on direct method calls.
 func TestPaneModel_CursorVisibleAfterVtermHidesCursor(t *testing.T) {
 	ws := workstream.New("test")
 	pane := NewPaneModel(ws)
 	pane.SetSize(80, 24)
 	pane.SetFocused(true)
+
+	// Set up a mock PTY session (required for cursor to be visible)
+	mockPTY := &PTYSession{workstreamID: "test"}
+	pane.SetPTY(mockPTY)
 
 	// Write some content then hide cursor (like Claude Code does while working)
 	pane.WritePTYOutput([]byte("Working...\r\n"))

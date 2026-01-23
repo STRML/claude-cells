@@ -1680,12 +1680,16 @@ type CursorPosition struct {
 // Returns position in the coordinate space inside the border and padding.
 // The caller needs to add the pane's screen position to get absolute coordinates.
 func (p *PaneModel) GetCursorPosition() CursorPosition {
-	// Only show cursor if focused, in input mode, and have a PTY
+	// Only show cursor if focused, in input mode, have an active PTY, and vterm is ready.
 	// Note: We don't check vterm.CursorVisible() because when in input mode,
 	// we always want to show the cursor regardless of the vterm's cursor state.
 	// Claude Code hides the cursor while working, but we want to show it when
 	// the user enters input mode.
 	if !p.focused || !p.inputMode || p.vterm == nil {
+		return CursorPosition{Visible: false}
+	}
+	// Also require an active PTY session - no cursor if PTY is nil or closed
+	if p.pty == nil || p.pty.IsClosed() {
 		return CursorPosition{Visible: false}
 	}
 
