@@ -39,6 +39,17 @@ internal/
   git/                     # Branch, worktree & PR operations
 ```
 
+### Codemaps
+
+**Always read codemaps when attempting to understand project structure.**
+
+The `codemaps/` directory contains detailed architecture documentation:
+- `codemaps/architecture.md` - Overall design, entry points, data flow, key patterns
+- `codemaps/backend.md` - Package structure, dependencies, internal APIs
+- `codemaps/data.md` - Data models, state formats, config schemas
+
+Before modifying code or answering questions about how the codebase works, read the relevant codemap(s) first.
+
 ### Data Directories
 
 - `~/.claude-cells/state/<repo-id>/state.json` - Per-repo workstream state (branches, container IDs, session IDs)
@@ -186,10 +197,18 @@ if app.dialog == nil {
 - **Session Persistence**: Claude sessions are persisted from container runtime location to mount point before pause, surviving container rebuilds
 - **OAuth Credential Refresh**: `CredentialRefresher` re-registers existing containers on startup, ensuring credentials stay fresh even after ccells restarts. Uses `CLAUDE_CONFIG_DIR` for proper Claude Code integration.
 - **Container Security Hardening**: Tiered security defaults (hardened/moderate/compat) with auto-relaxation on startup failure. Drops dangerous capabilities, enables no-new-privileges, uses init process.
+- **PR Generation via Claude CLI**: Uses Claude (haiku model) to generate PR titles and descriptions from branch diffs.
+- **tmux Integration Testing**: Golden file support for viewport verification tests.
 
 ### Remaining Technical Debt
 
 1. **Full Context Propagation**: Most operations use timeouts, but a root context for app-wide cancellation would be cleaner (pass context from main through AppModel to all commands)
+2. **God Objects**: AppModel (94 fields) and PaneModel (40+ fields) handle too many concerns. PaneModel could be split into PaneRenderer, ScrollController, AnimationController.
+3. **Global Mutable State**: `program`, `containerTracker`, `credentialRefresher` are package-level globals in tui package. Should be passed as AppModel fields for better testability.
+
+### Container Limitations
+
+- **No GitHub access from containers**: Containers cannot directly push to GitHub or create PRs. Use the host's `gh` CLI via pairing mode or push from the host after the container finishes work.
 
 ### Code Standards
 
