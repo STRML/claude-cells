@@ -1306,6 +1306,68 @@ func TestGit_MergeBranchWithOptions_AutoRebaseWithRealConflicts(t *testing.T) {
 	}
 }
 
+func TestGit_MergeBranchWithOptions_WorktreeConflict(t *testing.T) {
+	// This test verifies that when a branch is checked out in another worktree,
+	// the auto-rebase gracefully fails with a helpful error message instead
+	// of failing with git's cryptic "already used by worktree" error.
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// Get the base branch name (main or master)
+	baseBranch, _ := g.CurrentBranch(ctx)
+
+	// Create a worktree with a feature branch
+	worktreePath := filepath.Join(dir, "worktree")
+	err := g.CreateWorktree(ctx, worktreePath, "feature-in-worktree")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+	defer g.RemoveWorktree(ctx, worktreePath)
+
+	// Make a commit on the feature branch (in the worktree)
+	worktreeGit := New(worktreePath)
+	_ = os.WriteFile(filepath.Join(worktreePath, "feature.txt"), []byte("feature content"), 0644)
+	exec.Command("git", "-C", worktreePath, "add", "feature.txt").Run()
+	exec.Command("git", "-C", worktreePath, "commit", "-m", "Add feature").Run()
+
+	// Go back to main in the original repo and make a conflicting commit
+	_ = os.WriteFile(filepath.Join(dir, "feature.txt"), []byte("main content"), 0644)
+	exec.Command("git", "-C", dir, "add", "feature.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Add main version").Run()
+
+	// Verify the worktree exists for this branch
+	path, exists := g.WorktreeExistsForBranch(ctx, "feature-in-worktree")
+	if !exists {
+		t.Fatalf("WorktreeExistsForBranch() should find the worktree")
+	}
+	if path != worktreePath {
+		t.Fatalf("WorktreeExistsForBranch() = %q, want %q", path, worktreePath)
+	}
+	_ = worktreeGit
+	_ = baseBranch
+
+	// Try to merge - should get an error about worktree conflict
+	err = g.MergeBranchWithOptions(ctx, "feature-in-worktree", true)
+	if err == nil {
+		t.Fatal("MergeBranchWithOptions() should fail when branch is in a worktree")
+	}
+
+	// Should NOT be "already used by worktree" error, but our custom message
+	errStr := err.Error()
+	if strings.Contains(errStr, "already used by worktree") {
+		t.Errorf("Error should not be git's cryptic message, got: %v", err)
+	}
+	if !strings.Contains(errStr, "cannot auto-rebase") {
+		t.Errorf("Error should mention 'cannot auto-rebase', got: %v", err)
+	}
+	if !strings.Contains(errStr, worktreePath) {
+		t.Errorf("Error should mention worktree path, got: %v", err)
+	}
+}
+
 func TestIsValidBranchName(t *testing.T) {
 	tests := []struct {
 		name     string

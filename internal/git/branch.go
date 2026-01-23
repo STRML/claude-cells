@@ -337,6 +337,15 @@ func (g *Git) mergeBranchInternal(ctx context.Context, branch string, squash boo
 // more work was done on it, causing conflicts on the next merge attempt.
 // Returns nil on success, MergeConflictError if rebase has conflicts.
 func (g *Git) rebaseAndRetryMerge(ctx context.Context, branch string, squash bool) error {
+	// Check if the branch is checked out in another worktree
+	// Git doesn't allow checking out a branch that's already in use by a worktree
+	if worktreePath, exists := g.WorktreeExistsForBranch(ctx, branch); exists {
+		// Cannot rebase from here - the branch is locked to its worktree
+		// Return a helpful error suggesting the user rebase from within the container
+		return fmt.Errorf("cannot auto-rebase: branch '%s' is checked out in worktree at %s. "+
+			"Rebase the branch from within its container, or destroy the workstream first", branch, worktreePath)
+	}
+
 	// Determine the base branch
 	baseBranch, err := g.GetBaseBranch(ctx)
 	if err != nil {
