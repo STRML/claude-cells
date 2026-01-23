@@ -125,12 +125,16 @@ func TestScrollPageDown_StaysInScrollModeWhenNotAtBottom(t *testing.T) {
 	// Scroll down just one page (not enough to reach bottom)
 	p.ScrollPageDown()
 
-	// Should stay in scroll mode if not at bottom
-	// Note: scrollMode is only exited when AtBottom() returns true
+	// Assert both branches: at bottom should exit, not at bottom should stay
 	if p.viewport.AtBottom() {
 		// If we're at bottom, scroll mode should be false
 		if p.IsScrollMode() {
 			t.Error("ScrollPageDown() should exit scroll mode when at bottom")
+		}
+	} else {
+		// If we're NOT at bottom, scroll mode should still be true
+		if !p.IsScrollMode() {
+			t.Error("ScrollPageDown() should stay in scroll mode when not at bottom")
 		}
 	}
 }
