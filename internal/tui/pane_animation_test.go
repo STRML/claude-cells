@@ -242,9 +242,9 @@ func TestGetInitStartTime(t *testing.T) {
 
 func TestSetInitStatus_GetInitStatus(t *testing.T) {
 	tests := []struct {
-		name       string
-		status     string
-		wantStep   int
+		name        string
+		status      string
+		wantStep    int
 		initialStep int
 	}{
 		{
@@ -380,41 +380,41 @@ func TestStartSummarizeFade_IsSummarizeFading(t *testing.T) {
 
 func TestSummarizeFadeProgress(t *testing.T) {
 	tests := []struct {
-		name                string
-		phase               SummarizePhase
-		summarizeStart      time.Time
-		summarizeFadeEndAt  time.Time
-		wantProgressApprox  float64
+		name                  string
+		phase                 SummarizePhase
+		summarizeStart        time.Time
+		summarizeFadeEndAt    time.Time
+		wantProgressApprox    float64
 		wantProgressTolerance float64
 	}{
 		{
-			name:               "not in fading phase returns 0",
-			phase:              SummarizePhasePrompt,
-			wantProgressApprox: 0,
+			name:                  "not in fading phase returns 0",
+			phase:                 SummarizePhasePrompt,
+			wantProgressApprox:    0,
 			wantProgressTolerance: 0.01,
 		},
 		{
-			name:               "at start returns 0",
-			phase:              SummarizePhaseFading,
-			summarizeStart:     time.Now(),
-			summarizeFadeEndAt: time.Now().Add(4 * time.Second),
-			wantProgressApprox: 0,
+			name:                  "at start returns 0",
+			phase:                 SummarizePhaseFading,
+			summarizeStart:        time.Now(),
+			summarizeFadeEndAt:    time.Now().Add(4 * time.Second),
+			wantProgressApprox:    0,
 			wantProgressTolerance: 0.1,
 		},
 		{
-			name:               "halfway through returns 0.5",
-			phase:              SummarizePhaseFading,
-			summarizeStart:     time.Now().Add(-2 * time.Second),
-			summarizeFadeEndAt: time.Now().Add(2 * time.Second),
-			wantProgressApprox: 0.5,
+			name:                  "halfway through returns 0.5",
+			phase:                 SummarizePhaseFading,
+			summarizeStart:        time.Now().Add(-2 * time.Second),
+			summarizeFadeEndAt:    time.Now().Add(2 * time.Second),
+			wantProgressApprox:    0.5,
 			wantProgressTolerance: 0.1,
 		},
 		{
-			name:               "past end returns 1.0",
-			phase:              SummarizePhaseFading,
-			summarizeStart:     time.Now().Add(-5 * time.Second),
-			summarizeFadeEndAt: time.Now().Add(-1 * time.Second),
-			wantProgressApprox: 1.0,
+			name:                  "past end returns 1.0",
+			phase:                 SummarizePhaseFading,
+			summarizeStart:        time.Now().Add(-5 * time.Second),
+			summarizeFadeEndAt:    time.Now().Add(-1 * time.Second),
+			wantProgressApprox:    1.0,
 			wantProgressTolerance: 0.01,
 		},
 	}
