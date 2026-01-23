@@ -7,8 +7,14 @@ import (
 	"strings"
 )
 
-// ansiRegex matches ANSI escape sequences
-var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
+// ansiRegex matches ANSI CSI (Control Sequence Introducer) escape sequences.
+// Pattern matches: ESC [ <params> <intermediates> <final>
+// - params: 0x30-0x3F (digits, semicolon, and private markers like ?)
+// - intermediates: 0x20-0x2F (space through /)
+// - final: 0x40-0x7E (@ through ~)
+// This handles standard sequences like colors (\x1b[31m) and private sequences
+// like cursor visibility (\x1b[?25l, \x1b[?25h).
+var ansiRegex = regexp.MustCompile(`\x1b\[[0-?]*[ -/]*[@-~]`)
 
 // clampByte clamps an integer to the valid byte range [0, 255]
 func clampByte(v int) int {
