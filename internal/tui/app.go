@@ -1950,8 +1950,8 @@ Scroll Mode:
 					}
 				} else {
 					m.panes[i].AppendOutput("Rebase successful!\n")
-					// Notify Claude about the rebase
-					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ Rebased '%s' onto main", ws.BranchName), true); err != nil {
+					// Notify Claude about the rebase (don't press Enter - avoids submitting Claude's pending input)
+					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ Rebased '%s' onto main", ws.BranchName), false); err != nil {
 						LogWarn("Failed to notify Claude about rebase for %s (pane %d): %v", ws.BranchName, i, err)
 					}
 					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
@@ -1982,8 +1982,8 @@ Scroll Mode:
 					// Mark branch as pushed - this enables force push option in merge dialog
 					// and signals to Claude not to use commit amend
 					ws.SetHasBeenPushed(true)
-					// Notify Claude Code about the push (uses Kitty Enter)
-					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ Branch '%s' pushed to remote (avoid using commit --amend)", ws.BranchName), true); err != nil {
+					// Notify Claude Code about the push (don't press Enter - avoids submitting Claude's pending input)
+					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ Branch '%s' pushed to remote (avoid using commit --amend)", ws.BranchName), false); err != nil {
 						LogWarn("Failed to notify Claude about push for %s (pane %d): %v", ws.BranchName, i, err)
 					}
 					// Update in-pane progress dialog if open
@@ -2011,8 +2011,8 @@ Scroll Mode:
 					// Store PR info and mark as pushed (PR creation pushes the branch)
 					ws.SetPRInfo(msg.PRNumber, msg.PRURL)
 					ws.SetHasBeenPushed(true)
-					// Notify Claude about the PR and amend prevention
-					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ PR #%d created: %s\n\nIMPORTANT: Never use `git commit --amend` after a PR has been pushed. Create new commits instead.", msg.PRNumber, msg.PRURL), true); err != nil {
+					// Notify Claude about the PR and amend prevention (don't press Enter - avoids submitting Claude's pending input)
+					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ PR #%d created: %s (avoid using commit --amend)", msg.PRNumber, msg.PRURL), false); err != nil {
 						LogWarn("Failed to notify Claude about PR creation for %s (pane %d): %v", ws.BranchName, i, err)
 					}
 					// Update in-pane progress dialog if open
@@ -2045,8 +2045,8 @@ Scroll Mode:
 					}
 				} else {
 					m.panes[i].AppendOutput("Branch merged into main successfully!\n")
-					// Notify Claude Code about the merge (uses Kitty Enter)
-					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ Branch '%s' merged into main", ws.BranchName), true); err != nil {
+					// Notify Claude Code about the merge (don't press Enter - avoids submitting Claude's pending input)
+					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ Branch '%s' merged into main", ws.BranchName), false); err != nil {
 						LogWarn("Failed to notify Claude about merge for %s (pane %d): %v", ws.BranchName, i, err)
 					}
 					// Show post-merge destroy dialog in pane
@@ -2064,9 +2064,9 @@ Scroll Mode:
 				ws := m.panes[i].Workstream()
 				if msg.Error != nil {
 					if len(msg.ConflictFiles) > 0 {
-						// Rebase has conflicts - notify Claude to resolve (uses Kitty Enter)
+						// Rebase has conflicts - notify Claude to resolve (don't press Enter - avoids submitting Claude's pending input)
 						m.panes[i].AppendOutput("Rebase has conflicts. Resolve in container and run 'git rebase --continue'\n")
-						if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ⚠ Rebase has conflicts. Please resolve the following files and run 'git rebase --continue': %s", formatFileList(msg.ConflictFiles)), true); err != nil {
+						if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ⚠ Rebase has conflicts. Please resolve the following files and run 'git rebase --continue': %s", formatFileList(msg.ConflictFiles)), false); err != nil {
 							LogWarn("Failed to notify Claude about rebase conflicts for %s (pane %d): %v", ws.BranchName, i, err)
 						}
 					} else {
@@ -2074,8 +2074,8 @@ Scroll Mode:
 					}
 				} else {
 					m.panes[i].AppendOutput("Rebase successful! Branch is now up to date with main.\n")
-					// Notify Claude Code about the rebase (uses Kitty Enter)
-					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ Branch '%s' rebased onto main. You can now try merging again.", ws.BranchName), true); err != nil {
+					// Notify Claude Code about the rebase (don't press Enter - avoids submitting Claude's pending input)
+					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ Branch '%s' rebased onto main. You can now try merging again.", ws.BranchName), false); err != nil {
 						LogWarn("Failed to notify Claude about rebase for %s (pane %d): %v", ws.BranchName, i, err)
 					}
 					m.toast = "Rebase successful"

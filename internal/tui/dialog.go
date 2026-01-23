@@ -309,30 +309,37 @@ func NewMergeDialog(branchName, workstreamID, branchInfo, synopsis string, hasBe
 	}
 
 	// Build menu items based on state
-	menuItems := []string{
-		"Merge into main (squash)",
-		"Merge into main (merge commit)",
-	}
+	var menuItems []string
 
 	if prURL != "" {
-		// PR already exists - show push to PR option
+		// PR exists - show PR-related tasks first
 		if prStatus != nil && prStatus.UnpushedCount > 0 {
 			menuItems = append(menuItems, fmt.Sprintf("Push to open PR (%d commit(s))", prStatus.UnpushedCount))
 		} else {
 			menuItems = append(menuItems, "Push to open PR")
 		}
+		// Always show rebase option for PR workflow
+		menuItems = append(menuItems, "Rebase on main (fetch first)")
+		// Show force push option if branch has been pushed (allows re-pushing after amend)
+		if hasBeenPushed {
+			menuItems = append(menuItems, "Force push (--force-with-lease)")
+		}
+		// Separator before direct merge options
+		menuItems = append(menuItems, "───────────────────────────")
+		menuItems = append(menuItems, "Merge into main (squash)")
+		menuItems = append(menuItems, "Merge into main (merge commit)")
 	} else {
+		// No PR - show merge options first, then PR creation
+		menuItems = append(menuItems, "Merge into main (squash)")
+		menuItems = append(menuItems, "Merge into main (merge commit)")
 		menuItems = append(menuItems, "Create Pull Request")
-	}
-
-	menuItems = append(menuItems, "Push branch only")
-
-	// Always show rebase option
-	menuItems = append(menuItems, "Rebase on main (fetch first)")
-
-	// Show force push option if branch has been pushed (allows re-pushing after amend)
-	if hasBeenPushed {
-		menuItems = append(menuItems, "Force push (--force-with-lease)")
+		menuItems = append(menuItems, "Push branch only")
+		// Always show rebase option
+		menuItems = append(menuItems, "Rebase on main (fetch first)")
+		// Show force push option if branch has been pushed (allows re-pushing after amend)
+		if hasBeenPushed {
+			menuItems = append(menuItems, "Force push (--force-with-lease)")
+		}
 	}
 
 	menuItems = append(menuItems, "Cancel")
@@ -1020,6 +1027,10 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 			if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogQuitConfirm || d.Type == DialogCopyUntrackedFiles {
 				if d.MenuSelection > 0 {
 					d.MenuSelection--
+					// Skip separator items (start with ───)
+					for d.MenuSelection > 0 && strings.HasPrefix(d.MenuItems[d.MenuSelection], "───") {
+						d.MenuSelection--
+					}
 				}
 				return d, nil
 			}
@@ -1035,6 +1046,10 @@ func (d DialogModel) Update(msg tea.Msg) (DialogModel, tea.Cmd) {
 			if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogQuitConfirm || d.Type == DialogCopyUntrackedFiles {
 				if d.MenuSelection < len(d.MenuItems)-1 {
 					d.MenuSelection++
+					// Skip separator items (start with ───)
+					for d.MenuSelection < len(d.MenuItems)-1 && strings.HasPrefix(d.MenuItems[d.MenuSelection], "───") {
+						d.MenuSelection++
+					}
 				}
 				return d, nil
 			}
@@ -1226,7 +1241,10 @@ func (d DialogModel) View() string {
 	// Menu-style dialogs render a selection list
 	if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogQuitConfirm || d.Type == DialogCopyUntrackedFiles {
 		for i, item := range d.MenuItems {
-			if i == d.MenuSelection {
+			// Separator items render without selection prefix
+			if strings.HasPrefix(item, "───") {
+				content.WriteString(item)
+			} else if i == d.MenuSelection {
 				content.WriteString("→ ")
 				content.WriteString(item)
 			} else {
@@ -1322,7 +1340,10 @@ func (d DialogModel) ViewInPane() string {
 	} else if d.Type == DialogSettings || d.Type == DialogMerge || d.Type == DialogBranchConflict || d.Type == DialogCommitBeforeMerge || d.Type == DialogPostMergeDestroy || d.Type == DialogMergeConflict || d.Type == DialogQuitConfirm || d.Type == DialogCopyUntrackedFiles {
 		// Menu items (for menu-style dialogs like merge) - same styling as View()
 		for i, item := range d.MenuItems {
-			if i == d.MenuSelection {
+			// Separator items render without selection prefix
+			if strings.HasPrefix(item, "───") {
+				content.WriteString(item)
+			} else if i == d.MenuSelection {
 				content.WriteString("→ ")
 				content.WriteString(item)
 			} else {
