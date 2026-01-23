@@ -81,7 +81,12 @@ build_args_json() {
             json="$json,"
         fi
         # Escape special characters in JSON string
-        local escaped=$(echo -n "$arg" | sed 's/\\/\\\\/g; s/"/\\"/g; s/	/\\t/g')
+        # Order matters: escape backslash first, then other special chars
+        local escaped=$(printf '%s' "$arg" | sed -e 's/\\/\\\\/g' \
+            -e 's/"/\\"/g' \
+            -e 's/	/\\t/g' \
+            -e ':a' -e 'N' -e '$!ba' -e 's/\n/\\n/g' \
+            -e 's/\r/\\r/g')
         json="$json\"$escaped\""
     done
     json="$json]"

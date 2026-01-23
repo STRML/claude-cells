@@ -52,9 +52,12 @@ func validateUnrestricted(args []string, ws WorkstreamInfo) error {
 
 // validatePush ensures push is only to the workstream's branch and no --force.
 func validatePush(args []string, ws WorkstreamInfo) error {
-	// Check for force flags
+	// Check for force flags - must handle various formats:
+	// --force, --force=true, -f, -f=true, --force-with-lease, --force-with-lease=...
 	for _, arg := range args {
 		if arg == "--force" || arg == "-f" ||
+			strings.HasPrefix(arg, "--force=") ||
+			strings.HasPrefix(arg, "-f=") ||
 			strings.HasPrefix(arg, "--force-with-lease") {
 			return fmt.Errorf("force push not allowed from container")
 		}

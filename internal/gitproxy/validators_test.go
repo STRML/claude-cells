@@ -58,6 +58,20 @@ func TestValidatePush(t *testing.T) {
 			errMsg:  "force push not allowed",
 		},
 		{
+			name:    "push with --force=true",
+			args:    []string{"--force=true", "origin", "feature-branch"},
+			ws:      WorkstreamInfo{Branch: "feature-branch"},
+			wantErr: true,
+			errMsg:  "force push not allowed",
+		},
+		{
+			name:    "push with -f=true",
+			args:    []string{"-f=true", "origin", "feature-branch"},
+			ws:      WorkstreamInfo{Branch: "feature-branch"},
+			wantErr: true,
+			errMsg:  "force push not allowed",
+		},
+		{
 			name: "push with -u flag (set upstream)",
 			args: []string{"-u", "origin", "feature-branch"},
 			ws:   WorkstreamInfo{Branch: "feature-branch"},
