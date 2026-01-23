@@ -414,9 +414,11 @@ func TestPRCreatedMsg(t *testing.T) {
 
 func TestMergeBranchMsg(t *testing.T) {
 	tests := []struct {
-		name    string
-		msg     MergeBranchMsg
-		wantErr bool
+		name                string
+		msg                 MergeBranchMsg
+		wantErr             bool
+		wantContainerRebase bool
+		wantConflictFiles   int
 	}{
 		{
 			name: "successful merge",
@@ -424,15 +426,28 @@ func TestMergeBranchMsg(t *testing.T) {
 				WorkstreamID: "ws-1",
 				Error:        nil,
 			},
-			wantErr: false,
+			wantErr:             false,
+			wantContainerRebase: false,
 		},
 		{
 			name: "merge conflict",
 			msg: MergeBranchMsg{
-				WorkstreamID: "ws-1",
-				Error:        errors.New("merge conflict"),
+				WorkstreamID:  "ws-1",
+				Error:         errors.New("merge conflict"),
+				ConflictFiles: []string{"file1.go", "file2.go"},
 			},
-			wantErr: true,
+			wantErr:           true,
+			wantConflictFiles: 2,
+		},
+		{
+			name: "needs container rebase (worktree conflict)",
+			msg: MergeBranchMsg{
+				WorkstreamID:         "ws-1",
+				Error:                errors.New("cannot auto-rebase: branch checked out in worktree"),
+				NeedsContainerRebase: true,
+			},
+			wantErr:             true,
+			wantContainerRebase: true,
 		},
 	}
 
@@ -440,6 +455,12 @@ func TestMergeBranchMsg(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if (tt.msg.Error != nil) != tt.wantErr {
 				t.Errorf("Error = %v, wantErr = %v", tt.msg.Error, tt.wantErr)
+			}
+			if tt.msg.NeedsContainerRebase != tt.wantContainerRebase {
+				t.Errorf("NeedsContainerRebase = %v, want %v", tt.msg.NeedsContainerRebase, tt.wantContainerRebase)
+			}
+			if len(tt.msg.ConflictFiles) != tt.wantConflictFiles {
+				t.Errorf("ConflictFiles count = %d, want %d", len(tt.msg.ConflictFiles), tt.wantConflictFiles)
 			}
 		})
 	}

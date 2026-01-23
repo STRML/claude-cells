@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -1211,9 +1212,10 @@ func CreatePRCmd(ws *workstream.Workstream) tea.Cmd {
 
 // MergeBranchMsg is sent when a branch merge completes.
 type MergeBranchMsg struct {
-	WorkstreamID  string
-	Error         error
-	ConflictFiles []string // Files with conflicts (if any)
+	WorkstreamID         string
+	Error                error
+	ConflictFiles        []string // Files with conflicts (if any)
+	NeedsContainerRebase bool     // True if rebase must happen from within container (worktree conflict)
 }
 
 // MergeBranchCmd returns a command that merges a branch into main.
@@ -1247,6 +1249,15 @@ func MergeBranchWithOptionsCmd(ws *workstream.Workstream, squash bool) tea.Cmd {
 					WorkstreamID:  ws.ID,
 					Error:         err,
 					ConflictFiles: conflictErr.ConflictFiles,
+				}
+			}
+			// Check if it's a worktree conflict (branch checked out in container)
+			var wtErr *git.WorktreeConflictError
+			if errors.As(err, &wtErr) {
+				return MergeBranchMsg{
+					WorkstreamID:         ws.ID,
+					Error:                err,
+					NeedsContainerRebase: true,
 				}
 			}
 			return MergeBranchMsg{WorkstreamID: ws.ID, Error: fmt.Errorf("failed to merge branch: %w", err)}

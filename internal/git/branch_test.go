@@ -1306,6 +1306,84 @@ func TestGit_MergeBranchWithOptions_AutoRebaseWithRealConflicts(t *testing.T) {
 	}
 }
 
+func TestGit_MergeBranchWithOptions_WorktreeConflict(t *testing.T) {
+	// This test verifies that when a branch is checked out in another worktree,
+	// the auto-rebase gracefully fails with a helpful error message instead
+	// of failing with git's cryptic "already used by worktree" error.
+	dir := setupTestRepo(t)
+	defer os.RemoveAll(dir)
+
+	g := New(dir)
+	ctx := context.Background()
+
+	// Get the base branch name (main or master)
+	baseBranch, _ := g.CurrentBranch(ctx)
+
+	// Create a worktree in a temp directory outside the repo to avoid path issues
+	worktreeTempDir, err := os.MkdirTemp("", "worktree-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir for worktree: %v", err)
+	}
+	defer os.RemoveAll(worktreeTempDir)
+
+	worktreePath := filepath.Join(worktreeTempDir, "worktree")
+	err = g.CreateWorktree(ctx, worktreePath, "feature-in-worktree")
+	if err != nil {
+		t.Fatalf("CreateWorktree() error = %v", err)
+	}
+	defer g.RemoveWorktree(ctx, worktreePath)
+
+	// Make a commit on the feature branch (in the worktree)
+	worktreeGit := New(worktreePath)
+	_ = os.WriteFile(filepath.Join(worktreePath, "feature.txt"), []byte("feature content"), 0644)
+	exec.Command("git", "-C", worktreePath, "add", "feature.txt").Run()
+	exec.Command("git", "-C", worktreePath, "commit", "-m", "Add feature").Run()
+
+	// Go back to main in the original repo and make a conflicting commit
+	_ = os.WriteFile(filepath.Join(dir, "feature.txt"), []byte("main content"), 0644)
+	exec.Command("git", "-C", dir, "add", "feature.txt").Run()
+	exec.Command("git", "-C", dir, "commit", "-m", "Add main version").Run()
+
+	// Verify the worktree exists for this branch
+	// Use EvalSymlinks to normalize paths (handles macOS /tmp -> /private/tmp symlinks)
+	path, exists := g.WorktreeExistsForBranch(ctx, "feature-in-worktree")
+	if !exists {
+		t.Fatalf("WorktreeExistsForBranch() should find the worktree")
+	}
+	normalizedPath, _ := filepath.EvalSymlinks(path)
+	normalizedWorktreePath, _ := filepath.EvalSymlinks(worktreePath)
+	if normalizedPath != normalizedWorktreePath {
+		t.Fatalf("WorktreeExistsForBranch() = %q (normalized: %q), want %q (normalized: %q)",
+			path, normalizedPath, worktreePath, normalizedWorktreePath)
+	}
+	_ = worktreeGit
+	_ = baseBranch
+
+	// Try to merge - should get an error about worktree conflict
+	err = g.MergeBranchWithOptions(ctx, "feature-in-worktree", true)
+	if err == nil {
+		t.Fatal("MergeBranchWithOptions() should fail when branch is in a worktree")
+	}
+
+	// Should be a WorktreeConflictError
+	var wtErr *WorktreeConflictError
+	if !errors.As(err, &wtErr) {
+		t.Fatalf("Expected WorktreeConflictError, got %T: %v", err, err)
+	}
+
+	// Verify the error contains correct branch name
+	if wtErr.Branch != "feature-in-worktree" {
+		t.Errorf("WorktreeConflictError.Branch = %q, want %q", wtErr.Branch, "feature-in-worktree")
+	}
+
+	// Verify the error contains the worktree path (normalize for symlinks)
+	normalizedErrPath, _ := filepath.EvalSymlinks(wtErr.WorktreePath)
+	if normalizedErrPath != normalizedWorktreePath {
+		t.Errorf("WorktreeConflictError.WorktreePath = %q (normalized: %q), want %q",
+			wtErr.WorktreePath, normalizedErrPath, normalizedWorktreePath)
+	}
+}
+
 func TestIsValidBranchName(t *testing.T) {
 	tests := []struct {
 		name     string

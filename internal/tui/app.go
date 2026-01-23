@@ -185,6 +185,21 @@ func (m *AppModel) projectName() string {
 	return name
 }
 
+// getDefaultBranch returns the repository's default branch name (main or master).
+// Falls back to "main" if unable to determine.
+func (m *AppModel) getDefaultBranch() string {
+	repoPath := m.workingDir
+	if repoPath == "" {
+		repoPath, _ = os.Getwd()
+	}
+	gitRepo := GitClientFactory(repoPath)
+	defaultBranch, err := gitRepo.GetBaseBranch(m.ctx)
+	if err != nil || defaultBranch == "" {
+		return "main"
+	}
+	return defaultBranch
+}
+
 // Orchestrator returns the workstream orchestrator for lifecycle operations.
 // Returns nil if Docker is not available.
 func (m *AppModel) Orchestrator() *orchestrator.Orchestrator {
@@ -1264,9 +1279,12 @@ Scroll Mode:
 						m.toastExpiry = time.Now().Add(toastDuration)
 						m.panes[i].AppendOutput("\nAsking Claude to resolve merge conflicts...\n")
 
+						// Get the default branch name (main/master)
+						defaultBranch := m.getDefaultBranch()
+
 						// Build the prompt for Claude
 						fileList := strings.Join(msg.ConflictFiles, ", ")
-						prompt := fmt.Sprintf("Please run `git fetch origin main && git rebase origin/main` to start the rebase, then resolve the merge conflicts in these files: %s. After resolving each conflict, run `git add <file>` and then `git rebase --continue`. Let me know when done.", fileList)
+						prompt := fmt.Sprintf("Please run `git fetch origin %s && git rebase origin/%s` to start the rebase, then resolve the merge conflicts in these files: %s. After resolving each conflict, run `git add <file>` and then `git rebase --continue`. Let me know when done.", defaultBranch, defaultBranch, fileList)
 
 						// Send the prompt to Claude with Enter (uses Kitty keyboard protocol)
 						if err := m.panes[i].SendInput(prompt, true); err != nil {
@@ -2036,6 +2054,25 @@ Scroll Mode:
 						// Show merge conflict dialog in pane
 						dialog := NewMergeConflictDialog(ws.BranchName, ws.ID, msg.ConflictFiles)
 						m.panes[i].SetInPaneDialog(&dialog)
+					} else if msg.NeedsContainerRebase {
+						// Branch is checked out in container's worktree - auto-prompt Claude to rebase
+						m.panes[i].AppendOutput("Branch needs rebase from container. Asking Claude...\n")
+						m.toast = "Asking Claude to rebase..."
+						m.toastExpiry = time.Now().Add(toastDuration)
+
+						// Close progress dialog if open
+						if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
+							m.panes[i].ClearInPaneDialog()
+						}
+
+						// Get the default branch name (main/master)
+						defaultBranch := m.getDefaultBranch()
+
+						// Send rebase prompt to Claude (fetch first to ensure up-to-date)
+						prompt := fmt.Sprintf("Please rebase this branch onto %s by running `git fetch origin %s && git rebase origin/%s`. If there are conflicts, resolve them and run `git rebase --continue`. Let me know when done so I can retry the merge.", defaultBranch, defaultBranch, defaultBranch)
+						if err := m.panes[i].SendInput(prompt, true); err != nil {
+							LogWarn("Failed to send rebase prompt to pane %d: %v", i, err)
+						}
 					} else {
 						m.panes[i].AppendOutput(fmt.Sprintf("Merge failed: %v\n", msg.Error))
 						// Update in-pane progress dialog if open
