@@ -206,11 +206,11 @@ func loadGlobalCellsConfig() *CellsConfig {
 // Order of precedence (highest to lowest):
 // 1. Project config (.claude-cells/config.yaml in projectPath)
 // 2. Global config (~/.claude-cells/config.yaml)
-// 3. Default (ccstatusline)
+// 3. Default (empty - no injections)
 func LoadDockerfileConfig(projectPath string) DockerfileConfig {
-	// Default: install ccstatusline
+	// Default: no injections
 	cfg := DockerfileConfig{
-		Inject: []string{"npm install -g ccstatusline"},
+		Inject: []string{},
 	}
 
 	// Load global config
@@ -422,12 +422,11 @@ const DefaultConfigYAML = `# Claude Cells Configuration
 # Documentation: https://github.com/anthropics/claude-cells/blob/main/docs/CONTAINER-SECURITY.md
 
 # Dockerfile customization - commands injected after Claude Code installation
-dockerfile:
-  inject:
-    - "npm install -g ccstatusline"
-    # Add additional packages here, e.g.:
-    # - "apt-get update && apt-get install -y vim"
-    # - "pip install ipython"
+# Uncomment and customize as needed:
+# dockerfile:
+#   inject:
+#     - "apt-get update && apt-get install -y vim"
+#     - "pip install ipython"
 
 security:
   # Security tier controls the default capability drops.

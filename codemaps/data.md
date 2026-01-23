@@ -141,9 +141,11 @@ type SecurityConfig struct {
 }
 ```
 
-### Global Config (`config.json`)
+### Application State (`app-state.json`)
 
-Location: `~/.claude-cells/config.json`
+Location: `~/.claude-cells/app-state.json`
+
+Internal state file (not user-editable). Automatically migrates from legacy `config.json` if present.
 
 ```json
 {
@@ -572,7 +574,7 @@ type DialogResult struct {
 |------|----------|
 | Workstream state | `~/.claude-cells/state/<repo-id>/state.json` |
 | Instance lock | `~/.claude-cells/state/<repo-id>/.ccells.lock` |
-| Global config | `~/.claude-cells/config.json` |
+| App state | `~/.claude-cells/app-state.json` |
 | Security config (global) | `~/.claude-cells/config.yaml` |
 | Security config (project) | `<project>/.claude-cells/config.yaml` |
 | Container configs | `~/.claude-cells/containers/<name>/` |

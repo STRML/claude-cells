@@ -3,6 +3,8 @@ package docker
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -261,8 +263,30 @@ func findDockerfile() (string, error) {
 }
 
 // GetBaseImageName returns the base image name with a content hash tag.
-// This ensures the image is rebuilt when the Dockerfile changes.
-// The hash is computed from the embedded Dockerfile at build time.
+// This ensures the image is rebuilt when the Dockerfile or config changes.
+// The hash is computed from both the embedded Dockerfile and the global
+// dockerfile config (~/.claude-cells/config.yaml inject commands).
 func GetBaseImageName() string {
-	return DefaultImage + ":" + configs.BaseDockerfileHash()
+	// Start with the embedded Dockerfile hash
+	baseHash := configs.BaseDockerfileHash()
+
+	// Include dockerfile config in the hash so changes trigger rebuild
+	dfCfg := LoadDockerfileConfig("")
+	if len(dfCfg.Inject) == 0 {
+		// No injections, use base hash directly
+		return DefaultImage + ":" + baseHash
+	}
+
+	// Combine base Dockerfile hash with injection config
+	// Use newline delimiter between commands to prevent collisions
+	// (e.g., ["ab","c"] vs ["a","bc"] should produce different hashes)
+	h := sha256.New()
+	h.Write([]byte(baseHash))
+	for _, cmd := range dfCfg.Inject {
+		h.Write([]byte(cmd))
+		h.Write([]byte{'\n'})
+	}
+	combinedHash := hex.EncodeToString(h.Sum(nil))[:12]
+
+	return DefaultImage + ":" + combinedHash
 }

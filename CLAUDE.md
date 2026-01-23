@@ -109,14 +109,14 @@ Custom packages can be injected into container images via `~/.claude-cells/confi
 ```yaml
 dockerfile:
   inject:
-    - "npm install -g ccstatusline"      # Default - status line tool
     - "apt-get update && apt-get install -y vim"
     - "pip install ipython"
 ```
 
 - **Global config**: `~/.claude-cells/config.yaml` applies to all projects
 - **Project config**: `.claude-cells/config.yaml` overrides global (entire inject list replaced, not merged)
-- **Default**: If no config exists, `ccstatusline` is installed automatically
+- **Default**: If no config exists, no packages are injected (base image only)
+- **Rebuild trigger**: Changing injections triggers an automatic image rebuild
 
 Injected commands run as `RUN` instructions after Claude Code installation but before the container's `WORKDIR` is set.
 
