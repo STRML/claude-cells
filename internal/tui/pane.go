@@ -326,50 +326,80 @@ func (p PaneModel) View() string {
 	title := PaneTitle.Render(p.workstream.GetTitle())
 	stateLabel := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888")).Render(fmt.Sprintf("(%s)", p.workstream.GetState()))
 
-	// PR status indicator (shown when PR exists)
-	var prIndicator string
+	// Build left side of header
+	var headerLeft string
+	if p.focused && modeIndicator != "" {
+		headerLeft = fmt.Sprintf("%s %s %s %s %s", indexLabel, modeIndicator, status, title, stateLabel)
+	} else {
+		headerLeft = fmt.Sprintf("%s %s %s %s", indexLabel, status, title, stateLabel)
+	}
+
+	// PR status badge (shown at top right when PR exists)
+	var prBadge string
 	if p.workstream.PRURL != "" && p.prStatus != nil {
 		var parts []string
 
-		// Unpushed commits indicator
+		// Check status indicator with vibrant colors
+		switch p.prStatus.CheckStatus {
+		case git.PRCheckStatusSuccess:
+			// Bright electric green on dark green background
+			checkStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#00FF88")).
+				Bold(true)
+			parts = append(parts, checkStyle.Render("✓"))
+		case git.PRCheckStatusPending:
+			// Bright yellow/gold
+			checkStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#FFD700")).
+				Bold(true)
+			parts = append(parts, checkStyle.Render("⏳"))
+		case git.PRCheckStatusFailure:
+			// Bright red/coral
+			checkStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#FF4466")).
+				Bold(true)
+			parts = append(parts, checkStyle.Render("✗"))
+		}
+
+		// Unpushed commits indicator - bright magenta
 		if p.prStatus.UnpushedCount > 0 {
 			unpushedStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#F59E0B")). // Amber/orange for attention
+				Foreground(lipgloss.Color("#FF66FF")). // Bright magenta
 				Bold(true)
 			parts = append(parts, unpushedStyle.Render(fmt.Sprintf("↑%d", p.prStatus.UnpushedCount)))
 		}
 
-		// Check status indicator
-		switch p.prStatus.CheckStatus {
-		case git.PRCheckStatusSuccess:
-			checkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#10B981")) // Green
-			parts = append(parts, checkStyle.Render("✓"))
-		case git.PRCheckStatusPending:
-			checkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#F59E0B")) // Amber
-			parts = append(parts, checkStyle.Render("⏳"))
-		case git.PRCheckStatusFailure:
-			checkStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#EF4444")) // Red
-			parts = append(parts, checkStyle.Render("✗"))
-		}
-
-		// Divergence warning
+		// Divergence warning - bright orange/red
 		if p.prStatus.IsDiverged {
 			divergedStyle := lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#EF4444")). // Red for warning
+				Foreground(lipgloss.Color("#FF6B35")). // Bright orange
 				Bold(true)
 			parts = append(parts, divergedStyle.Render(fmt.Sprintf("⚠↓%d", p.prStatus.DivergedCount)))
 		}
 
 		if len(parts) > 0 {
-			prIndicator = " " + strings.Join(parts, " ")
+			// Create a compact badge with PR number
+			prNumStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#00DDFF")). // Bright cyan
+				Bold(true)
+			prBadge = prNumStyle.Render(fmt.Sprintf("#%d", p.prStatus.Number)) + " " + strings.Join(parts, " ")
 		}
 	}
 
+	// Combine header with PR badge on the right
 	var header string
-	if p.focused && modeIndicator != "" {
-		header = fmt.Sprintf("%s %s %s %s %s%s", indexLabel, modeIndicator, status, title, stateLabel, prIndicator)
+	if prBadge != "" {
+		// Calculate available width for spacing (account for border and padding)
+		availableWidth := p.width - 4 // 2 for border, 2 for padding
+		leftWidth := lipgloss.Width(headerLeft)
+		rightWidth := lipgloss.Width(prBadge)
+		spacing := availableWidth - leftWidth - rightWidth
+		if spacing < 1 {
+			spacing = 1
+		}
+		header = headerLeft + strings.Repeat(" ", spacing) + prBadge
 	} else {
-		header = fmt.Sprintf("%s %s %s %s%s", indexLabel, status, title, stateLabel, prIndicator)
+		header = headerLeft
 	}
 
 	// Add synopsis line below header if height > 80 and synopsis exists
