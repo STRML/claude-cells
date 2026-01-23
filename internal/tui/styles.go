@@ -190,12 +190,10 @@ const (
 
 	// SCROLL mode - orange
 	ModeScrollBadge = "#D97706" // Bright orange for badges
-	ModeScrollBar   = "#8B4D04" // Darker orange for title bar background
 
 	// DIALOG mode - purple
 	ModeDialogBadge  = "#7C3AED" // Bright purple for badges (focused)
 	ModeDialogDimmed = "#5B3A8C" // Dimmed purple for unfocused dialogs
-	ModeDialogBar    = "#4C1D95" // Darker purple for title bar background
 
 	// Initializing/unfocused - purple (same as dialog for consistency)
 	ModeInitBadge = "#7C3AED" // Purple for initializing state
