@@ -380,9 +380,9 @@ func TestExtractCLIResult_ValidEnvelope(t *testing.T) {
 func TestExtractCLIResult_EmptyResult(t *testing.T) {
 	input := `{"type":"result","result":"","is_error":false}`
 	result := extractCLIResult(input)
-	// Empty result field means we return the original input
-	if result != input {
-		t.Errorf("Expected original input for empty result, got %q", result)
+	// Empty result field returns empty string (valid envelope with empty response)
+	if result != "" {
+		t.Errorf("Expected empty string for empty result, got %q", result)
 	}
 }
 
@@ -411,14 +411,22 @@ func TestExtractCLIResult_WrongType(t *testing.T) {
 	}
 }
 
-func TestExtractCLIResult_IsolatesHookOutput(t *testing.T) {
-	// Simulate hook output appearing before the JSON envelope
-	// The extractCLIResult should fail to parse this as JSON and return as-is
-	// but in practice, the JSON parsing will find the envelope
+func TestExtractCLIResult_ValidEnvelopeExtractsResult(t *testing.T) {
+	// Valid JSON envelope extracts the result field correctly
 	input := `{"type":"result","result":"Actual response","is_error":false}`
 	result := extractCLIResult(input)
 	if result != "Actual response" {
 		t.Errorf("Expected 'Actual response', got %q", result)
+	}
+}
+
+func TestExtractCLIResult_HookOutputBeforeEnvelope(t *testing.T) {
+	// Hook output before envelope makes it unparseable - returns as-is
+	input := `Hook ran successfully
+{"type":"result","result":"Actual response","is_error":false}`
+	result := extractCLIResult(input)
+	if result != input {
+		t.Errorf("Expected original input when hook output precedes envelope, got %q", result)
 	}
 }
 

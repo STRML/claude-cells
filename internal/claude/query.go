@@ -47,7 +47,7 @@ func extractCLIResult(output string) string {
 		// Not a CLI envelope, return as-is
 		return output
 	}
-	if envelope.Type == "result" && envelope.Result != "" {
+	if envelope.Type == "result" {
 		return envelope.Result
 	}
 	return output
@@ -164,8 +164,7 @@ func Query(ctx context.Context, prompt string, opts *QueryOptions) (string, erro
 	return QueryWithExecutor(ctx, prompt, opts, defaultExecutor)
 }
 
-// QueryWithTimeout is a convenience wrapper that creates a context with the given timeout.
-func QueryWithTimeout(prompt string, timeout time.Duration) (string, error) {
-	ctx := context.Background()
+// QueryWithTimeout is a convenience wrapper that uses the given timeout.
+func QueryWithTimeout(ctx context.Context, prompt string, timeout time.Duration) (string, error) {
 	return Query(ctx, prompt, &QueryOptions{Timeout: timeout})
 }

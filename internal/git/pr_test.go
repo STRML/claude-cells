@@ -3,6 +3,7 @@ package git
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -220,7 +221,7 @@ func TestBuildPRPrompt(t *testing.T) {
 			result := buildPRPrompt(tt.branchName, tt.workstreamPrompt, tt.commitLogs, tt.branchInfo)
 
 			for _, want := range tt.wantContains {
-				if !contains(result, want) {
+				if !strings.Contains(result, want) {
 					t.Errorf("buildPRPrompt() result does not contain %q\nGot: %s", want, result)
 				}
 			}
@@ -279,21 +280,6 @@ func TestPRContentResponse(t *testing.T) {
 			}
 		})
 	}
-}
-
-// contains checks if s contains substr
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 ||
-		(len(s) > 0 && len(substr) > 0 && findSubstring(s, substr)))
-}
-
-func findSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
 }
 
 // TestMarkdownStrippingWithJSON tests the stripMarkdownCodeBlock function
