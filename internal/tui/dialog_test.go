@@ -1584,3 +1584,110 @@ func TestCopyUntrackedFilesDialog_View(t *testing.T) {
 		t.Error("View should contain selection indicator")
 	}
 }
+
+func TestNewMergeDialog_NoPR(t *testing.T) {
+	d := NewMergeDialog("feature-branch", "ws-123", "1 commit ahead", false, "", nil)
+
+	if d.Type != DialogMerge {
+		t.Error("Type should be DialogMerge")
+	}
+
+	// Without PR, order should be: squash, merge, create PR, push, rebase, cancel
+	if len(d.MenuItems) != 6 {
+		t.Errorf("Should have 6 menu items without PR, got %d", len(d.MenuItems))
+	}
+	if !strings.Contains(d.MenuItems[0], "squash") {
+		t.Errorf("First item should be squash, got %s", d.MenuItems[0])
+	}
+	if !strings.Contains(d.MenuItems[2], "Create Pull Request") {
+		t.Errorf("Third item should be Create Pull Request, got %s", d.MenuItems[2])
+	}
+	if !strings.Contains(d.MenuItems[3], "Push branch only") {
+		t.Errorf("Fourth item should be Push branch only, got %s", d.MenuItems[3])
+	}
+}
+
+func TestNewMergeDialog_WithPR(t *testing.T) {
+	d := NewMergeDialog("feature-branch", "ws-123", "1 commit ahead", true, "https://github.com/foo/bar/pull/1", nil)
+
+	if d.Type != DialogMerge {
+		t.Error("Type should be DialogMerge")
+	}
+
+	// With PR, order should be: push to PR, rebase, force push, separator, squash, merge, cancel
+	if len(d.MenuItems) != 7 {
+		t.Errorf("Should have 7 menu items with PR, got %d", len(d.MenuItems))
+	}
+	if !strings.Contains(d.MenuItems[0], "Push to open PR") {
+		t.Errorf("First item should be Push to open PR, got %s", d.MenuItems[0])
+	}
+	if !strings.Contains(d.MenuItems[1], "Rebase") {
+		t.Errorf("Second item should be Rebase, got %s", d.MenuItems[1])
+	}
+	// Third item is force push (hasBeenPushed=true)
+	if !strings.Contains(d.MenuItems[2], "Force push") {
+		t.Errorf("Third item should be Force push, got %s", d.MenuItems[2])
+	}
+	// Fourth item should be separator
+	if !strings.HasPrefix(d.MenuItems[3], "───") {
+		t.Errorf("Fourth item should be separator, got %s", d.MenuItems[3])
+	}
+	// Fifth item should be squash
+	if !strings.Contains(d.MenuItems[4], "squash") {
+		t.Errorf("Fifth item should be squash, got %s", d.MenuItems[4])
+	}
+}
+
+func TestMergeDialog_SeparatorSkipped(t *testing.T) {
+	// Create dialog with PR (which has separator)
+	d := NewMergeDialog("feature-branch", "ws-123", "1 commit ahead", true, "https://github.com/foo/bar/pull/1", nil)
+
+	// Find the separator index
+	separatorIdx := -1
+	for i, item := range d.MenuItems {
+		if strings.HasPrefix(item, "───") {
+			separatorIdx = i
+			break
+		}
+	}
+	if separatorIdx == -1 {
+		t.Fatal("Dialog should have a separator")
+	}
+
+	// Start at item before separator
+	d.MenuSelection = separatorIdx - 1
+
+	// Navigate down - should skip separator
+	d, _ = d.Update(dSpecialKey(tea.KeyDown))
+	if d.MenuSelection == separatorIdx {
+		t.Error("Down arrow should skip separator")
+	}
+	if d.MenuSelection != separatorIdx+1 {
+		t.Errorf("Selection should be at %d (after separator), got %d", separatorIdx+1, d.MenuSelection)
+	}
+
+	// Navigate up - should skip separator back
+	d, _ = d.Update(dSpecialKey(tea.KeyUp))
+	if d.MenuSelection == separatorIdx {
+		t.Error("Up arrow should skip separator")
+	}
+	if d.MenuSelection != separatorIdx-1 {
+		t.Errorf("Selection should be at %d (before separator), got %d", separatorIdx-1, d.MenuSelection)
+	}
+}
+
+func TestMergeDialog_SeparatorNotRenderedWithArrow(t *testing.T) {
+	d := NewMergeDialog("feature-branch", "ws-123", "1 commit ahead", true, "https://github.com/foo/bar/pull/1", nil)
+	d.SetSize(60, 20)
+
+	view := d.View()
+
+	// Separator line should appear without the arrow prefix
+	if strings.Contains(view, "→ ───") {
+		t.Error("Separator should not have selection arrow")
+	}
+	// But separator should still be visible
+	if !strings.Contains(view, "───") {
+		t.Error("Separator should be visible in view")
+	}
+}
