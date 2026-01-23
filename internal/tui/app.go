@@ -2355,14 +2355,14 @@ func (m AppModel) renderTitleBar() string {
 
 	var hints string
 	if m.inputMode {
+		// Show Shift+Esc if terminal supports Kitty protocol, otherwise Ctrl+B Esc
+		navKey := "⇧Esc"
+		if !m.keyboardEnhanced {
+			navKey = "Ctrl+B Esc"
+		}
 		if scrollIndicator != "" {
-			hints = "  " + coloredKeyHint("↑↓/PgUp/Dn", " scroll") + "  " + coloredKeyHint("Esc", " exit scroll")
+			hints = "  " + coloredKeyHint("↑↓/PgUp/Dn", " scroll") + "  " + coloredKeyHint(navKey, " exit scroll")
 		} else {
-			// Show Shift+Esc if terminal supports Kitty protocol, otherwise Ctrl+B Esc
-			navKey := "⇧Esc"
-			if !m.keyboardEnhanced {
-				navKey = "Ctrl+B Esc"
-			}
 			hints = "  " + coloredKeyHint(navKey, " nav") + "  " + coloredKeyHint("Ctrl+B ←→", " switch pane") + "  " + coloredKeyHint("Ctrl+B PgUp/Dn", " scroll")
 		}
 	} else {
