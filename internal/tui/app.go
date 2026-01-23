@@ -2084,7 +2084,12 @@ Scroll Mode:
 					}
 					m.panes[i].AppendOutput(successMsg)
 					// Mark branch as pushed - this enables force push option in merge dialog
+					// and signals to Claude not to use commit amend
 					ws.SetHasBeenPushed(true)
+					// Notify Claude Code about the push (don't press Enter - avoids submitting Claude's pending input)
+					if err := m.panes[i].SendInput(fmt.Sprintf("[ccells] ✓ Branch '%s' pushed to remote (avoid using commit --amend)", ws.BranchName), false); err != nil {
+						LogWarn("Failed to notify Claude about push for %s (pane %d): %v", ws.BranchName, i, err)
+					}
 					// Update in-pane progress dialog if open
 					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
 						dialog.SetComplete(dialogMsg)
@@ -2580,28 +2585,10 @@ func (m AppModel) View() tea.View {
 	if m.mouseEnabled {
 		v.MouseMode = tea.MouseModeCellMotion
 	}
-	// Show cursor in input mode at the correct position in the focused pane
-	if m.inputMode && m.dialog == nil && len(m.panes) > 0 && m.focusedPane < len(m.panes) {
-		pane := m.panes[m.focusedPane]
-		cursorPos := pane.GetCursorPosition()
-		if cursorPos.Visible {
-			// Calculate pane bounds to get absolute screen position
-			titleBarHeight := 1
-			statusBarHeight := 1
-			logPanelH := m.logPanelHeight()
-			availableHeight := m.height - titleBarHeight - statusBarHeight - logPanelH
-			bounds := CalculatePaneBounds(m.layout, len(m.panes), m.width, availableHeight, titleBarHeight)
-
-			if m.focusedPane < len(bounds) {
-				paneBounds := bounds[m.focusedPane]
-				// Absolute cursor position = pane position + cursor offset within pane
-				v.Cursor = tea.NewCursor(
-					paneBounds.X+cursorPos.X,
-					paneBounds.Y+cursorPos.Y,
-				)
-			}
-		}
-	}
+	// NOTE: We don't set v.Cursor here. Claude Code (the inner app) uses virtual cursor
+	// (renders cursor as styled text in its output), not hardware cursor positioning.
+	// The vterm.Cursor() position doesn't reflect where Claude Code's visual cursor is.
+	// Let Claude Code's own cursor rendering be visible as-is in the pane output.
 	return v
 }
 

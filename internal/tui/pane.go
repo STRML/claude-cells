@@ -881,12 +881,9 @@ func (p *PaneModel) renderVTerm() (result string) {
 		return p.lastVtermRender
 	}
 
-	// Get cursor position and visibility
-	// Show cursor when focused AND either:
-	// - in input mode (user wants to type, so always show cursor)
-	// - vterm says cursor is visible (application explicitly showing cursor)
-	cursor := p.vterm.Cursor()
-	showCursor := p.focused && (p.inputMode || p.vterm.CursorVisible())
+	// NOTE: We don't try to render our own cursor at a calculated position.
+	// Claude Code (the inner app) renders its cursor as styled text (virtual cursor),
+	// so we just need to preserve that styling.
 
 	var lines []string
 	for row := 0; row < rows; row++ {
@@ -897,14 +894,22 @@ func (p *PaneModel) renderVTerm() (result string) {
 		for col := 0; col < cols; col++ {
 			cell := p.vterm.Cell(col, row)
 
-			// Check if this is the cursor position - apply inverse video
-			isCursor := showCursor && col == cursor.X && row == cursor.Y
+			// Detect inverse video via Mode flag (bit 0)
+			// This works for both plain inverse and inverse+color combinations
+			isInverse := cell.Mode&1 != 0
 
-			// Check if colors or cursor state changed
-			if cell.FG != lastFG || cell.BG != lastBG || isCursor != lastInverse {
+			// Check if colors or inverse state changed
+			if cell.FG != lastFG || cell.BG != lastBG || isInverse != lastInverse {
 				// Reset and apply new colors
 				line.WriteString("\x1b[0m") // Reset
-				if cell.FG != vt10x.DefaultFG {
+
+				if isInverse {
+					// Output inverse video attribute
+					line.WriteString("\x1b[7m")
+				}
+				// Output explicit colors
+				// Skip default sentinels (DefaultFG, DefaultBG) which vt10x uses as placeholders
+				if cell.FG != vt10x.DefaultFG && cell.FG != vt10x.DefaultBG {
 					if cell.FG.ANSI() {
 						// Standard ANSI colors (0-15)
 						if cell.FG < 8 {
@@ -923,7 +928,7 @@ func (p *PaneModel) renderVTerm() (result string) {
 						line.WriteString(fmt.Sprintf("\x1b[38;5;%dm", cell.FG))
 					}
 				}
-				if cell.BG != vt10x.DefaultBG {
+				if cell.BG != vt10x.DefaultBG && cell.BG != vt10x.DefaultFG {
 					if cell.BG.ANSI() {
 						// Standard ANSI colors (0-15)
 						if cell.BG < 8 {
@@ -942,12 +947,8 @@ func (p *PaneModel) renderVTerm() (result string) {
 						line.WriteString(fmt.Sprintf("\x1b[48;5;%dm", cell.BG))
 					}
 				}
-				// Apply inverse video for cursor
-				if isCursor {
-					line.WriteString("\x1b[7m") // Inverse video
-				}
 				lastFG, lastBG = cell.FG, cell.BG
-				lastInverse = isCursor
+				lastInverse = isInverse
 			}
 
 			if cell.Char == 0 {
@@ -1169,15 +1170,26 @@ func (p *PaneModel) renderVTermLine(row int) string {
 
 	var line strings.Builder
 	var lastFG, lastBG vt10x.Color = vt10x.DefaultFG, vt10x.DefaultBG
+	var lastInverse bool
 
 	for col := 0; col < cols; col++ {
 		cell := p.vterm.Cell(col, row)
 
-		// Check if colors changed
-		if cell.FG != lastFG || cell.BG != lastBG {
+		// Detect inverse video via Mode flag (bit 0)
+		isInverse := cell.Mode&1 != 0
+
+		// Check if colors or inverse state changed
+		if cell.FG != lastFG || cell.BG != lastBG || isInverse != lastInverse {
 			// Reset and apply new colors
 			line.WriteString("\x1b[0m") // Reset
-			if cell.FG != vt10x.DefaultFG {
+
+			if isInverse {
+				// Output inverse video attribute
+				line.WriteString("\x1b[7m")
+			}
+			// Output explicit colors
+			// Skip default sentinels (DefaultFG, DefaultBG) which vt10x uses as placeholders
+			if cell.FG != vt10x.DefaultFG && cell.FG != vt10x.DefaultBG {
 				if cell.FG.ANSI() {
 					// Standard ANSI colors (0-15)
 					if cell.FG < 8 {
@@ -1196,7 +1208,7 @@ func (p *PaneModel) renderVTermLine(row int) string {
 					line.WriteString(fmt.Sprintf("\x1b[38;5;%dm", cell.FG))
 				}
 			}
-			if cell.BG != vt10x.DefaultBG {
+			if cell.BG != vt10x.DefaultBG && cell.BG != vt10x.DefaultFG {
 				if cell.BG.ANSI() {
 					// Standard ANSI colors (0-15)
 					if cell.BG < 8 {
@@ -1216,6 +1228,7 @@ func (p *PaneModel) renderVTermLine(row int) string {
 				}
 			}
 			lastFG, lastBG = cell.FG, cell.BG
+			lastInverse = isInverse
 		}
 
 		if cell.Char == 0 {
@@ -1465,86 +1478,11 @@ func (p *PaneModel) IsClaudeWorking() bool {
 	return false
 }
 
-// CursorPosition represents cursor position relative to pane content area
-type CursorPosition struct {
-	X       int  // X position relative to content area (0-based)
-	Y       int  // Y position relative to content area (0-based)
-	Visible bool // Whether cursor should be visible
-}
-
-// GetCursorPosition returns the cursor position relative to the pane's content area.
-// Returns position in the coordinate space inside the border and padding.
-// The caller needs to add the pane's screen position to get absolute coordinates.
-func (p *PaneModel) GetCursorPosition() CursorPosition {
-	// Only show cursor if focused, in input mode, have an active PTY, and vterm is ready.
-	// Note: We don't check vterm.CursorVisible() because when in input mode,
-	// we always want to show the cursor regardless of the vterm's cursor state.
-	// Claude Code hides the cursor while working, but we want to show it when
-	// the user enters input mode.
-	if !p.focused || !p.inputMode || p.vterm == nil {
-		return CursorPosition{Visible: false}
-	}
-	// Also require an active PTY session - no cursor if PTY is nil or closed
-	if p.pty == nil || p.pty.IsClosed() {
-		return CursorPosition{Visible: false}
-	}
-
-	cursor := p.vterm.Cursor()
-	_, vtermRows := p.vterm.Size()
-
-	// Calculate cursor position in the full content (scrollback + vterm)
-	scrollbackLines := len(p.scrollback)
-	contentCursorY := scrollbackLines + cursor.Y
-
-	// Calculate viewport Y offset using the same logic as View().
-	// IMPORTANT: View() uses a value receiver, so its viewport modifications don't persist.
-	// We must recalculate the offset here to match what View() used when rendering.
-	//
-	// View() logic:
-	//   if scrollMode       -> SetYOffset(yOffset)     // keep stored offset
-	//   else if isSettling  -> SetYOffset(yOffset)     // keep stored offset
-	//   else if wasAtBottom -> GotoBottom()            // go to bottom
-	//   else                -> (no change)             // keep stored offset
-	//
-	// The stored values (YOffset, AtBottom) reflect state BEFORE View() called SetContent().
-	viewportHeight := p.viewport.Height()
-	totalContentLines := scrollbackLines + vtermRows
-
-	isSettling := !p.resizeTime.IsZero() && time.Since(p.resizeTime) < resizeSettleTime
-	wasAtBottom := p.viewport.AtBottom()
-	storedYOffset := p.viewport.YOffset()
-
-	var viewportYOffset int
-	if p.scrollMode || isSettling || !wasAtBottom {
-		// These cases all use the stored offset
-		viewportYOffset = storedYOffset
-	} else {
-		// wasAtBottom && !scrollMode && !isSettling: viewport follows output to bottom
-		viewportYOffset = totalContentLines - viewportHeight
-		if viewportYOffset < 0 {
-			viewportYOffset = 0
-		}
-	}
-
-	visibleY := contentCursorY - viewportYOffset
-
-	// Check if cursor is within visible viewport area
-	if visibleY < 0 || visibleY >= viewportHeight {
-		return CursorPosition{Visible: false}
-	}
-
-	// Content area offset from pane edge:
-	// - Border: 1 char/line on each side
-	// - Padding: 1 char horizontal (from Padding(0, 1))
-	// - Header + empty line: 2 lines vertical (header + "\n\n")
-	// So cursor X is at: 1 (border) + 1 (padding) + cursor.X = 2 + cursor.X
-	// And cursor Y is at: 1 (border) + 2 (header+empty) + visibleY = 3 + visibleY
-	return CursorPosition{
-		X:       2 + cursor.X,
-		Y:       3 + visibleY,
-		Visible: true,
-	}
-}
+// NOTE: CursorPosition type and GetCursorPosition() were removed.
+// Claude Code uses virtual cursor (renders cursor as styled text), not hardware cursor.
+// The vterm.Cursor() position doesn't reflect where Claude Code's visual cursor is,
+// so attempting to position a hardware cursor based on it caused misplacement.
+// We now rely on Claude Code's own cursor rendering (inverse video in its output).
 
 // PromptMsg is sent when user submits a prompt
 type PromptMsg struct {
