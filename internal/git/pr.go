@@ -152,22 +152,22 @@ func (g *GH) PRExists(ctx context.Context, repoPath string) (bool, *PRResponse, 
 	return true, &resp, nil
 }
 
-// prStatusCheckRollup represents the statusCheckRollup from GitHub API.
-type prStatusCheckRollup struct {
-	State    string `json:"state"` // SUCCESS, PENDING, FAILURE, ERROR, EXPECTED
-	Contexts []struct {
-		State      string `json:"state"`
-		Conclusion string `json:"conclusion"`
-	} `json:"contexts"`
+// prCheckContext represents a single check/status in the statusCheckRollup array.
+// This handles both CheckRun and StatusContext types from GitHub API.
+// Note: The API also returns __typename, name, detailsUrl, etc. which we ignore
+// since we only need State (for StatusContext) and Conclusion (for CheckRun).
+type prCheckContext struct {
+	State      string `json:"state"`      // Used by StatusContext (SUCCESS, PENDING, etc.)
+	Conclusion string `json:"conclusion"` // Used by CheckRun (SUCCESS, FAILURE, etc.)
 }
 
 // prViewResponse is the full response from gh pr view --json.
 type prViewResponse struct {
-	Number            int                 `json:"number"`
-	URL               string              `json:"url"`
-	HeadRefOid        string              `json:"headRefOid"`
-	StatusCheckRollup prStatusCheckRollup `json:"statusCheckRollup"`
-	HeadRefName       string              `json:"headRefName"`
+	Number            int              `json:"number"`
+	URL               string           `json:"url"`
+	HeadRefOid        string           `json:"headRefOid"`
+	StatusCheckRollup []prCheckContext `json:"statusCheckRollup"` // Direct array, not nested object
+	HeadRefName       string           `json:"headRefName"`
 }
 
 // GetPRStatus retrieves comprehensive PR status including checks and commit comparison.
@@ -222,17 +222,17 @@ func (g *GH) GetPRStatus(ctx context.Context, repoPath string, gitClient GitClie
 }
 
 // aggregateCheckStatus converts the statusCheckRollup into a simple status and summary.
-func aggregateCheckStatus(rollup prStatusCheckRollup) (PRCheckStatus, string) {
-	if len(rollup.Contexts) == 0 {
+func aggregateCheckStatus(checks []prCheckContext) (PRCheckStatus, string) {
+	if len(checks) == 0 {
 		return PRCheckStatusUnknown, "No checks"
 	}
 
 	passed := 0
 	failed := 0
 	pending := 0
-	total := len(rollup.Contexts)
+	total := len(checks)
 
-	for _, ctx := range rollup.Contexts {
+	for _, ctx := range checks {
 		// Conclusion takes precedence if present
 		conclusion := ctx.Conclusion
 		if conclusion == "" {

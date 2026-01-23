@@ -1940,6 +1940,7 @@ Scroll Mode:
 			if m.panes[i].Workstream().ID == msg.WorkstreamID {
 				if msg.Error != nil {
 					// Log error but don't disrupt user
+					LogWarn("PR status fetch failed for workstream %s: %v", msg.WorkstreamID, msg.Error)
 					m.panes[i].SetPRStatusLoading(false)
 				} else {
 					m.panes[i].SetPRStatus(msg.Status)
@@ -2326,6 +2327,10 @@ Scroll Mode:
 			// Resume container
 			if ws.ContainerID != "" {
 				cmds = append(cmds, ResumeContainerCmd(ws, 80, 24))
+			}
+			// Fetch PR status for workstreams with open PRs
+			if ws.PRURL != "" {
+				cmds = append(cmds, FetchPRStatusCmd(ws))
 			}
 			cmds = append(cmds, spinnerTickCmd())
 		}

@@ -353,71 +353,51 @@ func TestMarkdownStrippingWithJSON(t *testing.T) {
 func TestAggregateCheckStatus(t *testing.T) {
 	tests := []struct {
 		name           string
-		rollup         prStatusCheckRollup
+		checks         []prCheckContext
 		expectedStatus PRCheckStatus
 		expectedHas    string // substring that should be in summary
 	}{
 		{
 			name:           "empty rollup",
-			rollup:         prStatusCheckRollup{Contexts: nil},
+			checks:         nil,
 			expectedStatus: PRCheckStatusUnknown,
 			expectedHas:    "No checks",
 		},
 		{
 			name: "all success",
-			rollup: prStatusCheckRollup{
-				Contexts: []struct {
-					State      string `json:"state"`
-					Conclusion string `json:"conclusion"`
-				}{
-					{Conclusion: "success"},
-					{Conclusion: "success"},
-					{Conclusion: "skipped"},
-				},
+			checks: []prCheckContext{
+				{Conclusion: "success"},
+				{Conclusion: "success"},
+				{Conclusion: "skipped"},
 			},
 			expectedStatus: PRCheckStatusSuccess,
 			expectedHas:    "3/3 passed",
 		},
 		{
 			name: "pending present",
-			rollup: prStatusCheckRollup{
-				Contexts: []struct {
-					State      string `json:"state"`
-					Conclusion string `json:"conclusion"`
-				}{
-					{Conclusion: "success"},
-					{State: "pending"},
-					{Conclusion: "success"},
-				},
+			checks: []prCheckContext{
+				{Conclusion: "success"},
+				{State: "pending"},
+				{Conclusion: "success"},
 			},
 			expectedStatus: PRCheckStatusPending,
 			expectedHas:    "2/3 passed",
 		},
 		{
 			name: "failure present",
-			rollup: prStatusCheckRollup{
-				Contexts: []struct {
-					State      string `json:"state"`
-					Conclusion string `json:"conclusion"`
-				}{
-					{Conclusion: "success"},
-					{Conclusion: "failure"},
-					{State: "pending"},
-				},
+			checks: []prCheckContext{
+				{Conclusion: "success"},
+				{Conclusion: "failure"},
+				{State: "pending"},
 			},
 			expectedStatus: PRCheckStatusFailure,
 			expectedHas:    "1/3 passed",
 		},
 		{
 			name: "uses state when conclusion empty",
-			rollup: prStatusCheckRollup{
-				Contexts: []struct {
-					State      string `json:"state"`
-					Conclusion string `json:"conclusion"`
-				}{
-					{State: "success"},
-					{State: "queued"},
-				},
+			checks: []prCheckContext{
+				{State: "success"},
+				{State: "queued"},
 			},
 			expectedStatus: PRCheckStatusPending,
 			expectedHas:    "1/2 passed",
@@ -426,7 +406,7 @@ func TestAggregateCheckStatus(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			status, summary := aggregateCheckStatus(tt.rollup)
+			status, summary := aggregateCheckStatus(tt.checks)
 			if status != tt.expectedStatus {
 				t.Errorf("status = %v, want %v", status, tt.expectedStatus)
 			}
@@ -434,6 +414,88 @@ func TestAggregateCheckStatus(t *testing.T) {
 				t.Errorf("summary = %q, want to contain %q", summary, tt.expectedHas)
 			}
 		})
+	}
+}
+
+// TestParseActualGHOutput verifies we can parse real GitHub API JSON output.
+// This test uses actual gh pr view output structure to catch API changes.
+func TestParseActualGHOutput(t *testing.T) {
+	// Actual output from: gh pr view --json number,url,headRefOid,statusCheckRollup,headRefName
+	raw := `{
+		"headRefName": "feature-branch",
+		"headRefOid": "33a62b9a151cf1c051b67de14efe639e73082b4d",
+		"number": 28,
+		"statusCheckRollup": [
+			{
+				"__typename": "CheckRun",
+				"completedAt": "2026-01-23T17:45:05Z",
+				"conclusion": "SUCCESS",
+				"detailsUrl": "https://github.com/owner/repo/actions/runs/123",
+				"name": "Lint",
+				"startedAt": "2026-01-23T17:44:29Z",
+				"status": "COMPLETED",
+				"workflowName": "CI"
+			},
+			{
+				"__typename": "CheckRun",
+				"completedAt": "2026-01-23T17:45:02Z",
+				"conclusion": "SUCCESS",
+				"detailsUrl": "https://github.com/owner/repo/actions/runs/124",
+				"name": "Test",
+				"startedAt": "2026-01-23T17:44:29Z",
+				"status": "COMPLETED",
+				"workflowName": "CI"
+			},
+			{
+				"__typename": "StatusContext",
+				"context": "CodeRabbit",
+				"startedAt": "2026-01-23T17:44:33Z",
+				"state": "SUCCESS",
+				"targetUrl": ""
+			}
+		],
+		"url": "https://github.com/owner/repo/pull/28"
+	}`
+
+	var resp prViewResponse
+	err := json.Unmarshal([]byte(raw), &resp)
+	if err != nil {
+		t.Fatalf("Failed to parse GitHub JSON: %v", err)
+	}
+
+	// Verify basic fields parsed correctly
+	if resp.Number != 28 {
+		t.Errorf("Number = %d, want 28", resp.Number)
+	}
+	if resp.HeadRefName != "feature-branch" {
+		t.Errorf("HeadRefName = %q, want %q", resp.HeadRefName, "feature-branch")
+	}
+	if resp.URL != "https://github.com/owner/repo/pull/28" {
+		t.Errorf("URL = %q, want %q", resp.URL, "https://github.com/owner/repo/pull/28")
+	}
+
+	// Verify statusCheckRollup parsed as array
+	if len(resp.StatusCheckRollup) != 3 {
+		t.Fatalf("StatusCheckRollup length = %d, want 3", len(resp.StatusCheckRollup))
+	}
+
+	// Verify CheckRun parsed (uses Conclusion)
+	if resp.StatusCheckRollup[0].Conclusion != "SUCCESS" {
+		t.Errorf("CheckRun conclusion = %q, want %q", resp.StatusCheckRollup[0].Conclusion, "SUCCESS")
+	}
+
+	// Verify StatusContext parsed (uses State)
+	if resp.StatusCheckRollup[2].State != "SUCCESS" {
+		t.Errorf("StatusContext state = %q, want %q", resp.StatusCheckRollup[2].State, "SUCCESS")
+	}
+
+	// Verify aggregation works with real data
+	status, summary := aggregateCheckStatus(resp.StatusCheckRollup)
+	if status != PRCheckStatusSuccess {
+		t.Errorf("aggregated status = %v, want %v", status, PRCheckStatusSuccess)
+	}
+	if !strings.Contains(summary, "3/3") {
+		t.Errorf("summary = %q, want to contain %q", summary, "3/3")
 	}
 }
 
