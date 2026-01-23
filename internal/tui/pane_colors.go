@@ -10,6 +10,17 @@ import (
 // ansiRegex matches ANSI escape sequences
 var ansiRegex = regexp.MustCompile(`\x1b\[[0-9;]*[a-zA-Z]`)
 
+// clampByte clamps an integer to the valid byte range [0, 255]
+func clampByte(v int) int {
+	if v < 0 {
+		return 0
+	}
+	if v > 255 {
+		return 255
+	}
+	return v
+}
+
 // stripANSI removes all ANSI escape sequences from a string
 func stripANSI(s string) string {
 	return ansiRegex.ReplaceAllString(s, "")
@@ -71,10 +82,20 @@ func muteANSI(s string, saturation, brightness float64, mutedDefault [3]int) str
 			// Handle extended color sequences: 38;5;N or 38;2;R;G;B (foreground)
 			// and 48;5;N or 48;2;R;G;B (background)
 			if (code == 38 || code == 48) && i+1 < len(parts) {
-				colorType, _ := strconv.Atoi(parts[i+1])
+				colorType, err := strconv.Atoi(parts[i+1])
+				if err != nil {
+					// Malformed color type, keep original code
+					result = append(result, parts[i])
+					continue
+				}
 				if colorType == 5 && i+2 < len(parts) {
 					// 256-color mode: 38;5;N or 48;5;N
-					colorIndex, _ := strconv.Atoi(parts[i+2])
+					colorIndex, err := strconv.Atoi(parts[i+2])
+					if err != nil || colorIndex < 0 || colorIndex > 255 {
+						// Malformed or out-of-range color index, keep original sequence
+						result = append(result, parts[i])
+						continue
+					}
 					r, g, b := color256ToRGB(colorIndex)
 					mr, mg, mb := MuteColor(r, g, b, saturation, brightness)
 					result = append(result, fmt.Sprintf("%d;2;%d;%d;%d", code, mr, mg, mb))
@@ -82,9 +103,18 @@ func muteANSI(s string, saturation, brightness float64, mutedDefault [3]int) str
 					continue
 				} else if colorType == 2 && i+4 < len(parts) {
 					// True color mode: 38;2;R;G;B or 48;2;R;G;B
-					r, _ := strconv.Atoi(parts[i+2])
-					g, _ := strconv.Atoi(parts[i+3])
-					b, _ := strconv.Atoi(parts[i+4])
+					r, errR := strconv.Atoi(parts[i+2])
+					g, errG := strconv.Atoi(parts[i+3])
+					b, errB := strconv.Atoi(parts[i+4])
+					if errR != nil || errG != nil || errB != nil {
+						// Malformed RGB values, keep original code
+						result = append(result, parts[i])
+						continue
+					}
+					// Clamp RGB values to valid range
+					r = clampByte(r)
+					g = clampByte(g)
+					b = clampByte(b)
 					mr, mg, mb := MuteColor(r, g, b, saturation, brightness)
 					result = append(result, fmt.Sprintf("%d;2;%d;%d;%d", code, mr, mg, mb))
 					i += 4
@@ -144,8 +174,16 @@ func muteANSI(s string, saturation, brightness float64, mutedDefault [3]int) str
 	})
 }
 
-// color256ToRGB converts a 256-color palette index to RGB
+// color256ToRGB converts a 256-color palette index to RGB.
+// Index must be in range [0, 255]. Out-of-range values are clamped.
 func color256ToRGB(index int) (r, g, b int) {
+	// Clamp to valid range for safety
+	if index < 0 {
+		index = 0
+	} else if index > 255 {
+		index = 255
+	}
+
 	if index < 16 {
 		// Standard colors (same as basic16Colors)
 		return basic16Colors[index].r, basic16Colors[index].g, basic16Colors[index].b
