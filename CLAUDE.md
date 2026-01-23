@@ -280,6 +280,15 @@ go func() {
 - [x] Auto-relaxation with config persistence for compatibility
 - [ ] Validate all branch names before using in paths/commands
 
+### Committing (ccells containers)
+
+**ALWAYS use `/ccells-commit` when committing inside ccells containers.** This skill:
+- Handles CLAUDE.md updates automatically
+- Runs pre-commit verification
+- Provides proper commit message formatting
+
+Never use raw `git commit` commands in ccells containers - a hook will block them.
+
 ### Before Committing
 
 1. `go test -race ./...` - no races

@@ -250,6 +250,17 @@ Project-specific `.claude-cells/config.yaml` with `dockerfile.inject` replaces (
 
 MIT
 
+## Commit Workflow (ccells containers)
+
+**ALWAYS use `/ccells-commit` when committing inside ccells containers.** This skill:
+- Handles CLAUDE.md updates automatically
+- Runs pre-commit verification
+- Provides proper commit message formatting
+
+Never use raw `git commit` commands in ccells containers—a hook will block them.
+
+See **[CLAUDE.md](CLAUDE.md#committing-ccells-containers)** for full development guidelines.
+
 ## Contributing
 
 Contributions welcome! Please:
