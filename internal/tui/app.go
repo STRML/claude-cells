@@ -486,7 +486,12 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 		// Handle input mode (keys routed to focused pane)
 		if m.inputMode && len(m.panes) > 0 && m.focusedPane < len(m.panes) {
-			switch msg.String() {
+			keyStr := msg.String()
+			// Debug logging for input mode key handling
+			if keyStr == "esc" || keyStr == "shift+esc" || strings.HasPrefix(keyStr, "shift+") {
+				LogDebug("Input mode received key: %q (type=%T)", keyStr, msg)
+			}
+			switch keyStr {
 			case "shift+esc":
 				// Shift+Esc immediately exits to nav mode (requires Kitty keyboard protocol)
 				m.tmuxPrefix = false
@@ -552,7 +557,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.tmuxPrefix = false
 					if len(m.panes) > 1 {
 						var dir Direction
-						switch msg.String() {
+						switch keyStr {
 						case "left":
 							dir = DirLeft
 						case "right":
@@ -574,7 +579,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				// In scroll mode, arrow keys scroll instead of going to pane
 				if len(m.panes) > 0 && m.focusedPane < len(m.panes) && m.panes[m.focusedPane].IsScrollMode() {
-					switch msg.String() {
+					switch keyStr {
 					case "up":
 						m.panes[m.focusedPane].ScrollLineUp()
 					case "down":
@@ -591,7 +596,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				// Check for tmux-style prefix (ctrl-b + number) - switch panes by number
 				if m.tmuxPrefix && time.Since(m.tmuxPrefixTime) < tmuxPrefixTimeout {
 					m.tmuxPrefix = false
-					targetIndex := int(msg.String()[0] - '0') // Convert to 1-based index
+					targetIndex := int(keyStr[0] - '0') // Convert to 1-based index
 					for i, pane := range m.panes {
 						if pane.Index() == targetIndex {
 							if m.focusedPane < len(m.panes) {
@@ -614,7 +619,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.tmuxPrefix && time.Since(m.tmuxPrefixTime) < tmuxPrefixTimeout {
 					m.tmuxPrefix = false
 					if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
-						if msg.String() == "pgup" {
+						if keyStr == "pgup" {
 							m.panes[m.focusedPane].ScrollPageUp()
 						} else {
 							m.panes[m.focusedPane].ScrollPageDown()
@@ -624,7 +629,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				// In scroll mode, pgup/pgdown work directly without prefix
 				if len(m.panes) > 0 && m.focusedPane < len(m.panes) && m.panes[m.focusedPane].IsScrollMode() {
-					if msg.String() == "pgup" {
+					if keyStr == "pgup" {
 						m.panes[m.focusedPane].ScrollPageUp()
 					} else {
 						m.panes[m.focusedPane].ScrollPageDown()
@@ -642,7 +647,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				if m.tmuxPrefix && time.Since(m.tmuxPrefixTime) < tmuxPrefixTimeout {
 					m.tmuxPrefix = false
 					if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
-						if msg.String() == "ctrl+u" {
+						if keyStr == "ctrl+u" {
 							m.panes[m.focusedPane].ScrollHalfPageUp()
 						} else {
 							m.panes[m.focusedPane].ScrollHalfPageDown()
@@ -652,7 +657,7 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				}
 				// In scroll mode, ctrl+u/d work directly
 				if len(m.panes) > 0 && m.focusedPane < len(m.panes) && m.panes[m.focusedPane].IsScrollMode() {
-					if msg.String() == "ctrl+u" {
+					if keyStr == "ctrl+u" {
 						m.panes[m.focusedPane].ScrollHalfPageUp()
 					} else {
 						m.panes[m.focusedPane].ScrollHalfPageDown()
@@ -1917,9 +1922,9 @@ Scroll Mode:
 					m.panes[i].SetInPaneDialog(&dialog)
 					return m, nil
 				case MergeActionPushToPR:
-					// Push to open PR - same as push but with different messaging
-					m.panes[i].AppendOutput("\nPushing to open PR...\n")
-					dialog := NewProgressDialog("Pushing to PR", fmt.Sprintf("Branch: %s\n\nPushing commits to open PR...", ws.BranchName), ws.ID)
+					// Push into open PR - same as push but with different messaging
+					m.panes[i].AppendOutput("\nPushing into open PR...\n")
+					dialog := NewProgressDialog("Pushing to PR", fmt.Sprintf("Branch: %s\n\nPushing commits into open PR...", ws.BranchName), ws.ID)
 					m.panes[i].SetInPaneDialog(&dialog)
 					return m, PushBranchCmd(ws)
 				case MergeActionFetchRebase:
