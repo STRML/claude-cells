@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strconv"
 	"strings"
 
 	"github.com/STRML/claude-cells/internal/claude"
@@ -726,4 +727,134 @@ func (g *Git) RepoID(ctx context.Context) (string, error) {
 		return hash, nil
 	}
 	return "", fmt.Errorf("no commits found in repository")
+}
+
+// isValidBranchName validates that a branch name is safe to use in git commands.
+// Returns false if the name could be interpreted as a git option or contains
+// dangerous characters.
+func isValidBranchName(branch string) bool {
+	if branch == "" {
+		return false
+	}
+	// Reject names starting with "-" (could be interpreted as options)
+	if strings.HasPrefix(branch, "-") {
+		return false
+	}
+	// Reject path traversal attempts
+	if strings.Contains(branch, "..") && !strings.Contains(branch, "...") {
+		// ".." is dangerous for paths but "..." is valid in rev-list ranges
+		// We check for ".." but not "..." which is a git range operator
+		// Actually, branch names shouldn't contain ".." at all
+		return false
+	}
+	// Reject null bytes and other control characters
+	for _, r := range branch {
+		if r < 32 || r == 127 {
+			return false
+		}
+	}
+	return true
+}
+
+// GetUnpushedCommitCount returns the number of commits on the local branch
+// that are not yet on the remote (origin/<branch>).
+// Returns 0, nil if there's no tracking branch (non-fatal).
+// Returns 0, error for validation failures or parse errors.
+func (g *Git) GetUnpushedCommitCount(ctx context.Context, branch string) (int, error) {
+	// Validate branch name to prevent command injection
+	if !isValidBranchName(branch) {
+		return 0, fmt.Errorf("invalid branch name: %q", branch)
+	}
+
+	// Count commits in local branch that are not in origin/<branch>
+	out, err := g.run(ctx, "rev-list", "--count", "origin/"+branch+".."+branch)
+	if err != nil {
+		// Check if this is a "couldn't find remote ref" error (non-fatal)
+		errStr := err.Error()
+		if strings.Contains(errStr, "unknown revision") ||
+			strings.Contains(errStr, "bad revision") ||
+			strings.Contains(errStr, "couldn't find remote ref") {
+			// No tracking branch - return 0 without error per docstring
+			return 0, nil
+		}
+		return 0, err
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse commit count: %w", err)
+	}
+	return count, nil
+}
+
+// GetDivergedCommitCount returns the number of commits on the remote branch
+// that are not in the local branch (commits we don't have).
+// Returns 0, nil if there's no tracking branch or fetch fails (non-fatal).
+// Returns 0, error for validation failures or parse errors.
+func (g *Git) GetDivergedCommitCount(ctx context.Context, branch string) (int, error) {
+	// Validate branch name to prevent command injection
+	if !isValidBranchName(branch) {
+		return 0, fmt.Errorf("invalid branch name: %q", branch)
+	}
+
+	// Fetch first to ensure we have the latest remote state
+	_, fetchErr := g.run(ctx, "fetch", "origin", branch)
+	if fetchErr != nil {
+		// Check if this is a "couldn't find remote ref" error (non-fatal)
+		errStr := fetchErr.Error()
+		if strings.Contains(errStr, "couldn't find remote ref") ||
+			strings.Contains(errStr, "fatal: Couldn't find remote ref") {
+			// No remote branch - return 0 without error per docstring
+			return 0, nil
+		}
+		// Log other fetch errors but continue - we may still have a cached remote ref
+		// The rev-list below will fail if there's truly no remote ref
+	}
+
+	// Count commits in origin/<branch> that are not in local branch
+	out, err := g.run(ctx, "rev-list", "--count", branch+"..origin/"+branch)
+	if err != nil {
+		// Check if this is a "couldn't find remote ref" error (non-fatal)
+		errStr := err.Error()
+		if strings.Contains(errStr, "unknown revision") ||
+			strings.Contains(errStr, "bad revision") {
+			// No tracking branch - return 0 without error per docstring
+			return 0, nil
+		}
+		return 0, err
+	}
+	count, err := strconv.Atoi(strings.TrimSpace(out))
+	if err != nil {
+		return 0, fmt.Errorf("failed to parse commit count: %w", err)
+	}
+	return count, nil
+}
+
+// FetchAndRebase fetches the latest main from origin and rebases the current branch onto it.
+// Returns a MergeConflictError if there are conflicts that need resolution.
+func (g *Git) FetchAndRebase(ctx context.Context) error {
+	// Determine the base branch
+	baseBranch, err := g.GetBaseBranch(ctx)
+	if err != nil {
+		baseBranch = "main"
+	}
+
+	// Fetch latest from origin
+	if _, err := g.run(ctx, "fetch", "origin", baseBranch); err != nil {
+		return fmt.Errorf("failed to fetch: %w", err)
+	}
+
+	// Rebase onto origin/<baseBranch>
+	_, err = g.run(ctx, "rebase", "origin/"+baseBranch)
+	if err != nil {
+		// Check if rebase has conflicts
+		conflictFiles, conflictErr := g.GetConflictFiles(ctx)
+		if conflictErr == nil && len(conflictFiles) > 0 {
+			// Get current branch for error message
+			branch, _ := g.CurrentBranch(ctx)
+			return &MergeConflictError{Branch: branch, ConflictFiles: conflictFiles}
+		}
+		return fmt.Errorf("rebase failed: %w", err)
+	}
+
+	return nil
 }

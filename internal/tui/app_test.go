@@ -2,12 +2,14 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/STRML/claude-cells/internal/git"
 	"github.com/STRML/claude-cells/internal/workstream"
 )
 
@@ -3295,4 +3297,182 @@ func TestNoNewlineOnKeyReleaseAfterDialogClose(t *testing.T) {
 	if len(data) > 0 {
 		t.Errorf("PTY received unexpected data on Enter in nav mode: %q", string(data))
 	}
+}
+
+// TestAppModel_Update_PRStatusMsg tests handling of PR status messages
+func TestAppModel_Update_PRStatusMsg(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream first
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test feature"})
+	app = model.(AppModel)
+
+	if len(app.panes) != 1 {
+		t.Fatal("Should have created a workstream")
+	}
+
+	wsID := app.panes[0].Workstream().ID
+
+	// Initially, PR status should be nil
+	if app.panes[0].GetPRStatus() != nil {
+		t.Error("Initial PR status should be nil")
+	}
+
+	// Test setting loading state first
+	app.panes[0].SetPRStatusLoading(true)
+	if !app.panes[0].IsPRStatusLoading() {
+		t.Error("Should be loading after SetPRStatusLoading(true)")
+	}
+
+	// Test successful PR status message
+	status := &git.PRStatusInfo{
+		Number:        42,
+		URL:           "https://github.com/test/repo/pull/42",
+		CheckStatus:   git.PRCheckStatusSuccess,
+		ChecksSummary: "3/3 passed",
+		UnpushedCount: 1,
+	}
+	model, _ = app.Update(PRStatusMsg{
+		WorkstreamID: wsID,
+		Status:       status,
+		Error:        nil,
+	})
+	app = model.(AppModel)
+
+	// Verify status was set
+	got := app.panes[0].GetPRStatus()
+	if got == nil {
+		t.Fatal("PR status should be set after PRStatusMsg")
+	}
+	if got.Number != 42 {
+		t.Errorf("Expected PR number 42, got %d", got.Number)
+	}
+	if got.UnpushedCount != 1 {
+		t.Errorf("Expected 1 unpushed, got %d", got.UnpushedCount)
+	}
+	if app.panes[0].IsPRStatusLoading() {
+		t.Error("Loading should be false after receiving status")
+	}
+
+	// Test error PR status message
+	app.panes[0].SetPRStatusLoading(true)
+	model, _ = app.Update(PRStatusMsg{
+		WorkstreamID: wsID,
+		Status:       nil,
+		Error:        errors.New("failed to get PR status"),
+	})
+	app = model.(AppModel)
+
+	// Loading should be cleared on error, but status should remain
+	if app.panes[0].IsPRStatusLoading() {
+		t.Error("Loading should be false after error")
+	}
+
+	// Test message for non-existent workstream (should not panic)
+	model, _ = app.Update(PRStatusMsg{
+		WorkstreamID: "non-existent-id",
+		Status: &git.PRStatusInfo{
+			Number: 99,
+		},
+	})
+	app = model.(AppModel)
+	// Should not crash and pane 0's status should be unchanged
+	if app.panes[0].GetPRStatus() == nil || app.panes[0].GetPRStatus().Number != 42 {
+		t.Error("Status for existing pane should be unchanged")
+	}
+}
+
+// TestAppModel_Update_FetchRebaseResultMsg tests handling of fetch-rebase result messages
+func TestAppModel_Update_FetchRebaseResultMsg(t *testing.T) {
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	// Create a workstream
+	model, _ := app.Update(DialogConfirmMsg{Type: DialogNewWorkstream, Value: "test feature"})
+	app = model.(AppModel)
+
+	if len(app.panes) != 1 {
+		t.Fatal("Should have created a workstream")
+	}
+
+	wsID := app.panes[0].Workstream().ID
+	branchName := app.panes[0].Workstream().BranchName
+
+	t.Run("successful rebase", func(t *testing.T) {
+		// Attach a mock PTY to capture Claude notifications
+		mockPTY := &mockWriteCloser{}
+		pty := &PTYSession{
+			workstreamID: wsID,
+			closed:       false,
+			done:         make(chan struct{}),
+			stdin:        mockPTY,
+		}
+		app.panes[0].SetPTY(pty)
+
+		model, _ := app.Update(FetchRebaseResultMsg{
+			WorkstreamID: wsID,
+			Error:        nil,
+		})
+		app = model.(AppModel)
+
+		// Should have written notification to PTY
+		output := string(mockPTY.Bytes())
+		if !strings.Contains(output, "[ccells]") || !strings.Contains(output, "Rebased") {
+			t.Errorf("Expected rebase notification in PTY output, got: %q", output)
+		}
+		if !strings.Contains(output, branchName) {
+			t.Errorf("Expected branch name %q in notification, got: %q", branchName, output)
+		}
+	})
+
+	t.Run("rebase with conflicts", func(t *testing.T) {
+		conflictFiles := []string{"file1.go", "file2.go"}
+		model, _ := app.Update(FetchRebaseResultMsg{
+			WorkstreamID:  wsID,
+			Error:         errors.New("CONFLICT (content): Merge conflict"),
+			ConflictFiles: conflictFiles,
+		})
+		app = model.(AppModel)
+
+		// Should show conflict dialog
+		dialog := app.panes[0].GetInPaneDialog()
+		if dialog == nil {
+			t.Fatal("Should show conflict dialog")
+		}
+		if dialog.Type != DialogMergeConflict {
+			t.Errorf("Expected DialogMergeConflict, got %v", dialog.Type)
+		}
+	})
+
+	t.Run("rebase failure without conflicts", func(t *testing.T) {
+		// Set up a progress dialog first
+		progressDialog := NewProgressDialog("Rebasing", "test", wsID)
+		app.panes[0].SetInPaneDialog(&progressDialog)
+
+		model, _ := app.Update(FetchRebaseResultMsg{
+			WorkstreamID:  wsID,
+			Error:         errors.New("fatal: some error"),
+			ConflictFiles: nil,
+		})
+		app = model.(AppModel)
+
+		// Progress dialog should be updated with error
+		dialog := app.panes[0].GetInPaneDialog()
+		if dialog == nil {
+			t.Fatal("Dialog should still exist")
+		}
+	})
+
+	t.Run("message for non-existent workstream", func(t *testing.T) {
+		// Should not panic
+		model, _ := app.Update(FetchRebaseResultMsg{
+			WorkstreamID: "non-existent-id",
+			Error:        nil,
+		})
+		_ = model.(AppModel)
+		// If we get here without panic, the test passes
+	})
 }

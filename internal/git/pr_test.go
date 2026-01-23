@@ -350,6 +350,227 @@ func TestMarkdownStrippingWithJSON(t *testing.T) {
 	}
 }
 
+func TestAggregateCheckStatus(t *testing.T) {
+	tests := []struct {
+		name           string
+		rollup         prStatusCheckRollup
+		expectedStatus PRCheckStatus
+		expectedHas    string // substring that should be in summary
+	}{
+		{
+			name:           "empty rollup",
+			rollup:         prStatusCheckRollup{Contexts: nil},
+			expectedStatus: PRCheckStatusUnknown,
+			expectedHas:    "No checks",
+		},
+		{
+			name: "all success",
+			rollup: prStatusCheckRollup{
+				Contexts: []struct {
+					State      string `json:"state"`
+					Conclusion string `json:"conclusion"`
+				}{
+					{Conclusion: "success"},
+					{Conclusion: "success"},
+					{Conclusion: "skipped"},
+				},
+			},
+			expectedStatus: PRCheckStatusSuccess,
+			expectedHas:    "3/3 passed",
+		},
+		{
+			name: "pending present",
+			rollup: prStatusCheckRollup{
+				Contexts: []struct {
+					State      string `json:"state"`
+					Conclusion string `json:"conclusion"`
+				}{
+					{Conclusion: "success"},
+					{State: "pending"},
+					{Conclusion: "success"},
+				},
+			},
+			expectedStatus: PRCheckStatusPending,
+			expectedHas:    "2/3 passed",
+		},
+		{
+			name: "failure present",
+			rollup: prStatusCheckRollup{
+				Contexts: []struct {
+					State      string `json:"state"`
+					Conclusion string `json:"conclusion"`
+				}{
+					{Conclusion: "success"},
+					{Conclusion: "failure"},
+					{State: "pending"},
+				},
+			},
+			expectedStatus: PRCheckStatusFailure,
+			expectedHas:    "1/3 passed",
+		},
+		{
+			name: "uses state when conclusion empty",
+			rollup: prStatusCheckRollup{
+				Contexts: []struct {
+					State      string `json:"state"`
+					Conclusion string `json:"conclusion"`
+				}{
+					{State: "success"},
+					{State: "queued"},
+				},
+			},
+			expectedStatus: PRCheckStatusPending,
+			expectedHas:    "1/2 passed",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status, summary := aggregateCheckStatus(tt.rollup)
+			if status != tt.expectedStatus {
+				t.Errorf("status = %v, want %v", status, tt.expectedStatus)
+			}
+			if !findSubstring(summary, tt.expectedHas) {
+				t.Errorf("summary = %q, want to contain %q", summary, tt.expectedHas)
+			}
+		})
+	}
+}
+
+func TestPRStatusInfo(t *testing.T) {
+	// Test PRStatusInfo struct creation
+	status := &PRStatusInfo{
+		Number:        123,
+		URL:           "https://github.com/user/repo/pull/123",
+		HeadSHA:       "abc123",
+		CheckStatus:   PRCheckStatusSuccess,
+		ChecksSummary: "3/3 passed",
+		UnpushedCount: 2,
+		DivergedCount: 1,
+		IsDiverged:    true,
+	}
+
+	if status.Number != 123 {
+		t.Errorf("Number = %d, want 123", status.Number)
+	}
+	if status.IsDiverged != true {
+		t.Errorf("IsDiverged = %v, want true", status.IsDiverged)
+	}
+	if status.CheckStatus != PRCheckStatusSuccess {
+		t.Errorf("CheckStatus = %v, want %v", status.CheckStatus, PRCheckStatusSuccess)
+	}
+}
+
+// MockGitClientForPRStatus is a mock implementation for testing GetPRStatus
+type MockGitClientForPRStatus struct {
+	unpushedCount int
+	unpushedErr   error
+	divergedCount int
+	divergedErr   error
+}
+
+func (m *MockGitClientForPRStatus) GetUnpushedCommitCount(ctx context.Context, branch string) (int, error) {
+	if m.unpushedErr != nil {
+		return 0, m.unpushedErr
+	}
+	return m.unpushedCount, nil
+}
+
+func (m *MockGitClientForPRStatus) GetDivergedCommitCount(ctx context.Context, branch string) (int, error) {
+	if m.divergedErr != nil {
+		return 0, m.divergedErr
+	}
+	return m.divergedCount, nil
+}
+
+func TestGetPRStatus_WithMockClient(t *testing.T) {
+	tests := []struct {
+		name               string
+		mockClient         *MockGitClientForPRStatus
+		expectedUnpushed   int
+		expectedDiverged   int
+		expectedIsDiverged bool
+	}{
+		{
+			name: "with unpushed and diverged commits",
+			mockClient: &MockGitClientForPRStatus{
+				unpushedCount: 3,
+				divergedCount: 2,
+			},
+			expectedUnpushed:   3,
+			expectedDiverged:   2,
+			expectedIsDiverged: true,
+		},
+		{
+			name: "no divergence",
+			mockClient: &MockGitClientForPRStatus{
+				unpushedCount: 1,
+				divergedCount: 0,
+			},
+			expectedUnpushed:   1,
+			expectedDiverged:   0,
+			expectedIsDiverged: false,
+		},
+		{
+			name: "error in unpushed count",
+			mockClient: &MockGitClientForPRStatus{
+				unpushedErr:   context.DeadlineExceeded,
+				divergedCount: 1,
+			},
+			expectedUnpushed:   0,
+			expectedDiverged:   1,
+			expectedIsDiverged: true,
+		},
+		{
+			name: "error in diverged count",
+			mockClient: &MockGitClientForPRStatus{
+				unpushedCount: 2,
+				divergedErr:   context.DeadlineExceeded,
+			},
+			expectedUnpushed:   2,
+			expectedDiverged:   0,
+			expectedIsDiverged: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// We can't easily test the full GetPRStatus without mocking exec.Command,
+			// but we can verify the interface contract
+			ctx := context.Background()
+
+			unpushed, _ := tt.mockClient.GetUnpushedCommitCount(ctx, "test-branch")
+			diverged, _ := tt.mockClient.GetDivergedCommitCount(ctx, "test-branch")
+
+			if unpushed != tt.expectedUnpushed {
+				t.Errorf("unpushed = %d, want %d", unpushed, tt.expectedUnpushed)
+			}
+			if diverged != tt.expectedDiverged {
+				t.Errorf("diverged = %d, want %d", diverged, tt.expectedDiverged)
+			}
+			if (diverged > 0) != tt.expectedIsDiverged {
+				t.Errorf("isDiverged = %v, want %v", diverged > 0, tt.expectedIsDiverged)
+			}
+		})
+	}
+}
+
+func TestPRCheckStatusConstants(t *testing.T) {
+	// Verify constant values are as expected
+	if PRCheckStatusSuccess != "success" {
+		t.Errorf("PRCheckStatusSuccess = %q, want %q", PRCheckStatusSuccess, "success")
+	}
+	if PRCheckStatusPending != "pending" {
+		t.Errorf("PRCheckStatusPending = %q, want %q", PRCheckStatusPending, "pending")
+	}
+	if PRCheckStatusFailure != "failure" {
+		t.Errorf("PRCheckStatusFailure = %q, want %q", PRCheckStatusFailure, "failure")
+	}
+	if PRCheckStatusUnknown != "unknown" {
+		t.Errorf("PRCheckStatusUnknown = %q, want %q", PRCheckStatusUnknown, "unknown")
+	}
+}
+
 func TestStripMarkdownCodeBlock(t *testing.T) {
 	tests := []struct {
 		name     string
