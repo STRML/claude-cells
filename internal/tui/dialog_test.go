@@ -435,7 +435,7 @@ func TestDialogType_IncludesSettings(t *testing.T) {
 
 func TestNewLogDialog(t *testing.T) {
 	content := "Line 1\nLine 2\nLine 3\nLine 4"
-	d := NewLogDialog("feature-branch", content)
+	d := NewLogDialog("feature-branch", "", content)
 
 	if d.Type != DialogLog {
 		t.Error("Type should be DialogLog")
@@ -455,7 +455,7 @@ func TestLogDialog_Scrolling(t *testing.T) {
 		lines = append(lines, "Line "+string(rune('0'+i%10)))
 	}
 	content := strings.Join(lines, "\n")
-	d := NewLogDialog("test-branch", content)
+	d := NewLogDialog("test-branch", "", content)
 	d.SetSize(60, 30)
 
 	// Initial scroll offset should be 0
@@ -495,7 +495,7 @@ func TestLogDialog_Scrolling(t *testing.T) {
 }
 
 func TestLogDialog_DismissOnEnter(t *testing.T) {
-	d := NewLogDialog("test-branch", "Some log content")
+	d := NewLogDialog("test-branch", "", "Some log content")
 	_, cmd := d.Update(dSpecialKey(tea.KeyEnter))
 
 	if cmd == nil {
@@ -509,7 +509,7 @@ func TestLogDialog_DismissOnEnter(t *testing.T) {
 }
 
 func TestLogDialog_DismissOnEscape(t *testing.T) {
-	d := NewLogDialog("test-branch", "Some log content")
+	d := NewLogDialog("test-branch", "", "Some log content")
 	_, cmd := d.Update(dSpecialKey(tea.KeyEsc))
 
 	if cmd == nil {
@@ -523,7 +523,7 @@ func TestLogDialog_DismissOnEscape(t *testing.T) {
 }
 
 func TestLogDialog_View(t *testing.T) {
-	d := NewLogDialog("test-branch", "Line 1\nLine 2\nLine 3")
+	d := NewLogDialog("test-branch", "", "Line 1\nLine 2\nLine 3")
 	d.SetSize(60, 30)
 
 	view := d.View()
@@ -545,7 +545,7 @@ func TestLogDialog_View(t *testing.T) {
 func TestLogDialog_LineTruncation(t *testing.T) {
 	// Create a log with a very long line
 	longLine := strings.Repeat("x", 200)
-	d := NewLogDialog("test-branch", longLine)
+	d := NewLogDialog("test-branch", "", longLine)
 	d.SetSize(80, 30) // Dialog width 80, content width = 80 - 6 = 74
 
 	view := d.View()

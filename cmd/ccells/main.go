@@ -677,6 +677,7 @@ func runStateRepair() error {
 		ws := workstream.NewWithID(saved.ID, saved.BranchName, saved.Prompt)
 		ws.ContainerID = saved.ContainerID
 		ws.Title = saved.Title
+		ws.Synopsis = saved.Synopsis
 		ws.CreatedAt = saved.CreatedAt
 		ws.ClaudeSessionID = saved.ClaudeSessionID
 		workstreams = append(workstreams, ws)

@@ -143,6 +143,13 @@ type TitleGeneratedMsg struct {
 	Error        error
 }
 
+// SynopsisGeneratedMsg is sent when a workstream synopsis is generated via Claude CLI.
+type SynopsisGeneratedMsg struct {
+	WorkstreamID string
+	Synopsis     string
+	Error        error
+}
+
 // UncommittedChangesMsg is sent after checking for uncommitted changes in a worktree.
 type UncommittedChangesMsg struct {
 	WorkstreamID string
@@ -216,6 +223,69 @@ Task: %s`, ws.Prompt)
 		return TitleGeneratedMsg{
 			WorkstreamID: ws.ID,
 			Title:        title,
+		}
+	}
+}
+
+// GenerateSynopsisCmd returns a command that generates a synopsis for a workstream
+// based on git changes. This runs when a session ends to summarize what was done.
+func GenerateSynopsisCmd(ws *workstream.Workstream) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+		defer cancel()
+
+		// Get git changes to summarize
+		worktreePath := resolveWorktreePath(ws)
+		if worktreePath == "" {
+			return SynopsisGeneratedMsg{
+				WorkstreamID: ws.ID,
+				Error:        fmt.Errorf("no worktree path"),
+			}
+		}
+
+		gitRepo := GitClientFactory(worktreePath)
+
+		// Get branch info (commits, files changed)
+		branchInfo, err := gitRepo.GetBranchInfo(ctx, ws.BranchName)
+		if err != nil || branchInfo == "" {
+			// No commits yet, nothing to summarize
+			return SynopsisGeneratedMsg{
+				WorkstreamID: ws.ID,
+				Synopsis:     "",
+			}
+		}
+
+		// Get a summary of recent commits
+		commitLog, _ := gitRepo.GetBranchCommitLogs(ctx, ws.BranchName)
+
+		// Build prompt for Claude
+		prompt := fmt.Sprintf(`Generate a brief 1-line synopsis (max 100 chars) summarizing what was accomplished on this branch. Output ONLY the synopsis text, no quotes or explanation.
+
+Original task: %s
+
+Branch info:
+%s
+
+Recent commits:
+%s`, ws.Prompt, branchInfo, commitLog)
+
+		// Use ephemeral query to generate synopsis
+		synopsis, err := claude.QueryWithTimeout(ctx, prompt, claude.DefaultTimeout)
+		if err != nil {
+			return SynopsisGeneratedMsg{
+				WorkstreamID: ws.ID,
+				Error:        err,
+			}
+		}
+
+		// Limit synopsis length
+		if len(synopsis) > 120 {
+			synopsis = synopsis[:117] + "..."
+		}
+
+		return SynopsisGeneratedMsg{
+			WorkstreamID: ws.ID,
+			Synopsis:     synopsis,
 		}
 	}
 }
@@ -1438,6 +1508,43 @@ func FetchResourceStatsCmd(global bool, projectContainerIDs []string) tea.Cmd {
 			TotalMemory: totalMemory,
 			DiskUsage:   diskUsage,
 			IsGlobal:    global,
+		}
+	}
+}
+
+// ClaudeUsageMsg is sent when Claude usage information is fetched.
+type ClaudeUsageMsg struct {
+	ContainerID string
+	Usage       string
+	Error       error
+}
+
+// FetchClaudeUsageCmd returns a command that fetches Claude usage from a container.
+// It executes `claude -p "/usage"` inside the container.
+func FetchClaudeUsageCmd(containerID string) tea.Cmd {
+	return func() tea.Msg {
+		if containerID == "" {
+			return ClaudeUsageMsg{Error: fmt.Errorf("no container ID")}
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		client, err := docker.NewClient()
+		if err != nil {
+			return ClaudeUsageMsg{ContainerID: containerID, Error: err}
+		}
+		defer client.Close()
+
+		// Execute claude -p "/usage" in the container
+		usage, err := client.ExecInContainer(ctx, containerID, []string{"claude", "-p", "/usage"})
+		if err != nil {
+			return ClaudeUsageMsg{ContainerID: containerID, Error: err}
+		}
+
+		return ClaudeUsageMsg{
+			ContainerID: containerID,
+			Usage:       usage,
 		}
 	}
 }

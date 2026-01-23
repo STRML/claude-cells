@@ -65,6 +65,9 @@ type PaneModel struct {
 	// PR status for merge dialog enhancement
 	prStatus        *git.PRStatusInfo
 	prStatusLoading bool
+
+	// Synopsis display
+	synopsisHidden bool // True to hide synopsis in header (app-level toggle)
 }
 
 // Width returns the pane width
@@ -328,6 +331,23 @@ func (p PaneModel) View() string {
 		header = fmt.Sprintf("%s %s %s %s %s", indexLabel, modeIndicator, status, title, stateLabel)
 	} else {
 		header = fmt.Sprintf("%s %s %s %s", indexLabel, status, title, stateLabel)
+	}
+
+	// Add synopsis line below header if height > 80 and synopsis exists
+	if p.height > 80 && !p.synopsisHidden {
+		synopsis := p.workstream.GetSynopsis()
+		if synopsis != "" {
+			// Style the synopsis line in dim grey
+			synopsisStyle := lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#666666")).
+				Italic(true)
+			// Truncate synopsis if too wide
+			maxWidth := p.width - 4
+			if len(synopsis) > maxWidth {
+				synopsis = synopsis[:maxWidth-3] + "..."
+			}
+			header = header + "\n" + synopsisStyle.Render("  "+synopsis)
+		}
 	}
 
 	// Output content - use virtual terminal if PTY is active
@@ -1279,6 +1299,11 @@ func (p *PaneModel) SetPRStatusLoading(loading bool) {
 // IsPRStatusLoading returns true if PR status is being loaded
 func (p *PaneModel) IsPRStatusLoading() bool {
 	return p.prStatusLoading
+}
+
+// SetSynopsisHidden sets whether the synopsis should be hidden in the header
+func (p *PaneModel) SetSynopsisHidden(hidden bool) {
+	p.synopsisHidden = hidden
 }
 
 // renderPRFooter renders a compact PR status footer line.
