@@ -1,13 +1,13 @@
 # Backend Structure
 
-Last updated: 2026-01-22 (Updated: orchestrator extraction)
+Last updated: 2026-01-23 (Updated: cursor position fix)
 
 ## Quick Reference: Large Files
 
 | File | Lines | Notes |
 |------|-------|-------|
 | `tui/app.go` | 2722 | Main event loop - acceptable for Bubble Tea |
-| `tui/pane.go` | 1721 | God object - candidate for split |
+| `tui/pane.go` | 1433 | Core pane logic (split into focused files) |
 | `tui/container.go` | 1356 | **Reduced from 1653** - core logic extracted to orchestrator |
 | `tui/dialog.go` | 1332 | Multiple dialog types - could split |
 | `orchestrator/create.go` | 309 | NEW - Creation flow extracted from container.go |
@@ -88,6 +88,7 @@ The main application package implementing the Bubble Tea TUI.
 - `WritePTYOutput()` - Write to vterm with scrollback tracking
 - `renderVTerm()` - Render vterm content with ANSI colors
 - `muteANSI()` - Desaturate colors for unfocused panes
+- `GetCursorPosition()` - Calculate cursor position (recalculates viewport offset to match View())
 
 ### Package-Level State
 

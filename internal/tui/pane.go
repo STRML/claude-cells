@@ -1459,17 +1459,34 @@ func (p *PaneModel) GetCursorPosition() CursorPosition {
 	}
 
 	cursor := p.vterm.Cursor()
+	_, vtermRows := p.vterm.Size()
 
 	// Calculate cursor position in the full content (scrollback + vterm)
 	scrollbackLines := len(p.scrollback)
 	contentCursorY := scrollbackLines + cursor.Y
 
-	// Get the visible position relative to viewport
-	viewportYOffset := p.viewport.YOffset()
+	// Calculate viewport Y offset using the same logic as View().
+	// IMPORTANT: View() uses a value receiver, so its viewport modifications don't persist.
+	// We must recalculate the offset here to match what View() used when rendering.
+	viewportHeight := p.viewport.Height()
+	totalContentLines := scrollbackLines + vtermRows
+
+	var viewportYOffset int
+	if p.scrollMode {
+		// In scroll mode - use the stored offset
+		viewportYOffset = p.viewport.YOffset()
+	} else {
+		// Normal mode - viewport follows output and stays at bottom
+		// This matches View()'s GotoBottom() behavior when wasAtBottom is true
+		viewportYOffset = totalContentLines - viewportHeight
+		if viewportYOffset < 0 {
+			viewportYOffset = 0
+		}
+	}
+
 	visibleY := contentCursorY - viewportYOffset
 
 	// Check if cursor is within visible viewport area
-	viewportHeight := p.viewport.Height()
 	if visibleY < 0 || visibleY >= viewportHeight {
 		return CursorPosition{Visible: false}
 	}
