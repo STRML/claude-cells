@@ -21,6 +21,12 @@ func InjectProxyConfig(claudeDir string) error {
 		return err
 	}
 
+	// Write the hook script that intercepts git/gh commands
+	hookScriptPath := filepath.Join(binDir, "ccells-git-hook")
+	if err := os.WriteFile(hookScriptPath, []byte(GitHookScript), 0755); err != nil {
+		return err
+	}
+
 	// Load existing settings or create new
 	settingsPath := filepath.Join(claudeDir, "settings.json")
 	settings := make(map[string]interface{})
@@ -33,52 +39,27 @@ func InjectProxyConfig(claudeDir string) error {
 	}
 
 	// Merge our hooks with any existing hooks
+	// Use PreToolUse event type with "Bash" matcher (not "Bash" as event type)
 	hooks := getOrCreateMap(settings, "hooks")
-	bashHooks := getOrCreateSlice(hooks, "Bash")
+	preToolUseHooks := getOrCreateSlice(hooks, "PreToolUse")
 
-	// Add our git/gh intercepting hooks
-	// Note: The command must pass "git" or "gh" as first arg so build_operation() works
-	bashHooks = appendHookIfNotExists(bashHooks, map[string]interface{}{
-		"matcher": "^git\\s+(fetch|pull|push)",
+	// Add a single hook that intercepts all Bash commands and filters git/gh
+	// The hook script parses the command from JSON stdin and decides what to do
+	preToolUseHooks = appendHookIfMatcherNotExists(preToolUseHooks, "Bash", map[string]interface{}{
+		"matcher": "Bash",
 		"hooks": []interface{}{
 			map[string]interface{}{
 				"type":    "command",
-				"command": "/root/.claude/bin/ccells-git-proxy git \"$@\"",
+				"command": "/root/.claude/bin/ccells-git-hook",
 			},
 		},
 	})
 
-	bashHooks = appendHookIfNotExists(bashHooks, map[string]interface{}{
-		"matcher": "^git\\s+remote",
-		"hooks": []interface{}{
-			map[string]interface{}{
-				"type":    "block",
-				"message": "git remote commands are blocked in ccells containers",
-			},
-		},
-	})
+	hooks["PreToolUse"] = preToolUseHooks
 
-	bashHooks = appendHookIfNotExists(bashHooks, map[string]interface{}{
-		"matcher": "^gh\\s+pr\\s+(view|checks|diff|list|create|merge)",
-		"hooks": []interface{}{
-			map[string]interface{}{
-				"type":    "command",
-				"command": "/root/.claude/bin/ccells-git-proxy gh \"$@\"",
-			},
-		},
-	})
+	// Remove any invalid "Bash" hook event type that may have been added by older versions
+	delete(hooks, "Bash")
 
-	bashHooks = appendHookIfNotExists(bashHooks, map[string]interface{}{
-		"matcher": "^gh\\s+issue\\s+(view|list)",
-		"hooks": []interface{}{
-			map[string]interface{}{
-				"type":    "command",
-				"command": "/root/.claude/bin/ccells-git-proxy gh \"$@\"",
-			},
-		},
-	})
-
-	hooks["Bash"] = bashHooks
 	settings["hooks"] = hooks
 
 	// Write updated settings
@@ -115,13 +96,11 @@ func getOrCreateSlice(parent map[string]interface{}, key string) []interface{} {
 	return s
 }
 
-// appendHookIfNotExists adds a hook to the slice if a hook with the same matcher doesn't exist.
-func appendHookIfNotExists(hooks []interface{}, newHook map[string]interface{}) []interface{} {
-	newMatcher, _ := newHook["matcher"].(string)
-
+// appendHookIfMatcherNotExists adds a hook to the slice if a hook with the specified matcher doesn't exist.
+func appendHookIfMatcherNotExists(hooks []interface{}, matcherToFind string, newHook map[string]interface{}) []interface{} {
 	for _, h := range hooks {
 		if m, ok := h.(map[string]interface{}); ok {
-			if matcher, ok := m["matcher"].(string); ok && matcher == newMatcher {
+			if matcher, ok := m["matcher"].(string); ok && matcher == matcherToFind {
 				// Hook with same matcher already exists, skip
 				return hooks
 			}

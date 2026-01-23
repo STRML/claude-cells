@@ -183,47 +183,63 @@ fi
 exit $EXIT_CODE
 `
 
-// HookConfig returns the Claude Code settings.json hook configuration
-// that intercepts git and gh commands.
-const HookConfig = `{
-  "hooks": {
-    "Bash": [
-      {
-        "matcher": "^git\\s+(fetch|pull|push)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ccells-git-proxy git $@"
-          }
-        ]
-      },
-      {
-        "matcher": "^git\\s+remote",
-        "hooks": [
-          {
-            "type": "block",
-            "message": "git remote commands are blocked in ccells containers"
-          }
-        ]
-      },
-      {
-        "matcher": "^gh\\s+pr\\s+(view|checks|diff|list|create|merge)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ccells-git-proxy gh $@"
-          }
-        ]
-      },
-      {
-        "matcher": "^gh\\s+issue\\s+(view|list)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "ccells-git-proxy gh $@"
-          }
-        ]
-      }
-    ]
-  }
-}`
+// GitHookScript is a PreToolUse hook script that intercepts git and gh commands.
+// It receives JSON on stdin with the bash command, checks if it matches git/gh patterns,
+// and either:
+// - Runs the command through the proxy and exits 2 (for proxied commands)
+// - Exits 2 with an error message (for blocked commands like git remote)
+// - Exits 0 to allow the command (for non-git/gh commands)
+const GitHookScript = `#!/bin/bash
+# ccells-git-hook: PreToolUse hook for intercepting git/gh commands
+# Receives JSON on stdin, extracts the bash command, and decides:
+# - git fetch/pull/push: run through proxy, output result, exit 2 (block original)
+# - git remote: block with error message
+# - gh pr/issue: run through proxy, output result, exit 2 (block original)
+# - other commands: exit 0 (allow)
+
+# Read JSON input from stdin
+input=$(cat)
+
+# Extract command from JSON using grep/sed (portable)
+command=$(echo "$input" | grep -o '"command"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*"command"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/')
+
+# If no command found, allow
+if [ -z "$command" ]; then
+    exit 0
+fi
+
+# Check for git remote commands (blocked entirely)
+if echo "$command" | grep -qE '^git\s+remote(\s|$)'; then
+    echo "git remote commands are blocked in ccells containers" >&2
+    exit 2
+fi
+
+# Check for git fetch/pull/push commands (proxy)
+if echo "$command" | grep -qE '^git\s+(fetch|pull|push)(\s|$)'; then
+    # Run through proxy - the proxy script handles the full command
+    /root/.claude/bin/ccells-git-proxy $command
+    exit_code=$?
+    # Exit 2 to block the original command (proxy already ran it)
+    # Use exit code 0 if proxy succeeded, 2 otherwise (exit 2 = block in Claude)
+    if [ $exit_code -eq 0 ]; then
+        exit 2  # Block original, proxy succeeded
+    else
+        exit 2  # Block original, but proxy failed (error already shown)
+    fi
+fi
+
+# Check for gh pr commands (proxy)
+if echo "$command" | grep -qE '^gh\s+pr\s+(view|checks|diff|list|create|merge)(\s|$)'; then
+    /root/.claude/bin/ccells-git-proxy $command
+    exit 2  # Block original
+fi
+
+# Check for gh issue commands (proxy)
+if echo "$command" | grep -qE '^gh\s+issue\s+(view|list)(\s|$)'; then
+    /root/.claude/bin/ccells-git-proxy $command
+    exit 2  # Block original
+fi
+
+# Allow all other commands
+exit 0
+`
