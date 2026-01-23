@@ -3,6 +3,8 @@ package claude
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -40,6 +42,15 @@ func defaultExecutor(ctx context.Context, args []string, env []string) (string, 
 	cmd.Env = env
 	output, err := cmd.Output()
 	if err != nil {
+		// Extract stderr from ExitError for better diagnostics
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			stderr := strings.TrimSpace(string(exitErr.Stderr))
+			if stderr != "" {
+				return "", fmt.Errorf("claude CLI failed (exit %d): %s", exitErr.ExitCode(), stderr)
+			}
+			return "", fmt.Errorf("claude CLI failed (exit %d): %w", exitErr.ExitCode(), err)
+		}
 		return "", err
 	}
 	return string(output), nil

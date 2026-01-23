@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os/exec"
 	"regexp"
 	"strconv"
@@ -159,21 +160,24 @@ func extractCLIResult(output string) string {
 
 // stripMarkdownCodeBlock removes markdown code block fencing from a string.
 // Handles patterns like: ```json\n{...}\n``` or ```\n{...}\n```
+// Also handles cases where there's text before the code block.
 func stripMarkdownCodeBlock(s string) string {
 	s = strings.TrimSpace(s)
 
-	// Check for code block start
-	if !strings.HasPrefix(s, "```") {
+	// Find opening fence - it might not be at the start
+	openingFence := strings.Index(s, "```")
+	if openingFence == -1 {
 		return s
 	}
 
 	// Find end of first line (the opening fence with optional language)
-	firstNewline := strings.Index(s, "\n")
+	firstNewline := strings.Index(s[openingFence:], "\n")
 	if firstNewline == -1 {
 		return s
 	}
+	firstNewline += openingFence // Adjust to absolute position
 
-	// Find closing fence
+	// Find closing fence (must be after the opening fence line)
 	closingFence := strings.LastIndex(s, "```")
 	if closingFence <= firstNewline {
 		return s
@@ -194,6 +198,7 @@ func GeneratePRContent(ctx context.Context, gitClient GitClient, branchName, wor
 	// Get commit logs for context
 	commitLogs, err := gitClient.GetBranchCommitLogs(ctx, branchName)
 	if err != nil {
+		log.Printf("GeneratePRContent: failed to get commit logs: %v", err)
 		return defaultTitle, defaultBody
 	}
 
@@ -209,6 +214,7 @@ func GeneratePRContent(ctx context.Context, gitClient GitClient, branchName, wor
 		Timeout:      claude.DefaultTimeout,
 	})
 	if err != nil {
+		log.Printf("GeneratePRContent: Claude query failed: %v", err)
 		return defaultTitle, defaultBody
 	}
 
@@ -221,6 +227,7 @@ func GeneratePRContent(ctx context.Context, gitClient GitClient, branchName, wor
 	// Parse the JSON response
 	var resp prContentResponse
 	if err := json.Unmarshal([]byte(result), &resp); err != nil {
+		log.Printf("GeneratePRContent: failed to parse JSON response: %v (result after extraction: %q)", err, result)
 		return defaultTitle, defaultBody
 	}
 

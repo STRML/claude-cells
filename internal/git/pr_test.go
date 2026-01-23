@@ -360,8 +360,8 @@ func TestCLIResponseProcessing(t *testing.T) {
 		shouldParse   bool
 	}{
 		{
-			name: "real CLI envelope with markdown-wrapped JSON",
-			cliOutput: `{"type":"result","subtype":"success","result":"` + "```json\\n{\\\"title\\\":\\\"Add user authentication\\\",\\\"body\\\":\\\"## Summary\\\\n- Added login feature\\\"}\\n```" + `"}`,
+			name:          "real CLI envelope with markdown-wrapped JSON",
+			cliOutput:     `{"type":"result","subtype":"success","result":"` + "```json\\n{\\\"title\\\":\\\"Add user authentication\\\",\\\"body\\\":\\\"## Summary\\\\n- Added login feature\\\"}\\n```" + `"}`,
 			expectedTitle: "Add user authentication",
 			expectedBody:  "## Summary\n- Added login feature",
 			shouldParse:   true,
@@ -393,6 +393,13 @@ func TestCLIResponseProcessing(t *testing.T) {
 			expectedTitle: "",
 			expectedBody:  "",
 			shouldParse:   false,
+		},
+		{
+			name:          "CLI envelope with explanatory text before JSON",
+			cliOutput:     `{"type":"result","result":"Here is the PR content:\n\n` + "```json\\n{\\\"title\\\":\\\"Refactor module\\\",\\\"body\\\":\\\"Cleaned up code\\\"}\\n```" + `"}`,
+			expectedTitle: "Refactor module",
+			expectedBody:  "Cleaned up code",
+			shouldParse:   true,
 		},
 	}
 
@@ -475,6 +482,16 @@ func TestStripMarkdownCodeBlock(t *testing.T) {
 			name:     "empty string",
 			input:    "",
 			expected: "",
+		},
+		{
+			name:     "text before code block",
+			input:    "Here is the JSON:\n\n```json\n{\"title\":\"Test\"}\n```",
+			expected: `{"title":"Test"}`,
+		},
+		{
+			name:     "explanation text before code block",
+			input:    "I've generated the PR content as requested:\n```json\n{\"title\":\"Add feature\",\"body\":\"Description\"}\n```\nLet me know if you need changes.",
+			expected: `{"title":"Add feature","body":"Description"}`,
 		},
 	}
 
