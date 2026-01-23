@@ -199,14 +199,14 @@ func TestPaneModel_HasPTY(t *testing.T) {
 	}
 }
 
-func TestPaneModel_SendToPTYWithEnter(t *testing.T) {
+func TestPaneModel_SendInput(t *testing.T) {
 	ws := workstream.New("test")
 	pane := NewPaneModel(ws)
 
 	// Test error when no PTY
-	err := pane.SendToPTYWithEnter("test")
+	err := pane.SendInput("test", true)
 	if err == nil {
-		t.Error("SendToPTYWithEnter() should return error when no PTY")
+		t.Error("SendInput() should return error when no PTY")
 	}
 
 	// Create a mock PTY with a mock stdin
@@ -220,9 +220,9 @@ func TestPaneModel_SendToPTYWithEnter(t *testing.T) {
 	pane.SetPTY(pty)
 
 	// Test sending text with enter
-	err = pane.SendToPTYWithEnter("hello world")
+	err = pane.SendInput("hello world", true)
 	if err != nil {
-		t.Errorf("SendToPTYWithEnter() unexpected error: %v", err)
+		t.Errorf("SendInput() unexpected error: %v", err)
 	}
 
 	// Verify the output: should be "hello world" followed by Kitty Enter key
@@ -232,7 +232,33 @@ func TestPaneModel_SendToPTYWithEnter(t *testing.T) {
 	}
 }
 
-func TestPaneModel_SendToPTYWithEnter_EmptyText(t *testing.T) {
+func TestPaneModel_SendInput_WithoutEnter(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+
+	mockStdin := &mockWriteCloser{}
+	pty := &PTYSession{
+		workstreamID: "test",
+		closed:       false,
+		done:         make(chan struct{}),
+		stdin:        mockStdin,
+	}
+	pane.SetPTY(pty)
+
+	// Test sending text without enter
+	err := pane.SendInput("hello", false)
+	if err != nil {
+		t.Errorf("SendInput() unexpected error: %v", err)
+	}
+
+	// Verify the output: should just be the text, no Enter key
+	expected := "hello"
+	if string(mockStdin.Bytes()) != expected {
+		t.Errorf("Written data = %q, want %q", string(mockStdin.Bytes()), expected)
+	}
+}
+
+func TestPaneModel_SendInput_EmptyWithEnter(t *testing.T) {
 	ws := workstream.New("test")
 	pane := NewPaneModel(ws)
 
@@ -246,13 +272,39 @@ func TestPaneModel_SendToPTYWithEnter_EmptyText(t *testing.T) {
 	pane.SetPTY(pty)
 
 	// Test sending just enter (empty text)
-	err := pane.SendToPTYWithEnter("")
+	err := pane.SendInput("", true)
 	if err != nil {
-		t.Errorf("SendToPTYWithEnter() unexpected error: %v", err)
+		t.Errorf("SendInput() unexpected error: %v", err)
 	}
 
 	// Verify the output: should just be Kitty Enter key
 	expected := "\x1b[13u"
+	if string(mockStdin.Bytes()) != expected {
+		t.Errorf("Written data = %q, want %q", string(mockStdin.Bytes()), expected)
+	}
+}
+
+// TestPaneModel_SendToPTYWithEnter tests the deprecated wrapper method
+func TestPaneModel_SendToPTYWithEnter(t *testing.T) {
+	ws := workstream.New("test")
+	pane := NewPaneModel(ws)
+
+	mockStdin := &mockWriteCloser{}
+	pty := &PTYSession{
+		workstreamID: "test",
+		closed:       false,
+		done:         make(chan struct{}),
+		stdin:        mockStdin,
+	}
+	pane.SetPTY(pty)
+
+	// Test that deprecated method still works
+	err := pane.SendToPTYWithEnter("test")
+	if err != nil {
+		t.Errorf("SendToPTYWithEnter() unexpected error: %v", err)
+	}
+
+	expected := "test\x1b[13u"
 	if string(mockStdin.Bytes()) != expected {
 		t.Errorf("Written data = %q, want %q", string(mockStdin.Bytes()), expected)
 	}

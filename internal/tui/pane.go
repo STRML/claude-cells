@@ -978,26 +978,33 @@ func (p *PaneModel) AppendOutput(text string) {
 	p.viewport.GotoBottom()
 }
 
-// SendToPTY sends text to the PTY session as if the user typed it.
+// SendInput sends text to the PTY session as if the user typed it.
+// If pressEnter is true, it also sends an Enter key press using the Kitty keyboard protocol
+// to ensure it works in Claude Code (bubbletea app) which enables Kitty protocol.
 // This is used to notify Claude Code about external events like PR creation.
-func (p *PaneModel) SendToPTY(text string) error {
-	if p.pty == nil || p.pty.IsClosed() {
-		return fmt.Errorf("PTY session not available")
-	}
-	return p.pty.WriteString(text)
-}
-
-// SendToPTYWithEnter sends text to the PTY followed by an Enter key press.
-// This uses the Kitty keyboard protocol for Enter to ensure it works in
-// Claude Code (bubbletea app) which enables Kitty protocol for enhanced key handling.
-func (p *PaneModel) SendToPTYWithEnter(text string) error {
+func (p *PaneModel) SendInput(text string, pressEnter bool) error {
 	if p.pty == nil || p.pty.IsClosed() {
 		return fmt.Errorf("PTY session not available")
 	}
 	if err := p.pty.WriteString(text); err != nil {
 		return err
 	}
-	return p.pty.Write(KittyEnterKey)
+	if pressEnter {
+		return p.pty.Write(KittyEnterKey)
+	}
+	return nil
+}
+
+// SendToPTY sends text to the PTY session without pressing Enter.
+// Deprecated: Use SendInput(text, false) instead.
+func (p *PaneModel) SendToPTY(text string) error {
+	return p.SendInput(text, false)
+}
+
+// SendToPTYWithEnter sends text to the PTY followed by an Enter key press.
+// Deprecated: Use SendInput(text, true) instead.
+func (p *PaneModel) SendToPTYWithEnter(text string) error {
+	return p.SendInput(text, true)
 }
 
 // WritePTYOutput writes raw PTY output to the virtual terminal
