@@ -75,8 +75,7 @@ type AppModel struct {
 	mouseEnabled   bool                 // True when mouse capture is enabled (click-to-focus)
 	dragHintShown  bool                 // True if we've shown the drag modifier hint this session
 	ctrlVHintShown bool                 // True if we've shown the Ctrl+V paste hint this session
-	lastEscapeTime time.Time            // For double-escape detection
-	pendingEscape  bool                 // True when first Esc pressed, waiting to see if double-tap
+	lastEscapeTime time.Time            // For double-escape quit detection in nav mode
 	toast          string               // Temporary notification message
 	toastExpiry    time.Time            // When toast should disappear
 	workingDir     string               // Current working directory (git repo path)
@@ -217,10 +216,8 @@ type spinnerTickMsg struct{}
 // fadeTickMsg is sent to animate the fade transition
 type fadeTickMsg struct{}
 
-// escapeTimeoutMsg is sent when the escape timeout expires (first Esc should be forwarded)
-type escapeTimeoutMsg struct {
-	timestamp time.Time // The timestamp of the Esc that started this timeout
-}
+// keyboardCheckMsg is sent after startup to check if Kitty keyboard protocol was detected
+type keyboardCheckMsg struct{}
 
 // pairingHealthTickMsg is sent periodically to check pairing sync health
 type pairingHealthTickMsg struct{}
@@ -356,7 +353,13 @@ func PauseAllAndSaveCmd(dir string, workstreams []*workstream.Workstream, focuse
 func (m AppModel) Init() tea.Cmd {
 	// Try to load saved state on startup
 	// Cursor visibility is now controlled via View().Cursor
-	return LoadStateCmd(m.stateDir)
+	// Also schedule a check for Kitty keyboard protocol support
+	return tea.Batch(
+		LoadStateCmd(m.stateDir),
+		tea.Tick(500*time.Millisecond, func(t time.Time) tea.Msg {
+			return keyboardCheckMsg{}
+		}),
+	)
 }
 
 // Update handles messages
@@ -462,11 +465,20 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Handle input mode (keys routed to focused pane)
 		if m.inputMode && len(m.panes) > 0 && m.focusedPane < len(m.panes) {
 			switch msg.String() {
+			case "shift+esc":
+				// Shift+Esc immediately exits to nav mode (requires Kitty keyboard protocol)
+				m.tmuxPrefix = false
+				// If in scroll mode, exit scroll mode first
+				if m.panes[m.focusedPane].IsScrollMode() {
+					m.panes[m.focusedPane].ScrollToBottom()
+					return m, nil
+				}
+				m.inputMode = false
+				return m, nil
 			case "esc":
 				// Check for Ctrl+B prefix - exit scroll mode or nav mode
 				if m.tmuxPrefix && time.Since(m.tmuxPrefixTime) < tmuxPrefixTimeout {
 					m.tmuxPrefix = false
-					m.pendingEscape = false
 					// If in scroll mode, exit scroll mode first
 					if m.panes[m.focusedPane].IsScrollMode() {
 						m.panes[m.focusedPane].ScrollToBottom()
@@ -477,22 +489,10 @@ func (m AppModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					return m, nil
 				}
 				m.tmuxPrefix = false
-				// Check for double-escape (exit to nav mode)
-				// Only triggers if we have a pending escape waiting
-				if m.pendingEscape && time.Since(m.lastEscapeTime) < escapeTimeout {
-					m.lastEscapeTime = time.Time{} // Reset
-					m.pendingEscape = false
-					m.inputMode = false
-					return m, nil
-				}
-				// First escape - defer sending to pane, wait to see if it's a double-tap
-				m.lastEscapeTime = time.Now()
-				m.pendingEscape = true
-				// Start timer - if it fires, we'll send the Esc to the pane
-				escTime := m.lastEscapeTime
-				return m, tea.Tick(escapeTimeout, func(t time.Time) tea.Msg {
-					return escapeTimeoutMsg{timestamp: escTime}
-				})
+				// Forward Esc directly to the pane (for vim mode, etc.)
+				var cmd tea.Cmd
+				m.panes[m.focusedPane], cmd = m.panes[m.focusedPane].Update(msg)
+				return m, cmd
 			case "ctrl+c":
 				// Send ctrl+c to the pane (for interrupting processes)
 				var cmd tea.Cmd
@@ -1096,7 +1096,7 @@ Navigation Mode:
   Esc Esc     Quit
 
 Input Mode:
-  Esc Esc     Exit to nav mode
+  Shift+Esc   Exit to nav mode*
   Ctrl+B Esc  Exit to nav mode (or scroll mode)
   Ctrl+B ←→   Switch pane (without exiting input mode)
   Ctrl+B 1-9  Switch pane by number
@@ -1104,8 +1104,9 @@ Input Mode:
   Shift+Enter Insert newline*
   All other keys sent to Claude Code
 
-* Shift+Enter requires a terminal with Kitty keyboard
-  protocol support (kitty, WezTerm, Ghostty, foot, etc.)
+* Shift+Esc and Shift+Enter require a terminal with
+  Kitty keyboard protocol (Kitty, WezTerm, Ghostty, foot).
+  Use Ctrl+B Esc if your terminal lacks support.
 
 Scroll Mode:
   PgUp/PgDn   Continue scrolling
@@ -1576,6 +1577,16 @@ Scroll Mode:
 		// Continue ticking if any pane is still fading
 		if anyFading {
 			return m, fadeTickCmd()
+		}
+		return m, nil
+
+	case keyboardCheckMsg:
+		// Check if Kitty keyboard protocol was detected
+		// If not, show a hint about using Ctrl+B Esc to exit input mode
+		if !m.keyboardEnhanced {
+			m.toast = "Terminal lacks Kitty protocol - use Ctrl+B Esc to exit input mode"
+			m.toastExpiry = time.Now().Add(4 * time.Second)
+			LogDebug("Kitty keyboard protocol not detected - Shift+Esc won't work")
 		}
 		return m, nil
 
@@ -2147,21 +2158,6 @@ Scroll Mode:
 		}
 		return m, tea.Quit
 
-	case escapeTimeoutMsg:
-		// Escape timeout fired - if we still have a pending escape from the same timestamp,
-		// forward it to the pane now. If pendingEscape was cleared (double-tap happened),
-		// or if we're no longer in input mode, ignore this message.
-		if m.pendingEscape && m.inputMode && msg.timestamp.Equal(m.lastEscapeTime) {
-			m.pendingEscape = false
-			// Send the deferred Esc to the focused pane
-			if len(m.panes) > 0 && m.focusedPane < len(m.panes) {
-				var cmd tea.Cmd
-				m.panes[m.focusedPane], cmd = m.panes[m.focusedPane].Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-				return m, cmd
-			}
-		}
-		return m, nil
-
 	case pairingHealthTickMsg:
 		// Periodic health check for pairing mode
 		if m.pairingOrchestrator.IsActive() {
@@ -2303,46 +2299,75 @@ func (m AppModel) padToHeight(view string) string {
 
 // renderTitleBar renders the top title bar
 func (m AppModel) renderTitleBar() string {
-	titleStyle := lipgloss.NewStyle().
-		Background(lipgloss.Color("#7C3AED")).
+	// Determine bar color based on mode
+	var barBg string
+	var modeName string
+	var badgeBg string
+	if m.inputMode {
+		barBg = "#047857"   // Darker green for whole bar
+		badgeBg = "#10B981" // Lighter green badge
+		modeName = " INPUT "
+	} else {
+		barBg = "#5B21B6"   // Darker purple for whole bar
+		badgeBg = "#7C3AED" // Lighter purple badge
+		modeName = " NAV "
+	}
+
+	// Mode badge style (slightly lighter than bar for contrast)
+	badgeStyle := lipgloss.NewStyle().
+		Background(lipgloss.Color(badgeBg)).
 		Foreground(lipgloss.Color("#FFFFFF")).
 		Bold(true).
 		Padding(0, 1)
+	mode := badgeStyle.Render(modeName)
 
-	// Mode indicator
-	var mode string
-	if m.inputMode {
-		inputStyle := titleStyle.Background(lipgloss.Color("#059669"))
-		mode = inputStyle.Render(" INPUT ")
-	} else {
-		navStyle := titleStyle.Background(lipgloss.Color("#7C3AED"))
-		mode = navStyle.Render(" NAV ")
-	}
-
-	// Scroll mode indicator
+	// Scroll mode indicator (orange badge)
 	var scrollIndicator string
 	if len(m.panes) > 0 && m.focusedPane < len(m.panes) && m.panes[m.focusedPane].IsScrollMode() {
-		scrollStyle := titleStyle.Background(lipgloss.Color("#D97706"))
+		scrollStyle := lipgloss.NewStyle().
+			Background(lipgloss.Color("#D97706")).
+			Foreground(lipgloss.Color("#FFFFFF")).
+			Bold(true).
+			Padding(0, 1)
 		scrollIndicator = scrollStyle.Render(" SCROLL ")
 	}
 
-	// App title
+	// App title (no background, inherits bar color)
+	titleStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FFFFFF")).
+		Bold(true).
+		Padding(0, 1)
 	title := titleStyle.Render(" Claude Cells ")
 
-	// Keybinds hint - top bar shows navigation/mode hints (context-sensitive)
-	// Bottom status bar shows action keys, so avoid duplication here
+	// Keybinds hint - styled for the colored bar
+	hintKeyStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#FBBF24")). // Yellow for keys
+		Bold(true)
+	hintDescStyle := lipgloss.NewStyle().
+		Foreground(lipgloss.Color("#E5E7EB")) // Light gray for descriptions
+
+	// Helper to render hints on colored bar
+	coloredKeyHint := func(key, desc string) string {
+		return hintKeyStyle.Render(key) + hintDescStyle.Render(desc)
+	}
+
 	var hints string
 	if m.inputMode {
+		// Show Shift+Esc if terminal supports Kitty protocol, otherwise Ctrl+B Esc
+		navKey := "⇧Esc"
+		if !m.keyboardEnhanced {
+			navKey = "Ctrl+B Esc"
+		}
 		if scrollIndicator != "" {
-			hints = "  " + KeyHint("↑↓/PgUp/Dn", " scroll") + "  " + KeyHint("Esc", " exit scroll")
+			hints = "  " + coloredKeyHint("↑↓/PgUp/Dn", " scroll") + "  " + coloredKeyHint(navKey, " exit scroll")
 		} else {
-			hints = "  " + KeyHint("Esc Esc", " nav") + "  " + KeyHint("Ctrl+B ←→", " switch pane") + "  " + KeyHint("Ctrl+B PgUp/Dn", " scroll")
+			hints = "  " + coloredKeyHint(navKey, " nav") + "  " + coloredKeyHint("Ctrl+B ←→", " switch pane") + "  " + coloredKeyHint("Ctrl+B PgUp/Dn", " scroll")
 		}
 	} else {
 		if scrollIndicator != "" {
-			hints = "  " + KeyHint("↑↓/PgUp/Dn", " scroll") + "  " + KeyHint("Esc", " exit") + "  " + KeyHint("i", " input mode")
+			hints = "  " + coloredKeyHint("↑↓/PgUp/Dn", " scroll") + "  " + coloredKeyHint("Esc", " exit") + "  " + coloredKeyHint("i", " input mode")
 		} else {
-			hints = "  " + KeyHint("←→", " panes") + "  " + KeyHint("Tab", " cycle") + "  " + KeyHint("1-9", " focus") + "  " + KeyHint("Space", " promote") + "  " + KeyHint("L", " layout") + "  " + KeyHint("i", " input") + "  " + KeyHint("?", " help")
+			hints = "  " + coloredKeyHint("←→", " panes") + "  " + coloredKeyHint("Tab", " cycle") + "  " + coloredKeyHint("1-9", " focus") + "  " + coloredKeyHint("Space", " promote") + "  " + coloredKeyHint("L", " layout") + "  " + coloredKeyHint("i", " input") + "  " + coloredKeyHint("?", " help")
 		}
 	}
 
@@ -2355,9 +2380,10 @@ func (m AppModel) renderTitleBar() string {
 		spacing = 0
 	}
 
+	// Render entire bar with mode-based background color
 	bar := lipgloss.NewStyle().
 		Width(m.width).
-		Background(lipgloss.Color("#1F2937")).
+		Background(lipgloss.Color(barBg)).
 		Render(left + strings.Repeat(" ", spacing) + right)
 
 	return bar

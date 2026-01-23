@@ -360,7 +360,7 @@ NAVIGATION
   INPUT mode Type directly into the focused pane (Claude)
 
   Press [i] or click a pane to enter INPUT mode
-  Press [Esc] twice quickly to return to NAV mode
+  Press [Shift+Esc] or [Ctrl+B Esc] to return to NAV mode
 
 KEYBOARD SHORTCUTS (NAV mode)
   [n]        New workstream      [d]        Destroy workstream

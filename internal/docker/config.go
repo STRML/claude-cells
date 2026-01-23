@@ -122,7 +122,7 @@ Please commit all changes in this repository with an appropriate commit message 
 
 After the commit is complete, inform the user:
 - Briefly summarize what was committed
-- Tell them they can press **Esc Esc m** to open the merge dialog and merge this branch into main
+- Tell them they can press **Shift+Esc** (or **Ctrl+B Esc**) then **m** to open the merge dialog
 `
 
 // CCellsInstructions is the CLAUDE.md content for ccells containers
@@ -622,7 +622,7 @@ if echo "$COMMAND" | grep -qE 'git\s+commit.*--amend|git\s+commit\s+-[a-zA-Z]*a[
         echo "Your branch has been pushed to remote. Using 'git commit --amend' will rewrite" >&2
         echo "history and cause push failures. Instead, create a new commit with your changes." >&2
         echo "" >&2
-        echo "If you really need to amend, use the Force Push option in the merge dialog (Esc Esc m)." >&2
+        echo "If you really need to amend, use the Force Push option in the merge dialog (Shift+Esc, then m)." >&2
         exit 2
     fi
 fi
