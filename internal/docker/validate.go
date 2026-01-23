@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/STRML/claude-cells/configs"
@@ -152,8 +153,36 @@ func BuildImage(ctx context.Context, output io.Writer) error {
 	}
 	defer os.RemoveAll(tmpDir)
 
+	// Build dockerfile content with injections from config
+	dockerfile := string(configs.BaseDockerfile)
+
+	// Load dockerfile injection config (global only, no project context for base image)
+	dfCfg := LoadDockerfileConfig("")
+	if len(dfCfg.Inject) > 0 {
+		// Insert injections before WORKDIR (after Claude Code install)
+		injections := "\n# Injected from ~/.claude-cells/config.yaml\n"
+		for _, cmd := range dfCfg.Inject {
+			injections += fmt.Sprintf("RUN %s\n", cmd)
+		}
+
+		// Find WORKDIR line and insert before it
+		workdirIdx := strings.Index(dockerfile, "\nWORKDIR /workspace")
+		if workdirIdx > 0 {
+			dockerfile = dockerfile[:workdirIdx] + injections + dockerfile[workdirIdx:]
+		} else {
+			// Fallback: append before CMD
+			cmdIdx := strings.Index(dockerfile, "\nCMD ")
+			if cmdIdx > 0 {
+				dockerfile = dockerfile[:cmdIdx] + injections + dockerfile[cmdIdx:]
+			} else {
+				// Last resort: append at end
+				dockerfile += injections
+			}
+		}
+	}
+
 	dockerfilePath := filepath.Join(tmpDir, "Dockerfile")
-	if err := os.WriteFile(dockerfilePath, configs.BaseDockerfile, 0644); err != nil {
+	if err := os.WriteFile(dockerfilePath, []byte(dockerfile), 0644); err != nil {
 		return fmt.Errorf("failed to write Dockerfile: %w", err)
 	}
 

@@ -16,8 +16,8 @@ RUN ARCH=$(case "${TARGETARCH}" in "arm64") echo "arm64" ;; *) echo "x64" ;; esa
     curl -fsSL https://nodejs.org/dist/v20.11.0/node-v20.11.0-linux-${ARCH}.tar.xz \
     | tar -xJ -C /usr/local --strip-components=1
 
-# Install Claude Code CLI and common statusline tools
-RUN npm install -g @anthropic-ai/claude-code ccstatusline
+# Install Claude Code CLI (native installer)
+RUN curl -fsSL https://claude.ai/install.sh | sh
 
 # Install GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
