@@ -1854,8 +1854,6 @@ Scroll Mode:
 					// Store PR info and mark as pushed (PR creation pushes the branch)
 					ws.SetPRInfo(msg.PRNumber, msg.PRURL)
 					ws.SetHasBeenPushed(true)
-					// Notify Claude Code about the PR creation (uses Kitty Enter)
-					_ = m.panes[i].SendToPTYWithEnter(fmt.Sprintf("[ccells] ✓ PR #%d created: %s (avoid using commit --amend)", msg.PRNumber, msg.PRURL))
 					// Update in-pane progress dialog if open
 					if dialog := m.panes[i].GetInPaneDialog(); dialog != nil && dialog.Type == DialogProgress {
 						dialog.SetComplete(fmt.Sprintf("Pull Request Created!\n\nPR #%d: %s\n\nPress Enter or Esc to close.", msg.PRNumber, msg.PRURL))
