@@ -1436,50 +1436,6 @@ func (p *PaneModel) GetPairingState() *sync.PairingState {
 	return p.pairingState
 }
 
-// renderPRFooter renders a compact PR status footer line.
-// Returns a string like "PR #123: ✓ 3/3 | ↑2 unpushed" or "PR #123: ⏳ 2/3 | ⚠ diverged"
-func (p *PaneModel) renderPRFooter() string {
-	if p.prStatus == nil {
-		return ""
-	}
-
-	// Style for the footer
-	footerStyle := lipgloss.NewStyle().
-		Foreground(lipgloss.Color("#888888"))
-
-	// Build the footer parts
-	var parts []string
-
-	// PR number
-	parts = append(parts, fmt.Sprintf("PR #%d:", p.prStatus.Number))
-
-	// Check status with icon
-	var checkIcon string
-	switch p.prStatus.CheckStatus {
-	case git.PRCheckStatusSuccess:
-		checkIcon = "✓"
-	case git.PRCheckStatusPending:
-		checkIcon = "⏳"
-	case git.PRCheckStatusFailure:
-		checkIcon = "✗"
-	default:
-		checkIcon = "?"
-	}
-	parts = append(parts, fmt.Sprintf("%s %s", checkIcon, p.prStatus.ChecksSummary))
-
-	// Unpushed commits
-	if p.prStatus.UnpushedCount > 0 {
-		parts = append(parts, fmt.Sprintf("↑%d unpushed", p.prStatus.UnpushedCount))
-	}
-
-	// Divergence warning
-	if p.prStatus.IsDiverged {
-		parts = append(parts, "⚠ diverged")
-	}
-
-	return footerStyle.Render(strings.Join(parts, " | "))
-}
-
 // IsClaudeWorking returns true if Claude appears to be actively working.
 // This is detected by looking for the "(ctrl+c to interrupt)" message in the terminal output,
 // which Claude Code shows when it's processing a task.
