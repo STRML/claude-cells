@@ -296,125 +296,57 @@ func findSubstring(s, substr string) bool {
 	return false
 }
 
-func TestExtractCLIResult(t *testing.T) {
-	tests := []struct {
-		name     string
-		input    string
-		expected string
-	}{
-		{
-			name:     "CLI envelope with result",
-			input:    `{"type":"result","subtype":"success","result":"hello world"}`,
-			expected: "hello world",
-		},
-		{
-			name:     "CLI envelope with JSON in result",
-			input:    `{"type":"result","result":"{\"title\":\"Test\",\"body\":\"Body\"}"}`,
-			expected: `{"title":"Test","body":"Body"}`,
-		},
-		{
-			name:     "CLI envelope with markdown in result",
-			input:    "{\"type\":\"result\",\"result\":\"```json\\n{\\\"title\\\":\\\"Test\\\"}\\n```\"}",
-			expected: "```json\n{\"title\":\"Test\"}\n```",
-		},
-		{
-			name:     "not an envelope - plain text",
-			input:    "just plain text",
-			expected: "just plain text",
-		},
-		{
-			name:     "not an envelope - raw JSON",
-			input:    `{"title":"Test","body":"Body"}`,
-			expected: `{"title":"Test","body":"Body"}`,
-		},
-		{
-			name:     "envelope with empty result",
-			input:    `{"type":"result","result":""}`,
-			expected: `{"type":"result","result":""}`,
-		},
-		{
-			name:     "envelope with different type",
-			input:    `{"type":"error","result":"some error"}`,
-			expected: `{"type":"error","result":"some error"}`,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := extractCLIResult(tt.input)
-			if result != tt.expected {
-				t.Errorf("extractCLIResult(%q) = %q, want %q", tt.input, result, tt.expected)
-			}
-		})
-	}
-}
-
-// TestCLIResponseProcessing tests the full pipeline of extracting and parsing
-// Claude CLI responses as used in GeneratePRContent.
-func TestCLIResponseProcessing(t *testing.T) {
+// TestMarkdownStrippingWithJSON tests the stripMarkdownCodeBlock function
+// with various JSON formats that may come from Claude CLI responses.
+// Note: CLI envelope extraction is now handled internally by the claude package.
+func TestMarkdownStrippingWithJSON(t *testing.T) {
 	tests := []struct {
 		name          string
-		cliOutput     string
+		input         string
 		expectedTitle string
 		expectedBody  string
 		shouldParse   bool
 	}{
 		{
-			name:          "real CLI envelope with markdown-wrapped JSON",
-			cliOutput:     `{"type":"result","subtype":"success","result":"` + "```json\\n{\\\"title\\\":\\\"Add user authentication\\\",\\\"body\\\":\\\"## Summary\\\\n- Added login feature\\\"}\\n```" + `"}`,
+			name:          "markdown-wrapped JSON",
+			input:         "```json\n{\"title\":\"Add user authentication\",\"body\":\"## Summary\\n- Added login feature\"}\n```",
 			expectedTitle: "Add user authentication",
 			expectedBody:  "## Summary\n- Added login feature",
 			shouldParse:   true,
 		},
 		{
-			name:          "CLI envelope with raw JSON result (no markdown)",
-			cliOutput:     `{"type":"result","result":"{\"title\":\"Fix bug\",\"body\":\"Fixed the bug\"}"}`,
+			name:          "plain JSON (no markdown)",
+			input:         `{"title":"Fix bug","body":"Fixed the bug"}`,
 			expectedTitle: "Fix bug",
 			expectedBody:  "Fixed the bug",
 			shouldParse:   true,
 		},
 		{
-			name:          "plain markdown-wrapped JSON (no envelope)",
-			cliOutput:     "```json\n{\"title\":\"Test\",\"body\":\"Body\"}\n```",
-			expectedTitle: "Test",
-			expectedBody:  "Body",
-			shouldParse:   true,
-		},
-		{
-			name:          "plain JSON (no envelope, no markdown)",
-			cliOutput:     `{"title":"Direct","body":"Direct body"}`,
-			expectedTitle: "Direct",
-			expectedBody:  "Direct body",
+			name:          "explanatory text before JSON code block",
+			input:         "Here is the PR content:\n\n```json\n{\"title\":\"Refactor module\",\"body\":\"Cleaned up code\"}\n```",
+			expectedTitle: "Refactor module",
+			expectedBody:  "Cleaned up code",
 			shouldParse:   true,
 		},
 		{
 			name:          "invalid response - not JSON",
-			cliOutput:     "This is not JSON at all",
+			input:         "This is not JSON at all",
 			expectedTitle: "",
 			expectedBody:  "",
 			shouldParse:   false,
-		},
-		{
-			name:          "CLI envelope with explanatory text before JSON",
-			cliOutput:     `{"type":"result","result":"Here is the PR content:\n\n` + "```json\\n{\\\"title\\\":\\\"Refactor module\\\",\\\"body\\\":\\\"Cleaned up code\\\"}\\n```" + `"}`,
-			expectedTitle: "Refactor module",
-			expectedBody:  "Cleaned up code",
-			shouldParse:   true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Simulate the processing pipeline used in GeneratePRContent
-			result := extractCLIResult(tt.cliOutput)
-			result = stripMarkdownCodeBlock(result)
+			result := stripMarkdownCodeBlock(tt.input)
 
 			var resp prContentResponse
 			err := json.Unmarshal([]byte(result), &resp)
 
 			if tt.shouldParse {
 				if err != nil {
-					t.Errorf("Expected successful parse, got error: %v\nInput: %s\nAfter extraction: %s", err, tt.cliOutput, result)
+					t.Errorf("Expected successful parse, got error: %v\nInput: %s\nAfter strip: %s", err, tt.input, result)
 					return
 				}
 				if resp.Title != tt.expectedTitle {
