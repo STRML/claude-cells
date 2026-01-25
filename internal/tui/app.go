@@ -2432,14 +2432,14 @@ Scroll Mode:
 			ws := workstream.NewWithID(saved.ID, saved.BranchName, saved.Prompt)
 			ws.ContainerID = saved.ContainerID
 			ws.CreatedAt = saved.CreatedAt
-			ws.Title = saved.Title                     // Restore generated title
-			ws.Synopsis = saved.Synopsis               // Restore synopsis
-			ws.ClaudeSessionID = saved.ClaudeSessionID // Restore session ID for --resume
+			ws.Title = saved.Title                       // Restore generated title
+			ws.Synopsis = saved.Synopsis                 // Restore synopsis
+			ws.ClaudeSessionID = saved.ClaudeSessionID   // Restore session ID for --resume
 			ws.Runtime = normalizeRuntime(saved.Runtime) // Restore runtime selection (normalized)
-			ws.WasInterrupted = saved.WasInterrupted   // Restore interrupted state for auto-continue
-			ws.HasBeenPushed = saved.HasBeenPushed     // Restore push status
-			ws.PRNumber = saved.PRNumber               // Restore PR number if created
-			ws.PRURL = saved.PRURL                     // Restore PR URL if created
+			ws.WasInterrupted = saved.WasInterrupted     // Restore interrupted state for auto-continue
+			ws.HasBeenPushed = saved.HasBeenPushed       // Restore push status
+			ws.PRNumber = saved.PRNumber                 // Restore PR number if created
+			ws.PRURL = saved.PRURL                       // Restore PR URL if created
 			if err := m.manager.Add(ws); err != nil {
 				// Skip workstreams that exceed the limit during restore
 				continue
