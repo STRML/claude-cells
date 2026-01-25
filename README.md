@@ -174,6 +174,38 @@ Containers run with hardened security defaults (capability drops, no-new-privile
 
 See **[docs/CONTAINER-SECURITY.md](docs/CONTAINER-SECURITY.md)** for configuration options and security tiers.
 
+### Runtime Selection
+
+Choose between standard Claude Code or experimental builds with feature flags enabled.
+
+**Standard Claude Code** (default):
+```bash
+ccells  # Uses standard Claude Code runtime
+```
+
+**Claude Sneakpeek** (experimental with swarm mode):
+```bash
+ccells --runtime claudesp  # Enables swarm mode, delegate mode, team coordination
+```
+
+**Configuration file** (set default runtime):
+```yaml
+# ~/.claude-cells/config.yaml (global default)
+runtime: claudesp
+
+# .claude-cells/config.yaml (project-specific)
+runtime: claudesp
+```
+
+**Priority**: CLI flag > project config > global config > default ("claude")
+
+Each runtime:
+- Has its own isolated config directory (`.claude` vs `.claude-sneakpeek`)
+- Persists across session restarts (runtime saved in state)
+- Applies to all workstreams in the session
+
+See [claude-sneakpeek](https://github.com/mikekelly/claude-sneakpeek) for experimental features.
+
 ## Architecture
 
 ```

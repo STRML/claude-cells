@@ -137,10 +137,29 @@ Then inform the user:
 - Tell them they can press **Shift+Esc** (or **Ctrl+B Esc**) then **m** to open the merge dialog
 `
 
-// CCellsInstructions is the CLAUDE.md content for ccells containers
-const CCellsInstructions = `# Claude Cells Session
+// GetCCellsInstructions returns the CLAUDE.md content for ccells containers.
+// It includes runtime-specific context.
+func GetCCellsInstructions(runtime string) string {
+	runtimeInfo := ""
+	if runtime == "claudesp" {
+		runtimeInfo = `
+**Runtime:** Claude Sneakpeek (experimental build with swarm mode)
 
-You are in an isolated container with a dedicated git worktree. **Commit your work** - this is the most important thing. A dirty worktree means lost work.
+You have access to experimental features:
+- **Swarm Mode**: Multi-agent orchestration via TeammateTool
+- **Delegate Mode**: Spawn background agents for parallel tasks
+- **Team Coordination**: Teammate messaging and task ownership
+
+See https://github.com/mikekelly/claude-sneakpeek for details.
+
+`
+	} else if runtime != "" && runtime != "claude" {
+		runtimeInfo = fmt.Sprintf("\n**Runtime:** %s\n\n", runtime)
+	}
+
+	return `# Claude Cells Session
+
+` + runtimeInfo + `You are in an isolated container with a dedicated git worktree. **Commit your work** - this is the most important thing. A dirty worktree means lost work.
 
 ## Git Operations
 
@@ -169,6 +188,7 @@ Commit all changes using ` + "`/ccells-commit`" + `, then provide:
 
 The user is running multiple containers in parallel and relies on Status to triage.
 `
+}
 
 // CreateContainerConfig creates an isolated config directory for a specific container.
 // Each container gets its own copy to prevent race conditions when multiple
@@ -250,7 +270,7 @@ func CreateContainerConfig(containerName string, runtime string) (*ConfigPaths, 
 		return nil, fmt.Errorf("failed to create .claude directory: %w", err)
 	}
 	claudeMdPath := filepath.Join(dstClaudeDir, "CLAUDE.md")
-	if err := os.WriteFile(claudeMdPath, []byte(CCellsInstructions), 0644); err != nil {
+	if err := os.WriteFile(claudeMdPath, []byte(GetCCellsInstructions(runtime)), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write CLAUDE.md: %w", err)
 	}
 

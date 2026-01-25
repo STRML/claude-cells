@@ -152,6 +152,8 @@ Usage:
 Options:
   -h, --help          Show this help message
   -v, --version       Show version information
+  --runtime <name>    Runtime to use: "claude" (default) or "claudesp" (experimental)
+                      Overrides runtime setting from config files
   --repair-state      Validate and repair the state file by extracting
                       session IDs from running containers
 
