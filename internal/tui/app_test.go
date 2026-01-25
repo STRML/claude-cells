@@ -2066,6 +2066,23 @@ func TestAppModel_MouseClick_WithInPaneDialog(t *testing.T) {
 	}
 }
 
+func TestAppModel_View_RuntimeInStatusBar(t *testing.T) {
+	// Set global runtime before creating app
+	SetRuntime("claudesp")
+	defer SetRuntime("claude") // Reset after test
+
+	app := NewAppModel(context.Background())
+	app.width = 100
+	app.height = 40
+
+	view := app.View()
+
+	// Status bar should contain runtime
+	if !strings.Contains(viewString(view), "claudesp") {
+		t.Error("Status bar should display runtime 'claudesp'")
+	}
+}
+
 func TestAppModel_View_MouseModeEnabled(t *testing.T) {
 	app := NewAppModel(context.Background())
 	app.width = 100

@@ -17,6 +17,7 @@ type StatusBarModel struct {
 	inputMode       bool
 	layoutName      string
 	repoPath        string
+	runtime         string
 
 	// Enhanced pairing status (Phase 4)
 	syncStatus       sync.SyncStatus
@@ -62,6 +63,12 @@ func (s StatusBarModel) View() string {
 	// Left section: mode + repo path + app name and count
 	repoPathStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#AAAAAA"))
 	left := fmt.Sprintf("%s %s ccells: %d workstreams", modeIndicator, repoPathStyle.Render(s.repoPath), s.workstreamCount)
+
+	// Runtime indicator
+	if s.runtime != "" {
+		runtimeStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("#888888"))
+		left += runtimeStyle.Render(fmt.Sprintf(" [%s]", s.runtime))
+	}
 
 	// Layout indicator (only show if more than 1 workstream)
 	if s.layoutName != "" && s.workstreamCount > 1 {
@@ -161,4 +168,9 @@ func (s *StatusBarModel) SetLayoutName(name string) {
 // SetRepoPath sets the repository path to display
 func (s *StatusBarModel) SetRepoPath(path string) {
 	s.repoPath = path
+}
+
+// SetRuntime sets the runtime to display
+func (s *StatusBarModel) SetRuntime(runtime string) {
+	s.runtime = runtime
 }

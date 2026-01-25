@@ -2575,6 +2575,7 @@ func (m AppModel) View() tea.View {
 	m.statusBar.SetInputMode(m.inputMode)
 	m.statusBar.SetLayoutName(m.layout.String())
 	m.statusBar.SetRepoPath(m.workingDir)
+	m.statusBar.SetRuntime(globalRuntime)
 	if pairingState.Active {
 		m.statusBar.SetPairingBranch(pairingState.CurrentBranch)
 		m.statusBar.SetPairingStatus(pairingState.SyncStatus, pairingState.StashedChanges, len(pairingState.Conflicts))
