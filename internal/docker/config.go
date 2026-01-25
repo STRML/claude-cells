@@ -27,10 +27,11 @@ const (
 
 // ConfigPaths holds paths to the isolated claude config for containers
 type ConfigPaths struct {
-	ClaudeDir   string // Path to copied .claude directory
-	ClaudeJSON  string // Path to copied .claude.json file
-	GitConfig   string // Path to copied .gitconfig file (empty if no .gitconfig exists)
-	Credentials string // Path to credentials file (from keychain)
+	ClaudeDir     string // Path to copied .claude directory
+	ClaudeJSON    string // Path to copied .claude.json file
+	GitConfig     string // Path to copied .gitconfig file (empty if no .gitconfig exists)
+	Credentials   string // Path to credentials file (from keychain)
+	SneakpeekDir  string // Path to copied .claude-sneakpeek directory (empty if runtime != "claudesp")
 }
 
 // GitIdentity holds the user's git identity
@@ -172,7 +173,8 @@ The user is running multiple containers in parallel and relies on Status to tria
 // CreateContainerConfig creates an isolated config directory for a specific container.
 // Each container gets its own copy to prevent race conditions when multiple
 // Claude Code instances modify credentials simultaneously.
-func CreateContainerConfig(containerName string) (*ConfigPaths, error) {
+// runtime specifies which Claude runtime to use: "claude" (default) or "claudesp" (experimental).
+func CreateContainerConfig(containerName string, runtime string) (*ConfigPaths, error) {
 	configMutex.Lock()
 	defer configMutex.Unlock()
 
@@ -273,11 +275,42 @@ func CreateContainerConfig(containerName string) (*ConfigPaths, error) {
 		gitConfigPath = dstGitConfig
 	}
 
+	// Copy .claude-sneakpeek if runtime is claudesp
+	sneakpeekDir := ""
+	if runtime == "claudesp" {
+		srcSneakpeekDir := filepath.Join(home, ".claude-sneakpeek")
+		dstSneakpeekDir := filepath.Join(containerConfigDir, ".claude-sneakpeek")
+
+		if _, err := os.Stat(srcSneakpeekDir); err == nil {
+			// Copy existing .claude-sneakpeek (selective, like .claude)
+			if err := copyClaudeDirSelective(srcSneakpeekDir, dstSneakpeekDir); err != nil {
+				return nil, fmt.Errorf("failed to copy .claude-sneakpeek directory: %w", err)
+			}
+		} else {
+			// Create empty directory (will be populated by install)
+			if err := os.MkdirAll(dstSneakpeekDir, 0755); err != nil {
+				return nil, fmt.Errorf("failed to create .claude-sneakpeek directory: %w", err)
+			}
+		}
+
+		// Copy credentials into .claude-sneakpeek/.credentials.json
+		// (same pattern as .claude credentials)
+		if creds != nil && creds.Raw != "" {
+			credsInSneakpeekDir := filepath.Join(dstSneakpeekDir, ".credentials.json")
+			if err := os.WriteFile(credsInSneakpeekDir, []byte(creds.Raw), 0600); err != nil {
+				return nil, fmt.Errorf("failed to write .claude-sneakpeek/.credentials.json: %w", err)
+			}
+		}
+
+		sneakpeekDir = dstSneakpeekDir
+	}
+
 	return &ConfigPaths{
-		ClaudeDir:   dstClaudeDir,
-		ClaudeJSON:  dstClaudeJSON,
-		GitConfig:   gitConfigPath,
-		Credentials: "", // Credentials are now inside .claude/.credentials.json
+		ClaudeDir:    dstClaudeDir,
+		ClaudeJSON:   dstClaudeJSON,
+		GitConfig:    gitConfigPath,
+		Credentials:  "", // Credentials are now inside .claude/.credentials.json
+		SneakpeekDir: sneakpeekDir,
 	}, nil
 }
 

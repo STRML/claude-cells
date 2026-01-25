@@ -8,6 +8,64 @@ import (
 	"testing"
 )
 
+func TestCreateContainerConfig_CopiesSneakpeekForClaudesp(t *testing.T) {
+	// Setup temp home directory
+	tmpHome := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpHome)
+	defer os.Setenv("HOME", oldHome)
+
+	// Create .claude-sneakpeek directory with a test file
+	sneakpeekDir := filepath.Join(tmpHome, ".claude-sneakpeek")
+	if err := os.MkdirAll(sneakpeekDir, 0755); err != nil {
+		t.Fatalf("Failed to create .claude-sneakpeek: %v", err)
+	}
+	testFile := filepath.Join(sneakpeekDir, "test.txt")
+	if err := os.WriteFile(testFile, []byte("sneakpeek test"), 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	// Create container config with claudesp runtime
+	cfg, err := CreateContainerConfig("test-container", "claudesp")
+	if err != nil {
+		t.Fatalf("CreateContainerConfig() error = %v", err)
+	}
+
+	// Verify SneakpeekDir is set
+	if cfg.SneakpeekDir == "" {
+		t.Error("SneakpeekDir should be set for claudesp runtime")
+	}
+
+	// Verify .claude-sneakpeek was copied
+	copiedFile := filepath.Join(cfg.SneakpeekDir, "test.txt")
+	data, err := os.ReadFile(copiedFile)
+	if err != nil {
+		t.Fatalf("Failed to read copied sneakpeek file: %v", err)
+	}
+	if string(data) != "sneakpeek test" {
+		t.Errorf("Copied file content = %q, want %q", data, "sneakpeek test")
+	}
+}
+
+func TestCreateContainerConfig_NoSneakpeekForClaude(t *testing.T) {
+	// Setup temp home directory
+	tmpHome := t.TempDir()
+	oldHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpHome)
+	defer os.Setenv("HOME", oldHome)
+
+	// Create container config with claude runtime (default)
+	cfg, err := CreateContainerConfig("test-container", "claude")
+	if err != nil {
+		t.Fatalf("CreateContainerConfig() error = %v", err)
+	}
+
+	// Verify SneakpeekDir is empty for standard claude runtime
+	if cfg.SneakpeekDir != "" {
+		t.Errorf("SneakpeekDir should be empty for claude runtime, got %q", cfg.SneakpeekDir)
+	}
+}
+
 func TestGetCellsDir(t *testing.T) {
 	dir, err := GetCellsDir()
 	if err != nil {

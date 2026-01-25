@@ -98,6 +98,7 @@ type DockerfileConfig struct {
 
 // CellsConfig is the top-level configuration file structure.
 type CellsConfig struct {
+	Runtime    string           `yaml:"runtime,omitempty"`
 	Security   SecurityConfig   `yaml:"security,omitempty"`
 	Dockerfile DockerfileConfig `yaml:"dockerfile,omitempty"`
 }
@@ -225,6 +226,52 @@ func LoadDockerfileConfig(projectPath string) DockerfileConfig {
 		if projectCfg != nil && len(projectCfg.Dockerfile.Inject) > 0 {
 			cfg.Inject = projectCfg.Dockerfile.Inject
 		}
+	}
+
+	return cfg
+}
+
+// LoadConfig loads and merges the full CellsConfig (runtime, security, dockerfile).
+// Order of precedence (highest to lowest):
+// 1. Project config (.claude-cells/config.yaml in projectPath)
+// 2. Global config (~/.claude-cells/config.yaml)
+// 3. Default (runtime="claude")
+func LoadConfig(projectPath string) CellsConfig {
+	cfg := CellsConfig{
+		Runtime: "claude", // Default runtime
+	}
+
+	// Load global config
+	globalCfg := loadGlobalCellsConfig()
+	if globalCfg != nil {
+		if globalCfg.Runtime != "" {
+			cfg.Runtime = globalCfg.Runtime
+		}
+		cfg.Security = mergeSecurityConfig(DefaultSecurityConfig(), globalCfg.Security)
+		if len(globalCfg.Dockerfile.Inject) > 0 {
+			cfg.Dockerfile.Inject = globalCfg.Dockerfile.Inject
+		}
+	} else {
+		cfg.Security = DefaultSecurityConfig()
+	}
+
+	// Load project config (takes precedence)
+	if projectPath != "" {
+		projectCfg := loadProjectCellsConfig(projectPath)
+		if projectCfg != nil {
+			if projectCfg.Runtime != "" {
+				cfg.Runtime = projectCfg.Runtime
+			}
+			cfg.Security = mergeSecurityConfig(cfg.Security, projectCfg.Security)
+			if len(projectCfg.Dockerfile.Inject) > 0 {
+				cfg.Dockerfile.Inject = projectCfg.Dockerfile.Inject
+			}
+		}
+	}
+
+	// Apply tier defaults if CapDrop wasn't explicitly set
+	if cfg.Security.CapDrop == nil {
+		cfg.Security.CapDrop = TierCapDrops(cfg.Security.Tier)
 	}
 
 	return cfg

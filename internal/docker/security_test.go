@@ -6,6 +6,85 @@ import (
 	"testing"
 )
 
+func TestLoadConfig_DefaultRuntime(t *testing.T) {
+	// Test that default runtime is "claude"
+	tmpDir := t.TempDir()
+
+	// No config file exists
+	cfg := LoadConfig(tmpDir)
+
+	if cfg.Runtime != "claude" {
+		t.Errorf("Default runtime should be 'claude', got '%s'", cfg.Runtime)
+	}
+}
+
+func TestLoadConfig_RuntimeFromGlobalConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create global config with runtime=claudesp
+	globalConfigPath := filepath.Join(tmpDir, ".claude-cells", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(globalConfigPath), 0755); err != nil {
+		t.Fatalf("Failed to create config dir: %v", err)
+	}
+
+	configContent := `runtime: claudesp
+security:
+  tier: moderate
+`
+	if err := os.WriteFile(globalConfigPath, []byte(configContent), 0644); err != nil {
+		t.Fatalf("Failed to write global config: %v", err)
+	}
+
+	// Set HOME to tmpDir so LoadConfig finds the global config
+	oldHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", oldHome)
+
+	cfg := LoadConfig("")  // Empty projectPath means global only
+
+	if cfg.Runtime != "claudesp" {
+		t.Errorf("Runtime should be 'claudesp' from global config, got '%s'", cfg.Runtime)
+	}
+}
+
+func TestLoadConfig_ProjectConfigOverridesGlobal(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// Create global config with runtime=claude
+	globalConfigPath := filepath.Join(tmpDir, ".claude-cells", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(globalConfigPath), 0755); err != nil {
+		t.Fatalf("Failed to create config dir: %v", err)
+	}
+
+	globalContent := `runtime: claude`
+	if err := os.WriteFile(globalConfigPath, []byte(globalContent), 0644); err != nil {
+		t.Fatalf("Failed to write global config: %v", err)
+	}
+
+	// Create project config with runtime=claudesp
+	projectDir := filepath.Join(tmpDir, "myproject")
+	projectConfigPath := filepath.Join(projectDir, ".claude-cells", "config.yaml")
+	if err := os.MkdirAll(filepath.Dir(projectConfigPath), 0755); err != nil {
+		t.Fatalf("Failed to create project config dir: %v", err)
+	}
+
+	projectContent := `runtime: claudesp`
+	if err := os.WriteFile(projectConfigPath, []byte(projectContent), 0644); err != nil {
+		t.Fatalf("Failed to write project config: %v", err)
+	}
+
+	// Set HOME to tmpDir
+	oldHome := os.Getenv("HOME")
+	os.Setenv("HOME", tmpDir)
+	defer os.Setenv("HOME", oldHome)
+
+	cfg := LoadConfig(projectDir)
+
+	if cfg.Runtime != "claudesp" {
+		t.Errorf("Runtime should be 'claudesp' from project config, got '%s'", cfg.Runtime)
+	}
+}
+
 func TestDefaultSecurityConfig(t *testing.T) {
 	cfg := DefaultSecurityConfig()
 
