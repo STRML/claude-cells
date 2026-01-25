@@ -121,6 +121,48 @@ dockerfile:
 
 Injected commands run as `RUN` instructions after Claude Code installation but before the container's `WORKDIR` is set.
 
+### Runtime Selection
+
+Claude Cells supports two Claude Code runtimes:
+
+**Standard Claude Code (default: `claude`)**
+- Stable, production-ready runtime
+- Recommended for most use cases
+
+**Claude Sneakpeek (experimental: `claudesp`)**
+- Experimental build with advanced features
+- Swarm Mode: Multi-agent orchestration via TeammateTool
+- Delegate Mode: Spawn background agents for parallel tasks
+- Team Coordination: Teammate messaging and task ownership
+- See [claude-sneakpeek](https://github.com/mikekelly/claude-sneakpeek)
+
+**CLI Usage:**
+```bash
+ccells --runtime claudesp  # Use experimental runtime
+ccells --runtime claude    # Use standard runtime (default)
+ccells                     # Use default runtime
+```
+
+**Configuration Files:**
+
+Global config (`~/.claude-cells/config.yaml`):
+```yaml
+runtime: claudesp  # Sets default for all projects
+```
+
+Project config (`.claude-cells/config.yaml`):
+```yaml
+runtime: claudesp  # Sets runtime for this project only
+```
+
+**Priority Chain:** CLI flag > project config > global config > default (`claude`)
+
+**Runtime Isolation:**
+- Each runtime has its own isolated config directory (`.claude` vs `.claude-sneakpeek`)
+- Runtime selection persists across session restarts
+- Runtime applies to all workstreams in the session
+- Changing runtime requires restarting ccells
+
 ## Development Rules
 
 ### Test-Driven Development (Mandatory)

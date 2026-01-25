@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -231,6 +232,17 @@ func LoadDockerfileConfig(projectPath string) DockerfileConfig {
 	return cfg
 }
 
+// normalizeRuntime normalizes and validates a runtime value.
+// Returns normalized value or falls back to "claude" for invalid/empty input.
+func normalizeRuntime(runtime string) string {
+	runtime = strings.ToLower(strings.TrimSpace(runtime))
+	// Only return if valid, otherwise fall back to default
+	if runtime == "claude" || runtime == "claudesp" {
+		return runtime
+	}
+	return "claude" // Default fallback
+}
+
 // LoadConfig loads and merges the full CellsConfig (runtime, security, dockerfile).
 // Order of precedence (highest to lowest):
 // 1. Project config (.claude-cells/config.yaml in projectPath)
@@ -245,7 +257,7 @@ func LoadConfig(projectPath string) CellsConfig {
 	globalCfg := loadGlobalCellsConfig()
 	if globalCfg != nil {
 		if globalCfg.Runtime != "" {
-			cfg.Runtime = globalCfg.Runtime
+			cfg.Runtime = normalizeRuntime(globalCfg.Runtime)
 		}
 		cfg.Security = mergeSecurityConfig(DefaultSecurityConfig(), globalCfg.Security)
 		if len(globalCfg.Dockerfile.Inject) > 0 {
@@ -260,7 +272,7 @@ func LoadConfig(projectPath string) CellsConfig {
 		projectCfg := loadProjectCellsConfig(projectPath)
 		if projectCfg != nil {
 			if projectCfg.Runtime != "" {
-				cfg.Runtime = projectCfg.Runtime
+				cfg.Runtime = normalizeRuntime(projectCfg.Runtime)
 			}
 			cfg.Security = mergeSecurityConfig(cfg.Security, projectCfg.Security)
 			if len(projectCfg.Dockerfile.Inject) > 0 {

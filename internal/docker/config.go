@@ -302,7 +302,11 @@ func CreateContainerConfig(containerName string, runtime string) (*ConfigPaths, 
 		dstSneakpeekDir := filepath.Join(containerConfigDir, ".claude-sneakpeek")
 
 		if _, err := os.Stat(srcSneakpeekDir); err == nil {
-			// Copy existing .claude-sneakpeek (selective, like .claude)
+			// Copy existing .claude-sneakpeek using same selective filter as .claude.
+			// Exclusions (projects/, debug, cache, image-cache) are appropriate because:
+			// - projects/: Project-specific state shouldn't be shared across containers
+			// - debug: Debug logs are ephemeral and container-specific
+			// - cache/image-cache: Caches can be regenerated and waste disk space
 			if err := copyClaudeDirSelective(srcSneakpeekDir, dstSneakpeekDir); err != nil {
 				return nil, fmt.Errorf("failed to copy .claude-sneakpeek directory: %w", err)
 			}

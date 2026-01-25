@@ -22,8 +22,8 @@ func TestLoadConfig_RuntimeFromGlobalConfig(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	// Create global config with runtime=claudesp
-	globalConfigPath := filepath.Join(tmpDir, ".claude-cells", "config.yaml")
-	if err := os.MkdirAll(filepath.Dir(globalConfigPath), 0755); err != nil {
+	globalConfigPath := filepath.Join(tmpDir, "config.yaml")
+	if err := os.MkdirAll(tmpDir, 0755); err != nil {
 		t.Fatalf("Failed to create config dir: %v", err)
 	}
 
@@ -35,12 +35,12 @@ security:
 		t.Fatalf("Failed to write global config: %v", err)
 	}
 
-	// Set HOME to tmpDir so LoadConfig finds the global config
-	oldHome := os.Getenv("HOME")
-	os.Setenv("HOME", tmpDir)
-	defer os.Setenv("HOME", oldHome)
+	// Use SetTestCellsDir to override GetCellsDir for this test
+	// (os.UserHomeDir() ignores HOME env var, so we use this test helper instead)
+	SetTestCellsDir(tmpDir)
+	defer SetTestCellsDir("") // Reset after test
 
-	cfg := LoadConfig("")  // Empty projectPath means global only
+	cfg := LoadConfig("") // Empty projectPath means global only
 
 	if cfg.Runtime != "claudesp" {
 		t.Errorf("Runtime should be 'claudesp' from global config, got '%s'", cfg.Runtime)

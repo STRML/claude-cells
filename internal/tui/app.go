@@ -51,9 +51,23 @@ func SetVersionInfo(version, commit string) {
 	commitHash = commit
 }
 
+// normalizeRuntime normalizes and validates a runtime value.
+// Returns normalized value or falls back to the current globalRuntime (or "claude" if not set).
+func normalizeRuntime(runtime string) string {
+	runtime = strings.ToLower(strings.TrimSpace(runtime))
+	// Only return if valid, otherwise fall back
+	if runtime == "claude" || runtime == "claudesp" {
+		return runtime
+	}
+	if globalRuntime != "" {
+		return globalRuntime
+	}
+	return "claude" // Default fallback
+}
+
 // SetRuntime sets the runtime selection for all workstreams
 func SetRuntime(runtime string) {
-	globalRuntime = runtime
+	globalRuntime = normalizeRuntime(runtime)
 }
 
 // dragModifier returns the key name for bypassing terminal mouse capture.
@@ -2421,7 +2435,7 @@ Scroll Mode:
 			ws.Title = saved.Title                     // Restore generated title
 			ws.Synopsis = saved.Synopsis               // Restore synopsis
 			ws.ClaudeSessionID = saved.ClaudeSessionID // Restore session ID for --resume
-			ws.Runtime = saved.Runtime                 // Restore runtime selection
+			ws.Runtime = normalizeRuntime(saved.Runtime) // Restore runtime selection (normalized)
 			ws.WasInterrupted = saved.WasInterrupted   // Restore interrupted state for auto-continue
 			ws.HasBeenPushed = saved.HasBeenPushed     // Restore push status
 			ws.PRNumber = saved.PRNumber               // Restore PR number if created
