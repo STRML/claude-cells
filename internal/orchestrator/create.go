@@ -272,6 +272,7 @@ func (o *Orchestrator) buildFullContainerConfig(ws *workstream.Workstream, workt
 	}
 
 	cfg.ClaudeCfg = configPaths.ClaudeDir
+	cfg.SneakpeekCfg = configPaths.SneakpeekDir
 	cfg.ClaudeJSON = configPaths.ClaudeJSON
 	cfg.GitConfig = configPaths.GitConfig
 	cfg.GitIdentity = docker.GetGitIdentity()

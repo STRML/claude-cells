@@ -2414,6 +2414,7 @@ Scroll Mode:
 			ws.Title = saved.Title                     // Restore generated title
 			ws.Synopsis = saved.Synopsis               // Restore synopsis
 			ws.ClaudeSessionID = saved.ClaudeSessionID // Restore session ID for --resume
+			ws.Runtime = saved.Runtime                 // Restore runtime selection
 			ws.WasInterrupted = saved.WasInterrupted   // Restore interrupted state for auto-continue
 			ws.HasBeenPushed = saved.HasBeenPushed     // Restore push status
 			ws.PRNumber = saved.PRNumber               // Restore PR number if created

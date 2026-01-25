@@ -115,7 +115,21 @@ if test -n "$HOST_PROJECT_PATH"; then
 fi
 
 mkdir -p "$HOME/.local/bin" 2>/dev/null
-test ! -f "$HOME/.local/bin/claude" && which claude >/dev/null 2>&1 && ln -sf "$(which claude)" "$HOME/.local/bin/claude" 2>/dev/null
+
+# Select runtime based on CLAUDE_RUNTIME env var
+if [ "$CLAUDE_RUNTIME" = "claudesp" ]; then
+  # Use claudesp binary (experimental with swarm mode)
+  CLAUDE_BIN="claudesp"
+  log "Using experimental runtime: claudesp"
+else
+  # Default to standard Claude Code
+  CLAUDE_BIN="claude"
+fi
+
+# Ensure the selected binary is available as 'claude' for the rest of the script
+if which $CLAUDE_BIN >/dev/null 2>&1; then
+  ln -sf "$(which $CLAUDE_BIN)" "$HOME/.local/bin/claude" 2>/dev/null
+fi
 
 # Install Claude Code if not available
 if ! which claude >/dev/null 2>&1; then
@@ -203,6 +217,7 @@ type PTYOptions struct {
 	IsResume        bool     // If true, use 'claude --resume' instead of starting new session
 	ClaudeSessionID string   // Claude session ID for --resume (if available)
 	HostProjectPath string   // Host project path for finding session data (encoded for .claude/projects/)
+	Runtime         string   // Runtime to use: "claude" (default) or "claudesp" (experimental)
 }
 
 // NewPTYSession creates a new PTY session for running Claude Code in a container.
@@ -258,6 +273,10 @@ func NewPTYSession(ctx context.Context, dockerClient *client.Client, containerID
 		// Pass IS_RESUME to make setup script quieter on resume
 		if opts.IsResume {
 			env = append(env, "IS_RESUME=1")
+		}
+		// Pass runtime selection (claudesp for experimental, claude for standard)
+		if opts.Runtime == "claudesp" {
+			env = append(env, "CLAUDE_RUNTIME=claudesp")
 		}
 	}
 

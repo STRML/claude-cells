@@ -19,6 +19,9 @@ RUN ARCH=$(case "${TARGETARCH}" in "arm64") echo "arm64" ;; *) echo "x64" ;; esa
 # Install Claude Code CLI (native installer)
 RUN curl -fsSL https://claude.ai/install.sh | bash
 
+# Install claude-sneakpeek (experimental build with swarm mode)
+RUN npx @realmikekelly/claude-sneakpeek quick --name claudesp
+
 # Install GitHub CLI
 RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg \
     && chmod go+r /usr/share/keyrings/githubcli-archive-keyring.gpg \

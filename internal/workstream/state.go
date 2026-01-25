@@ -86,6 +86,7 @@ type SavedWorkstream struct {
 	Synopsis        string    `json:"synopsis,omitempty"` // Brief description of work accomplished
 	ContainerID     string    `json:"container_id"`
 	ClaudeSessionID string    `json:"claude_session_id,omitempty"` // Claude Code session ID for --resume
+	Runtime         string    `json:"runtime,omitempty"`           // Runtime: "claude" or "claudesp"
 	WasInterrupted  bool      `json:"was_interrupted,omitempty"`   // True if Claude was working when session ended
 	HasBeenPushed   bool      `json:"has_been_pushed,omitempty"`   // True if branch has been pushed to remote
 	PRNumber        int       `json:"pr_number,omitempty"`         // GitHub PR number if created
@@ -156,6 +157,7 @@ func SaveStateWithRepoInfo(dir string, workstreams []*Workstream, focusedIndex i
 			Synopsis:        ws.Synopsis,
 			ContainerID:     ws.ContainerID,
 			ClaudeSessionID: ws.ClaudeSessionID,
+			Runtime:         ws.Runtime,
 			WasInterrupted:  ws.WasInterrupted,
 			HasBeenPushed:   ws.HasBeenPushed,
 			PRNumber:        ws.PRNumber,
