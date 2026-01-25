@@ -179,9 +179,21 @@ func main() {
 	// Initialize logging early to prevent any log.Printf from polluting TUI
 	tui.InitLogging()
 
+	// Parse runtime flag
+	var runtimeFlag string
+	args := os.Args[1:]
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--runtime" && i+1 < len(args) {
+			runtimeFlag = args[i+1]
+			// Remove runtime flag from args for other processing
+			args = append(args[:i], args[i+2:]...)
+			break
+		}
+	}
+
 	// Handle command-line flags
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
+	if len(args) > 0 {
+		switch args[0] {
 		case "--help", "-h":
 			printHelp()
 			os.Exit(0)
@@ -259,6 +271,15 @@ func main() {
 
 	// Set version info for display in help dialog
 	tui.SetVersionInfo(Version, CommitHash)
+
+	// Load config and set runtime
+	projectPath, _ := os.Getwd()
+	cellsConfig := docker.LoadConfig(projectPath)
+	// CLI flag overrides config file
+	if runtimeFlag != "" {
+		cellsConfig.Runtime = runtimeFlag
+	}
+	tui.SetRuntime(cellsConfig.Runtime)
 
 	app := tui.NewAppModel(appCtx)
 

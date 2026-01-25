@@ -40,14 +40,20 @@ func formatFileList(files []string) string {
 
 // Version info - set by main via SetVersionInfo
 var (
-	versionInfo = "dev"
-	commitHash  = "unknown"
+	versionInfo   = "dev"
+	commitHash    = "unknown"
+	globalRuntime = "claude" // Default runtime: "claude" or "claudesp"
 )
 
 // SetVersionInfo sets the version info displayed in the help dialog
 func SetVersionInfo(version, commit string) {
 	versionInfo = version
 	commitHash = commit
+}
+
+// SetRuntime sets the runtime selection for all workstreams
+func SetRuntime(runtime string) {
+	globalRuntime = runtime
 }
 
 // dragModifier returns the key name for bypassing terminal mouse capture.
@@ -1234,6 +1240,7 @@ Scroll Mode:
 		case DialogNewWorkstream:
 			// Create new workstream for summarizing (branch name derived from title later)
 			ws := workstream.NewForSummarizing(msg.Value)
+			ws.Runtime = globalRuntime // Set runtime from global config
 			if err := m.manager.Add(ws); err != nil {
 				m.toast = fmt.Sprintf("Cannot create workstream: %v", err)
 				m.toastExpiry = time.Now().Add(toastDuration * 2)

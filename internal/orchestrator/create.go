@@ -265,8 +265,8 @@ func (o *Orchestrator) buildFullContainerConfig(ws *workstream.Workstream, workt
 	}
 
 	// Create per-container isolated config directory
-	// TODO: Pass runtime from CreateOptions once wired up
-	configPaths, err := docker.CreateContainerConfig(cfg.Name, "claude")
+	// Runtime comes from global app setting (set via --runtime flag or config file)
+	configPaths, err := docker.CreateContainerConfig(cfg.Name, ws.Runtime)
 	if err != nil {
 		return nil, fmt.Errorf("create container config: %w", err)
 	}

@@ -756,6 +756,7 @@ func StartPTYCmd(ws *workstream.Workstream, initialPrompt string, width, height 
 			IsResume:        isResume,
 			ClaudeSessionID: ws.GetClaudeSessionID(), // Pass session ID for --resume
 			HostProjectPath: hostProjectPath,
+			Runtime:         ws.Runtime, // Pass runtime selection (claude or claudesp)
 		}
 
 		// Pass through ANTHROPIC_API_KEY if set (fallback for non-OAuth auth)
