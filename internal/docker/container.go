@@ -26,19 +26,19 @@ const (
 
 // ContainerConfig holds configuration for creating a workstream container.
 type ContainerConfig struct {
-	Name        string            // Container name (ccells-<project>-<timestamp>)
-	Image       string            // Docker image to use
-	RepoPath    string            // Path to worktree on host (mounted at /workspace)
-	HostGitDir  string            // Path to host repo's .git directory (mounted at same path for worktree support)
+	Name         string            // Container name (ccells-<project>-<timestamp>)
+	Image        string            // Docker image to use
+	RepoPath     string            // Path to worktree on host (mounted at /workspace)
+	HostGitDir   string            // Path to host repo's .git directory (mounted at same path for worktree support)
 	ClaudeCfg    string            // Path to ~/.claude directory on host
 	SneakpeekCfg string            // Path to ~/.claude-sneakpeek directory on host (for claudesp runtime)
 	ClaudeJSON   string            // Path to ~/.claude.json file on host (session state)
 	GitConfig    string            // Path to ~/.gitconfig file on host (git identity)
 	GitIdentity  *GitIdentity      // Git user identity (name/email) for commits
 	Credentials  string            // Path to credentials file (OAuth tokens from keychain)
-	Timezone    string            // Host timezone (e.g., "America/New_York") for consistent commit timestamps
-	ExtraEnv    map[string]string // Additional environment variables from devcontainer.json
-	ExtraMounts []mount.Mount     // Additional mounts from devcontainer.json
+	Timezone     string            // Host timezone (e.g., "America/New_York") for consistent commit timestamps
+	ExtraEnv     map[string]string // Additional environment variables from devcontainer.json
+	ExtraMounts  []mount.Mount     // Additional mounts from devcontainer.json
 
 	// Git proxy socket (for proxying git/gh commands to host)
 	GitProxySocketDir string // Path to directory containing git.sock (mounted at /var/run/ccells)

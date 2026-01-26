@@ -27,11 +27,11 @@ const (
 
 // ConfigPaths holds paths to the isolated claude config for containers
 type ConfigPaths struct {
-	ClaudeDir     string // Path to copied .claude directory
-	ClaudeJSON    string // Path to copied .claude.json file
-	GitConfig     string // Path to copied .gitconfig file (empty if no .gitconfig exists)
-	Credentials   string // Path to credentials file (from keychain)
-	SneakpeekDir  string // Path to copied .claude-sneakpeek directory (empty if runtime != "claudesp")
+	ClaudeDir    string // Path to copied .claude directory
+	ClaudeJSON   string // Path to copied .claude.json file
+	GitConfig    string // Path to copied .gitconfig file (empty if no .gitconfig exists)
+	Credentials  string // Path to credentials file (from keychain)
+	SneakpeekDir string // Path to copied .claude-sneakpeek directory (empty if runtime != "claudesp")
 }
 
 // GitIdentity holds the user's git identity
