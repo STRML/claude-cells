@@ -196,3 +196,52 @@ func TestStatusBarModel_View_InputMode(t *testing.T) {
 		t.Error("View should contain 'INPUT' when in input mode")
 	}
 }
+
+func TestStatusBarModel_SetRuntime(t *testing.T) {
+	sb := NewStatusBarModel()
+
+	// Default runtime should be empty
+	if sb.runtime != "" {
+		t.Errorf("Initial runtime should be empty, got %q", sb.runtime)
+	}
+
+	// Set to claudesp
+	sb.SetRuntime("claudesp")
+	if sb.runtime != "claudesp" {
+		t.Errorf("runtime = %q, want 'claudesp'", sb.runtime)
+	}
+
+	// Set to claude
+	sb.SetRuntime("claude")
+	if sb.runtime != "claude" {
+		t.Errorf("runtime = %q, want 'claude'", sb.runtime)
+	}
+}
+
+func TestStatusBarModel_View_WithRuntime(t *testing.T) {
+	sb := NewStatusBarModel()
+	sb.SetWidth(120)
+	sb.SetWorkstreamCount(2)
+	sb.SetRuntime("claudesp")
+
+	view := sb.View()
+
+	// Should contain runtime indicator
+	if !strings.Contains(view, "claudesp") {
+		t.Error("View should contain 'claudesp' runtime")
+	}
+}
+
+func TestStatusBarModel_View_DefaultRuntime(t *testing.T) {
+	sb := NewStatusBarModel()
+	sb.SetWidth(120)
+	sb.SetWorkstreamCount(2)
+	sb.SetRuntime("claude")
+
+	view := sb.View()
+
+	// Should contain runtime indicator
+	if !strings.Contains(view, "claude") {
+		t.Error("View should contain 'claude' runtime")
+	}
+}

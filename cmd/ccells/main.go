@@ -152,6 +152,8 @@ Usage:
 Options:
   -h, --help          Show this help message
   -v, --version       Show version information
+  --runtime <name>    Runtime to use: "claude" (default) or "claudesp" (experimental)
+                      Overrides runtime setting from config files
   --repair-state      Validate and repair the state file by extracting
                       session IDs from running containers
 
@@ -179,9 +181,31 @@ func main() {
 	// Initialize logging early to prevent any log.Printf from polluting TUI
 	tui.InitLogging()
 
+	// Parse runtime flag with validation
+	var runtimeFlag string
+	args := os.Args[1:]
+	for i := 0; i < len(args); i++ {
+		if args[i] == "--runtime" {
+			// Check if value is provided
+			if i+1 >= len(args) {
+				fmt.Fprintf(os.Stderr, "Error: --runtime requires a value (one of: %v)\n", AllowedRuntimes)
+				os.Exit(1)
+			}
+			runtimeFlag = strings.ToLower(strings.TrimSpace(args[i+1]))
+			// Validate immediately
+			if runtimeFlag == "" || !isValidRuntime(runtimeFlag) {
+				fmt.Fprintf(os.Stderr, "Error: invalid runtime %q (must be one of: %v)\n", args[i+1], AllowedRuntimes)
+				os.Exit(1)
+			}
+			// Remove runtime flag from args for other processing
+			args = append(args[:i], args[i+2:]...)
+			break
+		}
+	}
+
 	// Handle command-line flags
-	if len(os.Args) > 1 {
-		switch os.Args[1] {
+	if len(args) > 0 {
+		switch args[0] {
 		case "--help", "-h":
 			printHelp()
 			os.Exit(0)
@@ -259,6 +283,15 @@ func main() {
 
 	// Set version info for display in help dialog
 	tui.SetVersionInfo(Version, CommitHash)
+
+	// Resolve runtime from flag and config (with validation)
+	projectPath, _ := os.Getwd()
+	runtime, err := ResolveRuntime(runtimeFlag, projectPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+	tui.SetRuntime(runtime)
 
 	app := tui.NewAppModel(appCtx)
 

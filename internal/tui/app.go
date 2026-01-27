@@ -40,14 +40,34 @@ func formatFileList(files []string) string {
 
 // Version info - set by main via SetVersionInfo
 var (
-	versionInfo = "dev"
-	commitHash  = "unknown"
+	versionInfo   = "dev"
+	commitHash    = "unknown"
+	globalRuntime = "claude" // Default runtime: "claude" or "claudesp"
 )
 
 // SetVersionInfo sets the version info displayed in the help dialog
 func SetVersionInfo(version, commit string) {
 	versionInfo = version
 	commitHash = commit
+}
+
+// normalizeRuntime normalizes and validates a runtime value.
+// Returns normalized value or falls back to the current globalRuntime (or "claude" if not set).
+func normalizeRuntime(runtime string) string {
+	runtime = strings.ToLower(strings.TrimSpace(runtime))
+	// Only return if valid, otherwise fall back
+	if runtime == "claude" || runtime == "claudesp" {
+		return runtime
+	}
+	if globalRuntime != "" {
+		return globalRuntime
+	}
+	return "claude" // Default fallback
+}
+
+// SetRuntime sets the runtime selection for all workstreams
+func SetRuntime(runtime string) {
+	globalRuntime = normalizeRuntime(runtime)
 }
 
 // dragModifier returns the key name for bypassing terminal mouse capture.
@@ -1234,6 +1254,7 @@ Scroll Mode:
 		case DialogNewWorkstream:
 			// Create new workstream for summarizing (branch name derived from title later)
 			ws := workstream.NewForSummarizing(msg.Value)
+			ws.Runtime = globalRuntime // Set runtime from global config
 			if err := m.manager.Add(ws); err != nil {
 				m.toast = fmt.Sprintf("Cannot create workstream: %v", err)
 				m.toastExpiry = time.Now().Add(toastDuration * 2)
@@ -2411,13 +2432,14 @@ Scroll Mode:
 			ws := workstream.NewWithID(saved.ID, saved.BranchName, saved.Prompt)
 			ws.ContainerID = saved.ContainerID
 			ws.CreatedAt = saved.CreatedAt
-			ws.Title = saved.Title                     // Restore generated title
-			ws.Synopsis = saved.Synopsis               // Restore synopsis
-			ws.ClaudeSessionID = saved.ClaudeSessionID // Restore session ID for --resume
-			ws.WasInterrupted = saved.WasInterrupted   // Restore interrupted state for auto-continue
-			ws.HasBeenPushed = saved.HasBeenPushed     // Restore push status
-			ws.PRNumber = saved.PRNumber               // Restore PR number if created
-			ws.PRURL = saved.PRURL                     // Restore PR URL if created
+			ws.Title = saved.Title                       // Restore generated title
+			ws.Synopsis = saved.Synopsis                 // Restore synopsis
+			ws.ClaudeSessionID = saved.ClaudeSessionID   // Restore session ID for --resume
+			ws.Runtime = normalizeRuntime(saved.Runtime) // Restore runtime selection (normalized)
+			ws.WasInterrupted = saved.WasInterrupted     // Restore interrupted state for auto-continue
+			ws.HasBeenPushed = saved.HasBeenPushed       // Restore push status
+			ws.PRNumber = saved.PRNumber                 // Restore PR number if created
+			ws.PRURL = saved.PRURL                       // Restore PR URL if created
 			if err := m.manager.Add(ws); err != nil {
 				// Skip workstreams that exceed the limit during restore
 				continue
@@ -2567,6 +2589,7 @@ func (m AppModel) View() tea.View {
 	m.statusBar.SetInputMode(m.inputMode)
 	m.statusBar.SetLayoutName(m.layout.String())
 	m.statusBar.SetRepoPath(m.workingDir)
+	m.statusBar.SetRuntime(globalRuntime)
 	if pairingState.Active {
 		m.statusBar.SetPairingBranch(pairingState.CurrentBranch)
 		m.statusBar.SetPairingStatus(pairingState.SyncStatus, pairingState.StashedChanges, len(pairingState.Conflicts))

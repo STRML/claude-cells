@@ -8,6 +8,99 @@ import (
 	"testing"
 )
 
+func TestCreateContainerConfig(t *testing.T) {
+	tests := []struct {
+		name                  string
+		runtime               string
+		createSneakpeekSource bool // Whether to create ~/.claude-sneakpeek with test file
+		wantSneakpeekEmpty    bool // Whether SneakpeekDir should be empty
+		wantFilesCopied       bool // Whether sneakpeek files should be copied
+		wantErr               bool
+	}{
+		{
+			name:                  "claudesp runtime copies sneakpeek",
+			runtime:               "claudesp",
+			createSneakpeekSource: true,
+			wantSneakpeekEmpty:    false,
+			wantFilesCopied:       true,
+			wantErr:               false,
+		},
+		{
+			name:                  "claude runtime does not copy sneakpeek",
+			runtime:               "claude",
+			createSneakpeekSource: false,
+			wantSneakpeekEmpty:    true,
+			wantFilesCopied:       false,
+			wantErr:               false,
+		},
+		{
+			name:                  "claudesp without source creates empty dir",
+			runtime:               "claudesp",
+			createSneakpeekSource: false,
+			wantSneakpeekEmpty:    false, // Dir is created even if source doesn't exist
+			wantFilesCopied:       false,
+			wantErr:               false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup temp home directory
+			tmpHome := t.TempDir()
+			oldHome := os.Getenv("HOME")
+			os.Setenv("HOME", tmpHome)
+			defer os.Setenv("HOME", oldHome)
+
+			// Optionally create .claude-sneakpeek source directory with test file
+			if tt.createSneakpeekSource {
+				sneakpeekDir := filepath.Join(tmpHome, ".claude-sneakpeek")
+				if err := os.MkdirAll(sneakpeekDir, 0755); err != nil {
+					t.Fatalf("Failed to create .claude-sneakpeek: %v", err)
+				}
+				testFile := filepath.Join(sneakpeekDir, "test.txt")
+				if err := os.WriteFile(testFile, []byte("sneakpeek test"), 0644); err != nil {
+					t.Fatalf("Failed to write test file: %v", err)
+				}
+			}
+
+			// Create container config
+			cfg, err := CreateContainerConfig("test-container", tt.runtime)
+
+			// Check error expectation
+			if (err != nil) != tt.wantErr {
+				t.Errorf("CreateContainerConfig() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if tt.wantErr {
+				return
+			}
+
+			// Check SneakpeekDir empty/non-empty
+			if tt.wantSneakpeekEmpty {
+				if cfg.SneakpeekDir != "" {
+					t.Errorf("SneakpeekDir = %q, want empty for %s runtime", cfg.SneakpeekDir, tt.runtime)
+				}
+			} else {
+				if cfg.SneakpeekDir == "" {
+					t.Errorf("SneakpeekDir should be set for %s runtime", tt.runtime)
+				}
+			}
+
+			// Check if files were copied
+			if tt.wantFilesCopied {
+				copiedFile := filepath.Join(cfg.SneakpeekDir, "test.txt")
+				data, err := os.ReadFile(copiedFile)
+				if err != nil {
+					t.Fatalf("Failed to read copied sneakpeek file: %v", err)
+				}
+				if string(data) != "sneakpeek test" {
+					t.Errorf("Copied file content = %q, want %q", data, "sneakpeek test")
+				}
+			}
+		})
+	}
+}
+
 func TestGetCellsDir(t *testing.T) {
 	dir, err := GetCellsDir()
 	if err != nil {

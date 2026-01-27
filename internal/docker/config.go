@@ -27,10 +27,11 @@ const (
 
 // ConfigPaths holds paths to the isolated claude config for containers
 type ConfigPaths struct {
-	ClaudeDir   string // Path to copied .claude directory
-	ClaudeJSON  string // Path to copied .claude.json file
-	GitConfig   string // Path to copied .gitconfig file (empty if no .gitconfig exists)
-	Credentials string // Path to credentials file (from keychain)
+	ClaudeDir    string // Path to copied .claude directory
+	ClaudeJSON   string // Path to copied .claude.json file
+	GitConfig    string // Path to copied .gitconfig file (empty if no .gitconfig exists)
+	Credentials  string // Path to credentials file (from keychain)
+	SneakpeekDir string // Path to copied .claude-sneakpeek directory (empty if runtime != "claudesp")
 }
 
 // GitIdentity holds the user's git identity
@@ -136,10 +137,29 @@ Then inform the user:
 - Tell them they can press **Shift+Esc** (or **Ctrl+B Esc**) then **m** to open the merge dialog
 `
 
-// CCellsInstructions is the CLAUDE.md content for ccells containers
-const CCellsInstructions = `# Claude Cells Session
+// GetCCellsInstructions returns the CLAUDE.md content for ccells containers.
+// It includes runtime-specific context.
+func GetCCellsInstructions(runtime string) string {
+	runtimeInfo := ""
+	if runtime == "claudesp" {
+		runtimeInfo = `
+**Runtime:** Claude Sneakpeek (experimental build with swarm mode)
 
-You are in an isolated container with a dedicated git worktree. **Commit your work** - this is the most important thing. A dirty worktree means lost work.
+You have access to experimental features:
+- **Swarm Mode**: Multi-agent orchestration via TeammateTool
+- **Delegate Mode**: Spawn background agents for parallel tasks
+- **Team Coordination**: Teammate messaging and task ownership
+
+See https://github.com/mikekelly/claude-sneakpeek for details.
+
+`
+	} else if runtime != "" && runtime != "claude" {
+		runtimeInfo = fmt.Sprintf("\n**Runtime:** %s\n\n", runtime)
+	}
+
+	return `# Claude Cells Session
+
+` + runtimeInfo + `You are in an isolated container with a dedicated git worktree. **Commit your work** - this is the most important thing. A dirty worktree means lost work.
 
 ## Git Operations
 
@@ -168,11 +188,13 @@ Commit all changes using ` + "`/ccells-commit`" + `, then provide:
 
 The user is running multiple containers in parallel and relies on Status to triage.
 `
+}
 
 // CreateContainerConfig creates an isolated config directory for a specific container.
 // Each container gets its own copy to prevent race conditions when multiple
 // Claude Code instances modify credentials simultaneously.
-func CreateContainerConfig(containerName string) (*ConfigPaths, error) {
+// runtime specifies which Claude runtime to use: "claude" (default) or "claudesp" (experimental).
+func CreateContainerConfig(containerName string, runtime string) (*ConfigPaths, error) {
 	configMutex.Lock()
 	defer configMutex.Unlock()
 
@@ -248,7 +270,7 @@ func CreateContainerConfig(containerName string) (*ConfigPaths, error) {
 		return nil, fmt.Errorf("failed to create .claude directory: %w", err)
 	}
 	claudeMdPath := filepath.Join(dstClaudeDir, "CLAUDE.md")
-	if err := os.WriteFile(claudeMdPath, []byte(CCellsInstructions), 0644); err != nil {
+	if err := os.WriteFile(claudeMdPath, []byte(GetCCellsInstructions(runtime)), 0644); err != nil {
 		return nil, fmt.Errorf("failed to write CLAUDE.md: %w", err)
 	}
 
@@ -273,11 +295,46 @@ func CreateContainerConfig(containerName string) (*ConfigPaths, error) {
 		gitConfigPath = dstGitConfig
 	}
 
+	// Copy .claude-sneakpeek if runtime is claudesp
+	sneakpeekDir := ""
+	if runtime == "claudesp" {
+		srcSneakpeekDir := filepath.Join(home, ".claude-sneakpeek")
+		dstSneakpeekDir := filepath.Join(containerConfigDir, ".claude-sneakpeek")
+
+		if _, err := os.Stat(srcSneakpeekDir); err == nil {
+			// Copy existing .claude-sneakpeek using same selective filter as .claude.
+			// Exclusions (projects/, debug, cache, image-cache) are appropriate because:
+			// - projects/: Project-specific state shouldn't be shared across containers
+			// - debug: Debug logs are ephemeral and container-specific
+			// - cache/image-cache: Caches can be regenerated and waste disk space
+			if err := copyClaudeDirSelective(srcSneakpeekDir, dstSneakpeekDir); err != nil {
+				return nil, fmt.Errorf("failed to copy .claude-sneakpeek directory: %w", err)
+			}
+		} else {
+			// Create empty directory (will be populated by install)
+			if err := os.MkdirAll(dstSneakpeekDir, 0755); err != nil {
+				return nil, fmt.Errorf("failed to create .claude-sneakpeek directory: %w", err)
+			}
+		}
+
+		// Copy credentials into .claude-sneakpeek/.credentials.json
+		// (same pattern as .claude credentials)
+		if creds != nil && creds.Raw != "" {
+			credsInSneakpeekDir := filepath.Join(dstSneakpeekDir, ".credentials.json")
+			if err := os.WriteFile(credsInSneakpeekDir, []byte(creds.Raw), 0600); err != nil {
+				return nil, fmt.Errorf("failed to write .claude-sneakpeek/.credentials.json: %w", err)
+			}
+		}
+
+		sneakpeekDir = dstSneakpeekDir
+	}
+
 	return &ConfigPaths{
-		ClaudeDir:   dstClaudeDir,
-		ClaudeJSON:  dstClaudeJSON,
-		GitConfig:   gitConfigPath,
-		Credentials: "", // Credentials are now inside .claude/.credentials.json
+		ClaudeDir:    dstClaudeDir,
+		ClaudeJSON:   dstClaudeJSON,
+		GitConfig:    gitConfigPath,
+		Credentials:  "", // Credentials are now inside .claude/.credentials.json
+		SneakpeekDir: sneakpeekDir,
 	}, nil
 }
 

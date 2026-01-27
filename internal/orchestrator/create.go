@@ -265,12 +265,19 @@ func (o *Orchestrator) buildFullContainerConfig(ws *workstream.Workstream, workt
 	}
 
 	// Create per-container isolated config directory
-	configPaths, err := docker.CreateContainerConfig(cfg.Name)
+	// Runtime comes from global app setting (set via --runtime flag or config file)
+	// Default to "claude" if not set to ensure runtime-specific setup always runs
+	runtime := ws.Runtime
+	if runtime == "" {
+		runtime = "claude"
+	}
+	configPaths, err := docker.CreateContainerConfig(cfg.Name, runtime)
 	if err != nil {
 		return nil, fmt.Errorf("create container config: %w", err)
 	}
 
 	cfg.ClaudeCfg = configPaths.ClaudeDir
+	cfg.SneakpeekCfg = configPaths.SneakpeekDir
 	cfg.ClaudeJSON = configPaths.ClaudeJSON
 	cfg.GitConfig = configPaths.GitConfig
 	cfg.GitIdentity = docker.GetGitIdentity()

@@ -45,6 +45,7 @@ type Workstream struct {
 
 	// Claude Code session
 	ClaudeSessionID string // Claude Code session ID for --resume (captured from output)
+	Runtime         string // Runtime: "claude" (default) or "claudesp" (experimental)
 
 	// State
 	State        State     // Current lifecycle state
