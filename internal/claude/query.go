@@ -143,6 +143,7 @@ func QueryWithExecutor(ctx context.Context, prompt string, opts *QueryOptions, e
 	env := append(os.Environ(),
 		"DISABLE_TELEMETRY=1",
 		"DISABLE_ERROR_REPORTING=1",
+		"CLAUDE_CODE_DISABLE_CLAUDE_MDS=1", // Don't read CLAUDE.md files for ephemeral queries
 	)
 
 	// Execute the command
