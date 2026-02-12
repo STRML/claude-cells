@@ -71,3 +71,36 @@ func (c *Client) Prefix(ctx context.Context) (string, error) {
 	}
 	return out, nil
 }
+
+// NewSession creates a new detached tmux session.
+func (c *Client) NewSession(ctx context.Context, name string) error {
+	_, err := c.run(ctx, "new-session", "-d", "-s", name, "-x", "200", "-y", "50")
+	return err
+}
+
+// HasSession checks if a named session exists.
+func (c *Client) HasSession(ctx context.Context, name string) (bool, error) {
+	_, err := c.run(ctx, "has-session", "-t", name)
+	if err != nil {
+		return false, nil
+	}
+	return true, nil
+}
+
+// KillServer kills the tmux server on this socket.
+func (c *Client) KillServer(ctx context.Context) error {
+	_, err := c.run(ctx, "kill-server")
+	return err
+}
+
+// KillSession kills a specific session.
+func (c *Client) KillSession(ctx context.Context, name string) error {
+	_, err := c.run(ctx, "kill-session", "-t", name)
+	return err
+}
+
+// AttachCommand returns an exec.Cmd that attaches to a session.
+// This should be the last call — it exec's tmux attach.
+func (c *Client) AttachCommand(name string) *exec.Cmd {
+	return exec.Command("tmux", "-L", c.socket, "attach-session", "-t", name)
+}
