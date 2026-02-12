@@ -13,9 +13,10 @@ Last updated: 2026-02-12 (Updated: tmux migration, TUI removed)
 - Security hardening by default with tiered relaxation
 - Background daemon with Unix socket API
 
-### Weaknesses
-- TODO stubs in daemon handlers need wiring to orchestrator
+### Areas for Improvement
+- Daemon handlers fully implemented but could use more error context
 - Missing observability (no metrics, tracing)
+- Limited testing coverage for tmux integration (needs more golden file tests)
 
 ## Summary
 
@@ -108,6 +109,8 @@ Daemon                      # Background process
 Compose-style CLI commands. Each command is a separate file:
 
 ```
+main.go        # Entry point, arg parsing, command dispatch
+commands.go    # Command registry + flag parsing
 cmd_up.go      # up: create tmux session + daemon + attach
 cmd_attach.go  # attach: reattach to existing session
 cmd_down.go    # down: stop daemon + tmux + shared daemon client helpers
@@ -116,12 +119,14 @@ cmd_rm.go      # rm: destroy workstream
 cmd_pause.go   # pause/unpause workstreams
 cmd_ps.go      # ps: list workstreams from tmux panes
 cmd_pair.go    # pair/unpair/status: pairing mode
+detach.go      # Detach summary formatting
+runtime.go     # Runtime selection (claude/claudesp)
 ```
 
 **Interactive dialogs (Bubble Tea programs for tmux display-popup):**
-- `dialog_create.go` - New workstream form
-- `dialog_merge.go` - PR/merge flow
-- `dialog_rm.go` - Destroy confirmation
+- `dialog_create.go` - New workstream form (prompt → branch → confirm)
+- `dialog_merge.go` - PR/merge flow (generate → edit → confirm)
+- `dialog_rm.go` - Destroy confirmation (confirm → delete branch option)
 
 ### Orchestration Layer (`internal/orchestrator/`)
 
@@ -198,10 +203,7 @@ User: ccells create --branch my-feature --prompt "add auth"
 CLI sends "create" request to daemon via Unix socket
     |
     v
-Daemon handler (TODO: wire to orchestrator)
-    |
-    v
-Orchestrator.CreateWorkstream():
+Daemon handler calls Orchestrator.CreateWorkstream():
   1. Create git worktree (/tmp/ccells/worktrees/<branch>)
   2. Resolve Docker image
   3. Build container config (credentials, mounts)

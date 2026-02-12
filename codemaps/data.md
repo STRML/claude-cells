@@ -1,6 +1,6 @@
 # Data Models and Schemas
 
-Last updated: 2026-01-23 (Updated: cursor position types)
+Last updated: 2026-02-12 (Updated: removed TUI models, added daemon types)
 
 ## Overview
 
@@ -315,103 +315,153 @@ type PairingState struct {
 
 ---
 
-## TUI Models
+## tmux Integration Types
 
-### Application Model
+### Pane Information
 
 ```go
-// tui/app.go
-type AppModel struct {
-    ctx            context.Context
-    manager        *workstream.PersistentManager
-    panes          []PaneModel
-    focusedPane    int
-    nextPaneIndex  int
-    layout         LayoutType
-    statusBar      StatusBarModel
-    dialog         *DialogModel
-    width          int
-    height         int
-    quitting       bool
-    inputMode      bool
-    mouseEnabled   bool
-    toast          string
-    toastExpiry    time.Time
-    workingDir     string
-    stateDir       string
-    repoInfo       *workstream.RepoInfo
-    resuming       bool
-    pairingOrchestrator *sync.Pairing
-    logPanel       *LogPanelModel
-    keyboardEnhanced bool
+// tmux/pane.go
+type PaneInfo struct {
+    PaneID     string // tmux pane ID (e.g., "%0", "%1")
+    Workstream string // from @ccells-workstream pane option
+    Container  string // from @ccells-container pane option
 }
 ```
 
-### Pane Model
+### Status Line Data
 
 ```go
-// tui/pane.go
-type PaneModel struct {
-    workstream      *workstream.Workstream
-    viewport        viewport.Model
-    input           textinput.Model
-    focused         bool
-    inputMode       bool
-    width           int
-    height          int
-    output          *strings.Builder
-    pty             *PTYSession
-    vterm           vt10x.Terminal
-    lastVtermRender string
-    index           int
-    initializing    bool
-    initStartTime   time.Time
-    spinnerFrame    int
-    initStatus      string
-    scrollback      []string
-    scrollMode      bool
-    fading          bool
-    fadeProgress    float64
-    summarizing     bool
-    summarizePhase  SummarizePhase
-    summarizeTitle  string
-    inPaneDialog    *DialogModel
-}
-
-type SummarizePhase int
-
-const (
-    SummarizePhasePrompt SummarizePhase = iota
-    SummarizePhaseReveal
-    SummarizePhaseFading
-    SummarizePhaseDone
-)
-```
-
-### Cursor Position
-
-```go
-// tui/pane.go
-type CursorPosition struct {
-    X       int  // X position relative to content area (0-based)
-    Y       int  // Y position relative to content area (0-based)
-    Visible bool // Whether cursor should be visible
+// tmux/chrome.go
+type StatusWorkstream struct {
+    Name      string
+    Branch    string
+    PRNumber  int
+    HasPR     bool
+    Running   bool
 }
 ```
 
-**Note:** `GetCursorPosition()` recalculates viewport offset rather than using `p.viewport.YOffset()` because `View()` uses a value receiver, so its viewport modifications don't persist.
+---
 
-### Layout Types
+## Daemon Types
+
+### Request/Response Protocol
 
 ```go
-// tui/layout.go
-type LayoutType int
+// daemon/api.go
+type Request struct {
+    Action string          `json:"action"`
+    Params json.RawMessage `json:"params,omitempty"`
+}
 
-const (
-    LayoutVertical   LayoutType = iota  // Panes stacked vertically
-    LayoutHorizontal                     // Panes side by side
-    LayoutGrid                           // 2x2 or larger grid
-)
+type Response struct {
+    OK    bool            `json:"ok"`
+    Error string          `json:"error,omitempty"`
+    Data  json.RawMessage `json:"data,omitempty"`
+}
+```
+
+### Reconciliation Types
+
+```go
+// daemon/reconcile.go
+type PaneState struct {
+    PaneID     string
+    Workstream string // from @ccells-workstream option
+    Container  string // from @ccells-container option
+}
+
+type ContainerState struct {
+    ID      string
+    Name    string
+    Running bool
+    Labels  map[string]string
+}
+
+type ReconcileResult struct {
+    Healthy            []HealthyWorkstream
+    OrphanedContainers []ContainerState // container running, no matching pane
+    OrphanedPanes      []PaneState      // pane exists, no matching container
+}
+
+type HealthyWorkstream struct {
+    PaneID      string
+    ContainerID string
+    Workstream  string
+    Running     bool
+}
+```
+
+### Pairing State (Daemon View)
+
+```go
+// daemon/daemon.go
+type PairingState struct {
+    Active         bool     `json:"active"`
+    CurrentBranch  string   `json:"current_branch"`
+    PreviousBranch string   `json:"previous_branch"`
+    ContainerID    string   `json:"container_id"`
+    SyncHealthy    bool     `json:"sync_healthy"`
+    Conflicts      []string `json:"conflicts,omitempty"`
+    SyncStatusText string   `json:"sync_status_text"`
+}
+
+type PairingProvider interface {
+    IsActive() bool
+    Enable(ctx context.Context, branchName, containerID, localPath, previousBranch string) error
+    Disable(ctx context.Context) error
+    CheckSyncHealth(ctx context.Context) error
+    GetState() PairingState
+}
+```
+
+---
+
+## CLI Dialog Types (Bubble Tea)
+
+### Create Dialog
+
+```go
+// cmd/ccells/dialog_create.go
+type createDialog struct {
+    step     int    // 0=prompt, 1=branch, 2=confirm
+    prompt   string
+    branch   string
+    cursor   int
+    input    string
+    err      error
+    done     bool
+    stateDir string
+    runtime  string
+}
+```
+
+### Merge Dialog
+
+```go
+// cmd/ccells/dialog_merge.go
+type mergeDialog struct {
+    step       int    // 0=generate, 1=edit title, 2=edit body, 3=confirm
+    title      string
+    body       string
+    cursor     int
+    input      string
+    generating bool
+    err        error
+    done       bool
+}
+```
+
+### Remove Dialog
+
+```go
+// cmd/ccells/dialog_rm.go
+type rmDialog struct {
+    step         int  // 0=confirm, 1=delete branch option
+    deleteBranch bool
+    confirmed    bool
+    done         bool
+}
 ```
 
 ---
@@ -500,71 +550,6 @@ type BuildConfig struct {
 }
 ```
 
----
-
-## Message Types (Bubble Tea)
-
-### PTY Messages
-
-```go
-// tui/pty.go
-type PTYOutputMsg struct {
-    WorkstreamID string
-    Output       []byte
-}
-
-type PTYClosedMsg struct {
-    WorkstreamID string
-    Error        error
-}
-
-type SessionIDCapturedMsg struct {
-    WorkstreamID string
-    SessionID    string
-}
-```
-
-### Container Messages
-
-```go
-// tui/container.go (conceptual)
-type ContainerCreatedMsg struct {
-    WorkstreamID string
-    ContainerID  string
-    Error        error
-}
-
-type WorkstreamStartedMsg struct {
-    WorkstreamID string
-    Ready        bool
-}
-
-type ContainerPausedMsg struct {
-    WorkstreamID string
-    Error        error
-}
-
-type ContainerResumedMsg struct {
-    WorkstreamID string
-    Error        error
-}
-
-type ContainerDestroyedMsg struct {
-    WorkstreamID string
-    Error        error
-}
-```
-
-### Dialog Messages
-
-```go
-// tui/dialog.go
-type DialogResult struct {
-    Action  string
-    Data    interface{}
-    Confirm bool
-}
-```
 
 ---
 
@@ -573,6 +558,7 @@ type DialogResult struct {
 | Data | Location |
 |------|----------|
 | Workstream state | `~/.claude-cells/state/<repo-id>/state.json` |
+| Daemon socket | `~/.claude-cells/state/<repo-id>/daemon.sock` |
 | Instance lock | `~/.claude-cells/state/<repo-id>/.ccells.lock` |
 | App state | `~/.claude-cells/app-state.json` |
 | Security config (global) | `~/.claude-cells/config.yaml` |
@@ -584,3 +570,4 @@ type DialogResult struct {
 | Container tracking | `~/.claude-cells/containers.json` |
 | Heartbeat | `~/.claude-cells/heartbeat` |
 | Exported logs | `~/.claude-cells/logs/` |
+| tmux server socket | `/tmp/tmux-<uid>/ccells-<repo-id>` |

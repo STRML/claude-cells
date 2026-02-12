@@ -115,11 +115,11 @@ Background process managing credentials, state reconciliation, and pairing healt
 | Action | Handler | Description |
 |--------|---------|-------------|
 | `ping` | inline | Health check |
-| `create` | `handleCreate` | Create workstream (TODO: wire to orchestrator) |
-| `rm` | `handleRemove` | Remove workstream |
-| `pause` | `handlePause` | Pause workstream |
-| `unpause` | `handleUnpause` | Resume workstream |
-| `pair` | `handlePair` | Enable pairing mode |
+| `create` | `handleCreate` | Create workstream (calls orchestrator) |
+| `rm` | `handleRemove` | Remove workstream (calls orchestrator) |
+| `pause` | `handlePause` | Pause workstream (calls orchestrator) |
+| `unpause` | `handleUnpause` | Resume workstream (calls orchestrator) |
+| `pair` | `handlePair` | Enable pairing mode (calls sync.Pairing) |
 | `unpair` | `handleUnpair` | Disable pairing mode |
 | `pair-status` | `handlePairStatus` | Query pairing state |
 | `shutdown` | inline | Graceful shutdown |
