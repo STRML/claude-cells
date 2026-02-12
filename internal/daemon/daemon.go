@@ -93,9 +93,84 @@ func (d *Daemon) dispatch(ctx context.Context, req Request) Response {
 	switch req.Action {
 	case "ping":
 		return Response{OK: true}
+	case "create":
+		return d.handleCreate(ctx, req.Params)
+	case "rm":
+		return d.handleRemove(ctx, req.Params)
+	case "pause":
+		return d.handlePause(ctx, req.Params)
+	case "unpause":
+		return d.handleUnpause(ctx, req.Params)
+	case "shutdown":
+		return Response{OK: true} // actual shutdown handled by context cancel
 	default:
 		return Response{Error: fmt.Sprintf("unknown action: %s", req.Action)}
 	}
+}
+
+// CreateParams holds parameters for the create action.
+type CreateParams struct {
+	Branch  string `json:"branch"`
+	Prompt  string `json:"prompt"`
+	Runtime string `json:"runtime"`
+}
+
+// WorkstreamParams holds parameters for rm/pause/unpause actions.
+type WorkstreamParams struct {
+	Name string `json:"name"`
+}
+
+func (d *Daemon) handleCreate(ctx context.Context, params json.RawMessage) Response {
+	var p CreateParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return Response{Error: fmt.Sprintf("invalid create params: %v", err)}
+	}
+	if p.Branch == "" {
+		return Response{Error: "branch is required"}
+	}
+
+	// TODO(task-14): Wire to orchestrator.CreateWorkstream + tmux pane creation
+	data, _ := json.Marshal(map[string]string{"status": "created", "branch": p.Branch})
+	return Response{OK: true, Data: data}
+}
+
+func (d *Daemon) handleRemove(ctx context.Context, params json.RawMessage) Response {
+	var p WorkstreamParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return Response{Error: fmt.Sprintf("invalid rm params: %v", err)}
+	}
+	if p.Name == "" {
+		return Response{Error: "name is required"}
+	}
+
+	// TODO(task-14): Wire to orchestrator.DestroyWorkstream + tmux pane kill
+	return Response{OK: true}
+}
+
+func (d *Daemon) handlePause(ctx context.Context, params json.RawMessage) Response {
+	var p WorkstreamParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return Response{Error: fmt.Sprintf("invalid pause params: %v", err)}
+	}
+	if p.Name == "" {
+		return Response{Error: "name is required"}
+	}
+
+	// TODO(task-14): Wire to orchestrator.PauseWorkstream
+	return Response{OK: true}
+}
+
+func (d *Daemon) handleUnpause(ctx context.Context, params json.RawMessage) Response {
+	var p WorkstreamParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return Response{Error: fmt.Sprintf("invalid unpause params: %v", err)}
+	}
+	if p.Name == "" {
+		return Response{Error: "name is required"}
+	}
+
+	// TODO(task-14): Wire to orchestrator.ResumeWorkstream + respawn pane
+	return Response{OK: true}
 }
 
 func writeResponse(conn net.Conn, resp Response) {

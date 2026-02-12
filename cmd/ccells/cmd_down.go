@@ -42,32 +42,52 @@ func runDown(ctx context.Context, repoID, stateDir string, destroyContainers boo
 	return nil
 }
 
-// sendDaemonRequest sends a request to the daemon via Unix socket.
+// daemonResponse mirrors daemon.Response for CLI-side decoding.
+type daemonResponse struct {
+	OK    bool            `json:"ok"`
+	Error string          `json:"error,omitempty"`
+	Data  json.RawMessage `json:"data,omitempty"`
+}
+
+// sendDaemonRequest sends a simple action to the daemon (no params, no response data).
 func sendDaemonRequest(sockPath, action string) error {
-	conn, err := net.DialTimeout("unix", sockPath, 2*time.Second)
+	conn, resp, err := sendDaemonRequestWithResponse(sockPath, action, nil)
+	if conn != nil {
+		conn.Close()
+	}
 	if err != nil {
-		return fmt.Errorf("daemon not reachable: %w", err)
-	}
-	defer conn.Close()
-
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
-
-	req := struct {
-		Action string `json:"action"`
-	}{Action: action}
-	if err := json.NewEncoder(conn).Encode(req); err != nil {
-		return fmt.Errorf("send: %w", err)
-	}
-
-	var resp struct {
-		OK    bool   `json:"ok"`
-		Error string `json:"error,omitempty"`
-	}
-	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
-		return fmt.Errorf("recv: %w", err)
+		return err
 	}
 	if !resp.OK {
 		return fmt.Errorf("daemon error: %s", resp.Error)
 	}
 	return nil
+}
+
+// sendDaemonRequestWithResponse sends a request with optional params and returns the response.
+// Caller must close the returned connection.
+func sendDaemonRequestWithResponse(sockPath, action string, params json.RawMessage) (net.Conn, *daemonResponse, error) {
+	conn, err := net.DialTimeout("unix", sockPath, 2*time.Second)
+	if err != nil {
+		return nil, nil, fmt.Errorf("daemon not reachable: %w", err)
+	}
+
+	conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+	req := struct {
+		Action string          `json:"action"`
+		Params json.RawMessage `json:"params,omitempty"`
+	}{Action: action, Params: params}
+
+	if err := json.NewEncoder(conn).Encode(req); err != nil {
+		conn.Close()
+		return nil, nil, fmt.Errorf("send: %w", err)
+	}
+
+	var resp daemonResponse
+	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
+		conn.Close()
+		return nil, nil, fmt.Errorf("recv: %w", err)
+	}
+	return conn, &resp, nil
 }
