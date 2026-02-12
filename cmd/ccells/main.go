@@ -13,8 +13,11 @@ import (
 	"syscall"
 	"time"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/STRML/claude-cells/internal/docker"
 	"github.com/STRML/claude-cells/internal/git"
+	"github.com/STRML/claude-cells/internal/tmux"
 	"github.com/STRML/claude-cells/internal/workstream"
 )
 
@@ -137,6 +140,28 @@ func getStateDir() string {
 	return stateDir
 }
 
+func printKeybindings() {
+	fmt.Print(`
+  Claude Cells - Keybindings
+  ══════════════════════════
+
+  prefix + n     Create new workstream
+  prefix + d     Destroy workstream
+  prefix + p     Pause current workstream
+  prefix + r     Resume current workstream
+  prefix + m     Create/view pull request
+  prefix + s     Refresh status line
+  prefix + ?     Show this help
+
+  Standard tmux keybindings also work:
+  prefix + arrow  Navigate between panes
+  prefix + z      Zoom current pane (toggle)
+  prefix + d      Detach from session
+
+  Press q or Esc to close.
+`)
+}
+
 func printHelp() {
 	fmt.Printf(`ccells - Claude Cells: Run parallel Claude Code instances in Docker containers
 
@@ -197,6 +222,13 @@ func main() {
 	// Handle commands that don't need repo context
 	switch cmd {
 	case "help":
+		// Check for --keybindings flag (used by tmux ? popup)
+		for _, a := range args {
+			if a == "--keybindings" {
+				printKeybindings()
+				os.Exit(0)
+			}
+		}
 		printHelp()
 		os.Exit(0)
 	case "version":
@@ -346,16 +378,31 @@ func main() {
 
 	case "rm":
 		name := ""
-		if len(cmdArgs) > 0 {
-			name = cmdArgs[0]
+		interactive := false
+		for _, arg := range cmdArgs {
+			switch arg {
+			case "--interactive", "-i":
+				interactive = true
+			default:
+				if name == "" {
+					name = arg
+				}
+			}
 		}
-		if name == "" {
-			fmt.Fprintf(os.Stderr, "Usage: ccells rm <workstream-name>\n")
-			os.Exit(1)
-		}
-		if err := runRemove(stateDir, name); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+		if interactive {
+			if err := runRmInteractive(appCtx, repoID, stateDir); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			if name == "" {
+				fmt.Fprintf(os.Stderr, "Usage: ccells rm <workstream-name>\n")
+				os.Exit(1)
+			}
+			if err := runRemove(stateDir, name); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
 		}
 
 	case "pause":
@@ -413,14 +460,39 @@ func main() {
 		}
 
 	case "status":
-		if err := runPairStatus(stateDir); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
+		formatTmux := false
+		for _, arg := range cmdArgs {
+			if arg == "--format=tmux" {
+				formatTmux = true
+			}
+		}
+		if formatTmux {
+			if err := runStatusTmux(appCtx, repoID); err != nil {
+				// Silently fail — tmux status line should not show errors
+				fmt.Print("[ccells]")
+			}
+		} else {
+			if err := runPairStatus(stateDir); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
 		}
 
 	case "merge":
-		// TODO: implement merge command
-		fmt.Println("merge command not yet implemented")
+		interactive := false
+		for _, arg := range cmdArgs {
+			if arg == "--interactive" || arg == "-i" {
+				interactive = true
+			}
+		}
+		if interactive {
+			if err := runMergeInteractive(appCtx, repoID, stateDir); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			fmt.Println("Usage: ccells merge --interactive (or use prefix+m keybinding)")
+		}
 
 	case "logs":
 		// TODO: implement logs command
@@ -432,12 +504,84 @@ func main() {
 	}
 }
 
-// runCreateInteractive launches the interactive create dialog.
-// When called from within a tmux session, this would be via display-popup.
+// runCreateInteractive launches the interactive create dialog as a Bubble Tea program.
 func runCreateInteractive(stateDir, runtime string) error {
-	// TODO(task-14): Launch interactive Bubble Tea dialog
-	// For now, tell user to use --branch flag
-	fmt.Println("Interactive create not yet wired. Use: ccells create --branch <name>")
+	m := newCreateDialog(stateDir, runtime)
+	p := tea.NewProgram(m)
+	_, err := p.Run()
+	return err
+}
+
+// runRmInteractive launches the interactive rm dialog as a Bubble Tea program.
+func runRmInteractive(ctx context.Context, repoID, stateDir string) error {
+	names, err := listWorkstreamNames(ctx, repoID)
+	if err != nil {
+		return err
+	}
+	m := newRmDialog(stateDir, names)
+	p := tea.NewProgram(m)
+	_, err = p.Run()
+	return err
+}
+
+// runMergeInteractive launches the interactive merge dialog as a Bubble Tea program.
+func runMergeInteractive(ctx context.Context, repoID, stateDir string) error {
+	names, err := listWorkstreamNames(ctx, repoID)
+	if err != nil {
+		return err
+	}
+	m := newMergeDialog(stateDir, names)
+	p := tea.NewProgram(m)
+	_, err = p.Run()
+	return err
+}
+
+// listWorkstreamNames returns workstream names from tmux panes.
+func listWorkstreamNames(ctx context.Context, repoID string) ([]string, error) {
+	socketName := fmt.Sprintf("ccells-%s", repoID)
+	client := tmux.NewClient(socketName)
+
+	panes, err := client.ListPanes(ctx, "ccells")
+	if err != nil {
+		return nil, err
+	}
+
+	var names []string
+	for _, p := range panes {
+		ws, _ := client.GetPaneOption(ctx, p.ID, "@ccells-workstream")
+		if ws != "" {
+			names = append(names, ws)
+		}
+	}
+	return names, nil
+}
+
+// runStatusTmux prints a compact status string for the tmux status line.
+func runStatusTmux(ctx context.Context, repoID string) error {
+	socketName := fmt.Sprintf("ccells-%s", repoID)
+	client := tmux.NewClient(socketName)
+
+	prefix, _ := client.Prefix(ctx)
+
+	panes, err := client.ListPanes(ctx, "ccells")
+	if err != nil {
+		return err
+	}
+
+	var workstreams []tmux.StatusWorkstream
+	for _, p := range panes {
+		ws, _ := client.GetPaneOption(ctx, p.ID, "@ccells-workstream")
+		if ws == "" {
+			continue
+		}
+		sw := tmux.StatusWorkstream{
+			Name:   ws,
+			Status: "running",
+		}
+		workstreams = append(workstreams, sw)
+	}
+
+	fmt.Print(tmux.FormatStatusLine(workstreams, prefix, false))
 	return nil
 }
 

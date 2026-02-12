@@ -45,6 +45,13 @@ type Config struct {
 	ReconcileFunc       ReconcileFunc   // nil = skip reconciliation
 	Pairing             PairingProvider // nil = pairing disabled
 	PairingPollInterval time.Duration   // default 5s
+
+	// Action handlers — called when CLI sends requests via socket.
+	// If nil, the corresponding action returns "not configured".
+	OnCreate  func(ctx context.Context, branch, prompt, runtime string) error
+	OnRemove  func(ctx context.Context, name string) error
+	OnPause   func(ctx context.Context, name string) error
+	OnUnpause func(ctx context.Context, name string) error
 }
 
 // Daemon is the background process managing credentials, state, and tmux hooks.
@@ -216,7 +223,13 @@ func (d *Daemon) handleCreate(ctx context.Context, params json.RawMessage) Respo
 		return Response{Error: "branch is required"}
 	}
 
-	// TODO(task-14): Wire to orchestrator.CreateWorkstream + tmux pane creation
+	if d.config.OnCreate == nil {
+		return Response{Error: "create handler not configured"}
+	}
+	if err := d.config.OnCreate(ctx, p.Branch, p.Prompt, p.Runtime); err != nil {
+		return Response{Error: fmt.Sprintf("create failed: %v", err)}
+	}
+
 	data, _ := json.Marshal(map[string]string{"status": "created", "branch": p.Branch})
 	return Response{OK: true, Data: data}
 }
@@ -230,7 +243,12 @@ func (d *Daemon) handleRemove(ctx context.Context, params json.RawMessage) Respo
 		return Response{Error: "name is required"}
 	}
 
-	// TODO(task-14): Wire to orchestrator.DestroyWorkstream + tmux pane kill
+	if d.config.OnRemove == nil {
+		return Response{Error: "remove handler not configured"}
+	}
+	if err := d.config.OnRemove(ctx, p.Name); err != nil {
+		return Response{Error: fmt.Sprintf("rm failed: %v", err)}
+	}
 	return Response{OK: true}
 }
 
@@ -243,7 +261,12 @@ func (d *Daemon) handlePause(ctx context.Context, params json.RawMessage) Respon
 		return Response{Error: "name is required"}
 	}
 
-	// TODO(task-14): Wire to orchestrator.PauseWorkstream
+	if d.config.OnPause == nil {
+		return Response{Error: "pause handler not configured"}
+	}
+	if err := d.config.OnPause(ctx, p.Name); err != nil {
+		return Response{Error: fmt.Sprintf("pause failed: %v", err)}
+	}
 	return Response{OK: true}
 }
 
@@ -312,7 +335,12 @@ func (d *Daemon) handleUnpause(ctx context.Context, params json.RawMessage) Resp
 		return Response{Error: "name is required"}
 	}
 
-	// TODO(task-14): Wire to orchestrator.ResumeWorkstream + respawn pane
+	if d.config.OnUnpause == nil {
+		return Response{Error: "unpause handler not configured"}
+	}
+	if err := d.config.OnUnpause(ctx, p.Name); err != nil {
+		return Response{Error: fmt.Sprintf("unpause failed: %v", err)}
+	}
 	return Response{OK: true}
 }
 

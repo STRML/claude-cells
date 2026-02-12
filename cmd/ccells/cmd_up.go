@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 
 	"github.com/STRML/claude-cells/internal/daemon"
+	"github.com/STRML/claude-cells/internal/docker"
+	"github.com/STRML/claude-cells/internal/git"
+	"github.com/STRML/claude-cells/internal/orchestrator"
 	"github.com/STRML/claude-cells/internal/tmux"
 )
 
@@ -44,10 +47,33 @@ func runUp(ctx context.Context, repoID, repoPath, stateDir, runtime string) erro
 		fmt.Fprintf(os.Stderr, "Warning: failed to configure tmux chrome: %v\n", err)
 	}
 
+	// Create Docker client and orchestrator for workstream operations
+	dockerClient, err := docker.NewClient()
+	if err != nil {
+		return fmt.Errorf("docker client: %w", err)
+	}
+	defer dockerClient.Close()
+
+	gitFactory := func(path string) git.GitClient {
+		return git.New(path)
+	}
+	orch := orchestrator.New(dockerClient, gitFactory, repoPath)
+
+	// Wire action handlers (orchestrator + tmux)
+	handlers := &actionHandlers{
+		orch:    orch,
+		tmux:    client,
+		session: sessionName,
+	}
+
 	// Start daemon for credential refresh + state reconciliation
 	daemonSockPath := filepath.Join(stateDir, "daemon.sock")
 	d := daemon.New(daemon.Config{
 		SocketPath: daemonSockPath,
+		OnCreate:   handlers.handleCreate,
+		OnRemove:   handlers.handleRemove,
+		OnPause:    handlers.handlePause,
+		OnUnpause:  handlers.handleUnpause,
 	})
 	go func() {
 		if err := d.Run(ctx); err != nil && ctx.Err() == nil {

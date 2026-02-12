@@ -130,10 +130,24 @@ func daemonRequest(t *testing.T, sockPath string, action string, params interfac
 	return resp
 }
 
+// noopHandlers returns handler functions that always succeed (for testing).
+func noopHandlers() (
+	func(context.Context, string, string, string) error,
+	func(context.Context, string) error,
+	func(context.Context, string) error,
+	func(context.Context, string) error,
+) {
+	return func(ctx context.Context, branch, prompt, runtime string) error { return nil },
+		func(ctx context.Context, name string) error { return nil },
+		func(ctx context.Context, name string) error { return nil },
+		func(ctx context.Context, name string) error { return nil }
+}
+
 func TestDaemonCreateAction(t *testing.T) {
 	sockPath := testSocketPath(t)
+	onCreate, onRemove, onPause, onUnpause := noopHandlers()
 
-	d := New(Config{SocketPath: sockPath})
+	d := New(Config{SocketPath: sockPath, OnCreate: onCreate, OnRemove: onRemove, OnPause: onPause, OnUnpause: onUnpause})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -160,8 +174,9 @@ func TestDaemonCreateAction(t *testing.T) {
 
 func TestDaemonRemoveAction(t *testing.T) {
 	sockPath := testSocketPath(t)
+	onCreate, onRemove, onPause, onUnpause := noopHandlers()
 
-	d := New(Config{SocketPath: sockPath})
+	d := New(Config{SocketPath: sockPath, OnCreate: onCreate, OnRemove: onRemove, OnPause: onPause, OnUnpause: onUnpause})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -181,8 +196,9 @@ func TestDaemonRemoveAction(t *testing.T) {
 
 func TestDaemonPauseUnpauseActions(t *testing.T) {
 	sockPath := testSocketPath(t)
+	onCreate, onRemove, onPause, onUnpause := noopHandlers()
 
-	d := New(Config{SocketPath: sockPath})
+	d := New(Config{SocketPath: sockPath, OnCreate: onCreate, OnRemove: onRemove, OnPause: onPause, OnUnpause: onUnpause})
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
