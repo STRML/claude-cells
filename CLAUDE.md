@@ -1,6 +1,6 @@
 # Claude Cells
 
-A terminal UI for running parallel Claude Code instances in isolated Docker containers.
+A tmux-based orchestrator for running parallel Claude Code instances in isolated Docker containers.
 
 ## Commands
 
@@ -18,15 +18,32 @@ go build -ldflags "-X main.CommitHash=$(git rev-parse --short HEAD)" ./cmd/ccell
 ## Architecture
 
 ```
-cmd/ccells/main.go         # Entry point
+cmd/ccells/                # CLI entry point + subcommands
+  main.go                  # Startup, arg parsing, command dispatch
+  commands.go              # Command registry + flag parsing
+  cmd_up.go                # up: create tmux session + daemon
+  cmd_attach.go            # attach: reattach to session
+  cmd_down.go              # down: stop daemon + tmux
+  cmd_create.go            # create: new workstream via daemon
+  cmd_rm.go                # rm: destroy workstream
+  cmd_pause.go             # pause/unpause workstreams
+  cmd_ps.go                # ps: list workstreams
+  cmd_pair.go              # pair/unpair: pairing mode
+  dialog_create.go         # Interactive create popup (Bubble Tea)
+  dialog_merge.go          # Interactive merge popup
+  dialog_rm.go             # Interactive destroy popup
+  detach.go                # Detach summary display
+  runtime.go               # Runtime selection (claude/claudesp)
 internal/
-  tui/                     # Bubble Tea UI (app.go is the hub)
-    app.go                 # Main model, Update loop, View rendering
-    pane.go                # Individual workstream pane with vterm
-    pty.go                 # Docker exec PTY session management
-    dialog.go              # Modal dialogs
-    container.go           # Container lifecycle & git worktree management
-  orchestrator/            # Workstream lifecycle orchestration (extracted from TUI)
+  tmux/                    # tmux server + pane management
+    tmux.go                # Server lifecycle, session creation/destruction
+    pane.go                # Pane CRUD + metadata (workstream/container vars)
+    chrome.go              # Status line, pane borders, keybindings, help
+  daemon/                  # Background daemon (sidecar process)
+    daemon.go              # Socket server, reconciliation loop, pairing health
+    api.go                 # Request/Response JSON protocol
+    reconcile.go           # State reconciliation (tmux + Docker)
+  orchestrator/            # Workstream lifecycle orchestration
     orchestrator.go        # WorkstreamOrchestrator interface & implementation
     create.go              # CreateWorkstream - worktree + container creation
     lifecycle.go           # Pause, Resume, Destroy, Rebuild operations
@@ -37,6 +54,8 @@ internal/
   docker/                  # Docker SDK wrapper
   sync/                    # Mutagen/pairing mode
   git/                     # Branch, worktree & PR operations
+  gitproxy/                # Git proxy for container operations
+  claude/                  # Claude CLI wrapper for ephemeral queries
 ```
 
 ### Codemaps
@@ -52,7 +71,8 @@ Before modifying code or answering questions about how the codebase works, read 
 
 ### Data Directories
 
-- `~/.claude-cells/state/<repo-id>/state.json` - Per-repo workstream state (branches, container IDs, session IDs)
+- `~/.claude-cells/state/<repo-id>/state.json` - Per-repo workstream metadata (prompts, session IDs, PR info)
+- `~/.claude-cells/state/<repo-id>/daemon.sock` - Daemon Unix socket for CLI communication
 - `~/.claude-cells/containers/<container-name>/` - Container-specific config files (credentials, .claude.json copies)
 - `~/.claude-cells/logs/` - Exported logs (pane logs and system logs)
 
@@ -228,45 +248,42 @@ For tests that need real Docker:
 - Run with: `go test -tags=integration ./...`
 - These tests are slower and require Docker daemon
 
-**TUI Testing**
+**tmux/Daemon Testing**
 
-The TUI uses Bubble Tea's message-passing architecture which makes testing straightforward:
+The tmux package wraps shell commands and can be tested by examining command construction. The daemon uses Unix sockets and can be tested with in-process clients:
 ```go
-app := NewAppModel(context.Background())
-app.width = 100
-app.height = 40
-
-// Send a message and check state
-model, _ := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}})
-app = model.(AppModel)
-
-if app.dialog == nil {
-    t.Error("Dialog should be open")
-}
+// Daemon test pattern
+d := daemon.New(daemon.Config{SocketPath: socketPath})
+go d.Run(ctx)
+// Send requests via daemon client
+conn, _ := net.Dial("unix", socketPath)
+json.NewEncoder(conn).Encode(daemon.Request{Action: "ping"})
 ```
 
 ### Completed Technical Improvements
 
-- **Git Worktree Isolation**: Each container gets its own git worktree, avoiding host repo conflicts
-- **Shell Escaping**: `escapeShellArg()` handles newlines (`\n`, `\r`), null bytes, and other special characters
-- **Resource Limits**: Manager limits workstreams to 12 (MaxWorkstreams constant)
-- **Auto-Persisting State**: `PersistentManager` auto-saves on any mutation (add/remove workstream, focus change, layout change). 200ms debounced saves prevent disk thrashing. Force-quit leaves coherent state.
-- **Atomic State Writes**: `SaveState` writes to temp file then renames for crash safety
-- **PTY Clean Shutdown**: Uses done channel for clean goroutine shutdown
-- **Container Cleanup**: Orphaned containers from crashed sessions are cleaned up on startup
-- **Context Timeouts**: All Docker operations use timeouts (no unbounded context.Background())
-- **Session Persistence**: Claude sessions are persisted from container runtime location to mount point before pause, surviving container rebuilds
-- **OAuth Credential Refresh**: `CredentialRefresher` re-registers existing containers on startup, ensuring credentials stay fresh even after ccells restarts. Uses `CLAUDE_CONFIG_DIR` for proper Claude Code integration.
-- **Container Security Hardening**: Tiered security defaults (hardened/moderate/compat) with auto-relaxation on startup failure. Drops dangerous capabilities, enables no-new-privileges, uses init process.
+- **tmux-Based Architecture**: Replaced Bubble Tea TUI (~24,500 lines) with tmux sidecar model (~2000 lines). Docker exec runs directly in tmux panes—no terminal emulation layer.
+- **Background Daemon**: Unix socket daemon handles credential refresh, state reconciliation, and pairing health. Survives tmux detach/reattach cycles.
+- **Compose-Style CLI**: `up`/`down`/`create`/`rm`/`ps`/`pause`/`unpause`/`pair` commands. All support non-interactive mode for scripting.
+- **Interactive Dialogs**: Bubble Tea programs run in `tmux display-popup` for create/merge/destroy flows.
+- **State Reconciliation**: Cross-references tmux panes with Docker containers to detect orphans and stale state.
+- **Git Worktree Isolation**: Each container gets its own git worktree, avoiding host repo conflicts.
+- **Shell Escaping**: `escapeShellArg()` handles newlines (`\n`, `\r`), null bytes, and other special characters.
+- **Resource Limits**: Manager limits workstreams to 12 (MaxWorkstreams constant).
+- **Auto-Persisting State**: `PersistentManager` auto-saves on any mutation. 200ms debounced saves prevent disk thrashing.
+- **Atomic State Writes**: `SaveState` writes to temp file then renames for crash safety.
+- **Container Cleanup**: Orphaned containers from crashed sessions are cleaned up on startup.
+- **Context Timeouts**: All Docker operations use timeouts (no unbounded context.Background()).
+- **Session Persistence**: Claude sessions are persisted from container runtime location to mount point before pause, surviving container rebuilds.
+- **OAuth Credential Refresh**: `CredentialRefresher` re-registers existing containers on startup, ensuring credentials stay fresh even after ccells restarts.
+- **Container Security Hardening**: Tiered security defaults (hardened/moderate/compat) with auto-relaxation on startup failure.
 - **PR Generation via Claude CLI**: Uses Claude (haiku model) to generate PR titles and descriptions from branch diffs.
-- **tmux Integration Testing**: Golden file support for viewport verification tests.
 - **Native Claude Code Installer**: Uses `claude.ai/install.sh` instead of npm. Configurable injection via `~/.claude-cells/config.yaml`.
 
 ### Remaining Technical Debt
 
-1. **Full Context Propagation**: Most operations use timeouts, but a root context for app-wide cancellation would be cleaner (pass context from main through AppModel to all commands)
-2. **God Objects**: AppModel (94 fields) and PaneModel (40+ fields) handle too many concerns. PaneModel could be split into PaneRenderer, ScrollController, AnimationController.
-3. **Global Mutable State**: `program`, `containerTracker`, `credentialRefresher` are package-level globals in tui package. Should be passed as AppModel fields for better testability.
+1. **Wire TODO(task-14) placeholders**: Daemon handlers for create/rm/pause/unpause have TODO stubs that need wiring to the orchestrator package.
+2. **Full Context Propagation**: Root context from main should flow through daemon to all operations for clean shutdown.
 
 ### Git Proxy (Container Git Operations)
 

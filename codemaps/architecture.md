@@ -1,78 +1,131 @@
 # Architecture Overview
 
-Last updated: 2026-01-23 (Updated: cursor position fix)
+Last updated: 2026-02-12 (Updated: tmux migration, TUI removed)
 
-## Architecture Assessment: 7.5/10
+## Architecture Assessment: 8/10
 
 ### Strengths
-- Clean message-passing with Bubble Tea (Elm Architecture)
+- tmux-native UI: no terminal emulation, no rendering code, fully resumable sessions
+- Clean sidecar model: ccells orchestrates, tmux owns the terminal
 - Strong interface abstractions (DockerClient, GitClient) with mocks
 - Comprehensive testing infrastructure
 - Excellent crash recovery & state persistence
 - Security hardening by default with tiered relaxation
+- Background daemon with Unix socket API
 
 ### Weaknesses
-- Business logic leaking into TUI layer (`container.go` has 1600+ lines of orchestration)
-- God objects (AppModel: 94 fields, PaneModel: 40+ fields)
-- Global mutable state (`program`, `containerTracker`, `credentialRefresher`)
+- TODO stubs in daemon handlers need wiring to orchestrator
 - Missing observability (no metrics, tracing)
 
 ## Summary
 
-Claude Cells (ccells) is a terminal UI application that orchestrates parallel Claude Code instances in isolated Docker containers. It enables running multiple AI-assisted development workstreams simultaneously, each with its own git worktree, container, and Claude Code session.
+Claude Cells (ccells) is a tmux-based orchestrator that runs parallel Claude Code instances in isolated Docker containers. It uses compose-style CLI commands (`up`/`down`/`create`/`rm`/`ps`) to manage workstreams, with a background daemon handling credential refresh, state reconciliation, and pairing health.
 
 ## Entry Points
 
 ```
 cmd/ccells/main.go          # Primary CLI entry point
+cmd/ccells/commands.go       # Command registry + flag parsing
 cmd/keytest/main.go         # Keyboard testing utility (dev tool)
 ```
 
 ### Main Entry Flow
 
 ```
-main() -> validatePrerequisites() -> NewAppModel() -> tea.NewProgram() -> Run()
-                                          |
-                                          v
-                              tui.AppModel (Bubble Tea model)
+main() -> parseCommand() -> dispatch:
+  "up"     -> validatePrerequisites() -> runUp() -> tmux session + daemon + attach
+  "attach" -> runAttach() -> tmux attach
+  "down"   -> runDown() -> daemon shutdown + tmux kill
+  "create" -> runCreate() -> daemon request
+  "rm"     -> runRemove() -> daemon request
+  "ps"     -> runPS() -> tmux list-panes query
+  "pair"   -> runPair() -> daemon request
 ```
 
-Key startup operations:
-1. Initialize logging (to avoid TUI pollution)
+Key startup operations (in `up`):
+1. Validate Docker prerequisites (image build if needed)
 2. Acquire per-repo lock (prevents multiple instances)
-3. Validate Docker prerequisites (image build if needed)
-4. Initialize container tracker (crash recovery)
-5. Clean up orphaned containers/worktrees
-6. Start credential refresher (OAuth token sync)
-7. Create Bubble Tea program and run TUI
+3. Clean up orphaned containers/worktrees
+4. Start heartbeat for crash recovery
+5. Create tmux session (detached)
+6. Configure chrome (status line, pane borders, keybindings)
+7. Start background daemon (credential refresh, reconciliation)
+8. Attach to tmux session (blocks until detach)
+9. Print detach summary on exit
 
 ## Main Components
 
-### TUI Layer (`internal/tui/`)
+### tmux Layer (`internal/tmux/`)
 
-The UI is built on [Bubble Tea](https://github.com/charmbracelet/bubbletea) (bubbletea v2), a Go framework for terminal applications.
+Manages the tmux server, sessions, and panes. ccells owns a dedicated tmux server per repo (socket: `ccells-<repo-id>`).
 
 ```
-AppModel                    # Main application state, message routing
-  |-- PaneModel[]           # Individual workstream panes with vt10x terminals
-  |-- StatusBarModel        # Bottom status bar
-  |-- DialogModel           # Modal dialogs (new workstream, help, etc.)
-  |-- LogPanelModel         # Debug log panel (toggleable)
-  |-- PairingOrchestrator   # File sync coordination (Mutagen)
+Client                      # tmux CLI wrapper for a specific socket
+  |-- NewSession()          # Create detached session
+  |-- HasSession()          # Check if session exists
+  |-- KillServer()          # Kill tmux server
+  |-- AttachCommand()       # Returns exec.Cmd for attach
+  |-- ConfigureChrome()     # Set up status line, borders, keybindings
+  |-- CreatePane()          # Split window to add pane
+  |-- KillPane()            # Kill a specific pane
+  |-- SetPaneOption()       # Set per-pane metadata
+  |-- ListPanes()           # Query panes with metadata
 ```
 
 **Key files:**
-- `app.go` - Central hub: state management, message routing, layout calculation
-- `pane.go` - Terminal emulation via vt10x, ANSI color handling, scrollback
-- `pty.go` - Docker exec PTY sessions, keyboard input, session ID capture
-- `container.go` - Container lifecycle Bubble Tea commands (delegates to orchestrator)
-- `dialog.go` - Modal dialog system
-- `layout.go` - Multi-pane layout calculations
-- `styles.go` - Lipgloss-based styling and color utilities
+- `tmux.go` - Server lifecycle, session management, version detection
+- `pane.go` - Pane CRUD, metadata (workstream/container vars)
+- `chrome.go` - Status line formatting, pane border formatting, keybindings, help
 
-### Orchestration Layer (`internal/orchestrator/`) [NEW]
+### Daemon (`internal/daemon/`)
 
-Workstream lifecycle business logic extracted from TUI. Enables testable code without Bubble Tea dependencies, reusable for CLI tools or API servers.
+Background process running alongside the tmux session. Communicates with CLI commands via Unix domain socket.
+
+```
+Daemon                      # Background process
+  |-- Run()                 # Start socket server + background loops
+  |-- dispatch()            # Route requests to handlers
+  |-- handleCreate()        # Create workstream (TODO: wire to orchestrator)
+  |-- handleRemove()        # Remove workstream
+  |-- handlePause()         # Pause workstream
+  |-- handleUnpause()       # Resume workstream
+  |-- handlePair()          # Enable pairing mode
+  |-- handleUnpair()        # Disable pairing mode
+  |-- handlePairStatus()    # Query pairing state
+```
+
+**Background loops:**
+- Reconciliation (30s default): Cross-references tmux panes with Docker containers
+- Pairing health (5s default): Checks Mutagen sync health when pairing is active
+
+**Key files:**
+- `daemon.go` - Socket server, request dispatch, background loops
+- `api.go` - Request/Response JSON protocol
+- `reconcile.go` - State reconciliation types and logic
+
+### CLI Layer (`cmd/ccells/`)
+
+Compose-style CLI commands. Each command is a separate file:
+
+```
+cmd_up.go      # up: create tmux session + daemon + attach
+cmd_attach.go  # attach: reattach to existing session
+cmd_down.go    # down: stop daemon + tmux + shared daemon client helpers
+cmd_create.go  # create: new workstream via daemon
+cmd_rm.go      # rm: destroy workstream
+cmd_pause.go   # pause/unpause workstreams
+cmd_ps.go      # ps: list workstreams from tmux panes
+cmd_pair.go    # pair/unpair/status: pairing mode
+```
+
+**Interactive dialogs (Bubble Tea programs for tmux display-popup):**
+- `dialog_create.go` - New workstream form
+- `dialog_merge.go` - PR/merge flow
+- `dialog_rm.go` - Destroy confirmation
+
+### Orchestration Layer (`internal/orchestrator/`)
+
+Workstream lifecycle business logic. Pure Go, no TUI or tmux dependencies.
 
 ```
 WorkstreamOrchestrator interface
@@ -85,17 +138,9 @@ WorkstreamOrchestrator interface
 ```
 
 **Key files:**
-- `orchestrator.go` - Interface, `Orchestrator` struct, options types (`CreateOptions`, `DestroyOptions`, `CreateResult`, `BranchConflict`)
-- `create.go` - Complete creation flow: worktree, image resolution, config building, container start
+- `orchestrator.go` - Interface, struct, options/result types
+- `create.go` - Complete creation flow
 - `lifecycle.go` - Pause, resume, destroy, rebuild operations
-
-**CreateWorkstream flow:**
-1. Update main branch (optional)
-2. Create git worktree (new or from existing branch)
-3. Copy untracked files (if requested)
-4. Resolve image (devcontainer auto-detect or default)
-5. Build container config (credentials, git identity, timezone, extra env)
-6. Create and start container
 
 ### Workstream Management (`internal/workstream/`)
 
@@ -130,118 +175,91 @@ DockerClient interface      # Abstraction for Docker operations
 - Credential management (OAuth token sync to containers)
 - Orphan cleanup (crash recovery)
 
-**Security tiers:** `hardened` > `moderate` (default) > `compat`
-- Auto-relaxation: if container fails to start, tries less restrictive settings
-
 ### Git Operations (`internal/git/`)
 
 Handles git worktrees, branches, and repository management.
 
-```
-GitClient interface         # Abstraction for git operations
-  |-- Git                   # Real git CLI wrapper
-  |-- MockClient            # Test mock
-```
-
-**Key features:**
-- Git worktree management (isolation without repo conflicts)
-- Branch operations (create, checkout, delete, push)
-- PR creation via `gh` CLI
-- Repo ID generation (first commit hash for stable identity)
-
 ### File Sync (`internal/sync/`)
 
-Bidirectional file sync between containers and local filesystem.
-
-```
-Pairing                     # Orchestrates pairing mode
-  |-- GitOperations         # Git interface for branch switching
-  |-- MutagenOperations     # Mutagen session management
-```
-
-**Pairing mode:**
-1. Stash local changes
-2. Checkout workstream branch locally
-3. Start Mutagen sync session
-4. Real-time bidirectional sync with conflict detection
+Bidirectional file sync between containers and local filesystem via Mutagen.
 
 ### Claude CLI Integration (`internal/claude/`)
 
-Ephemeral queries to Claude CLI for metadata generation.
-
-```
-Query()                     # Execute stateless Claude query
-  |-- Uses fixed session ID to avoid polluting resume log
-  |-- Thread-safe (mutex-protected)
-  |-- Periodic context clearing (every 100 queries)
-```
-
-Used for: title generation, commit message suggestions
+Ephemeral queries to Claude CLI for metadata generation (titles, commit messages).
 
 ## Data Flow
 
 ### Container Creation Flow
 
 ```
-User presses 'n'
+User: ccells create --branch my-feature --prompt "add auth"
     |
     v
-NewWorkstream dialog
+CLI sends "create" request to daemon via Unix socket
     |
     v
-Title generation (Claude CLI query)
+Daemon handler (TODO: wire to orchestrator)
     |
     v
-Create git worktree (/tmp/ccells/worktrees/<branch>)
+Orchestrator.CreateWorkstream():
+  1. Create git worktree (/tmp/ccells/worktrees/<branch>)
+  2. Resolve Docker image
+  3. Build container config (credentials, mounts)
+  4. Docker: CreateContainer -> StartContainer
     |
     v
-Create container config (credentials, mounts)
+Create tmux pane: docker exec -it <container> claude --resume
     |
     v
-Docker: CreateContainer -> StartContainer
+Set pane metadata (@ccells-workstream, @ccells-container)
     |
     v
-Create PTY session (docker exec with TTY)
-    |
-    v
-Run container setup script (install Claude Code if needed)
-    |
-    v
-Launch Claude Code with --dangerously-skip-permissions
-    |
-    v
-Capture session ID from output
-    |
-    v
-Workstream state -> "running"
+Update status line
 ```
 
-### Message Flow (Bubble Tea)
+### CLI → Daemon Communication
 
 ```
-tea.Msg -> AppModel.Update() -> dispatch to handlers
+CLI command (e.g., ccells create)
     |
     v
-Key events -> route to focused pane or dialog
+net.Dial("unix", daemon.sock)
     |
     v
-PTY output -> route to appropriate PaneModel
+JSON request: {"action": "create", "params": {...}}
     |
     v
-Timer ticks -> spinner animation, fade effects
+Daemon.dispatch() -> handler
     |
     v
-State changes -> trigger UI re-render via View()
+JSON response: {"ok": true, "data": {...}}
 ```
 
 ## Key Design Decisions
+
+### tmux Sidecar Model
+ccells runs as an orchestrator alongside tmux, not inside it. Benefits:
+- **Resumability**: Detach and reattach without losing state
+- **Native terminal**: No vterm emulation, no rendering bugs
+- **Simplicity**: ~2000 lines replaces ~24,500 lines of TUI code
+- **Standard interaction**: Users get full tmux functionality (copy mode, zoom, etc.)
+
+### Hybrid State Model
+- **Operational truth**: Derived from tmux (`list-panes`) + Docker (`docker ps`)
+- **Metadata**: Supplementary state file for prompts, session IDs, PR info
+- **Lossy-safe**: If state file is stale/missing, workstreams still function
+
+### Background Daemon
+- Runs in-process alongside tmux attach
+- Unix socket for CLI command communication
+- Survives tmux detach (same process)
+- Crash recovery: `ccells attach` restarts daemon if needed
 
 ### Git Worktree Isolation
 Each container gets its own worktree instead of sharing the host repo. This:
 - Avoids `.git/index.lock` conflicts
 - Keeps host working directory unchanged
 - Shares git objects for efficiency
-- Enables independent branch work
 
 ### OAuth Credential Architecture
 ```
@@ -254,34 +272,14 @@ CredentialRefresher (polls every 15 min)
 Container config dirs (~/.claude-cells/containers/<name>/)
     |
     v
-Mounted into containers at /root/.claude/.credentials.json
+Mounted into containers at /home/claude/.credentials.json
 ```
-
-Why keychain is authoritative: containers may be paused while ccells is off. On restart, fresh credentials must be pushed to revive stale tokens.
-
-### Virtual Terminal (vt10x)
-Panes embed a virtual terminal emulator to properly handle:
-- ANSI escape sequences (colors, cursor positioning)
-- Scrollback buffer with color preservation
-- Cursor rendering for input feedback
-- Muted colors for unfocused panes
-
-### Cursor Position Calculation
-`GetCursorPosition()` must recalculate viewport offset rather than relying on `p.viewport.YOffset()` because:
-- `View()` uses a **value receiver**, so viewport modifications (like `GotoBottom()`) don't persist
-- `GetCursorPosition()` is called after `View()` renders, reading from the original (unmodified) pane
-- Fix: Calculate viewport offset using same logic as `View()` (assume at-bottom in normal mode)
-
-### State Persistence
-- `PersistentManager` wraps `Manager` with auto-save
-- 200ms debounced saves prevent disk thrashing
-- Atomic writes ensure crash safety
-- State includes: workstreams, focus, layout, repo metadata
 
 ## External Dependencies
 
 | Dependency | Purpose |
 |------------|---------|
+| tmux | Terminal multiplexer (pane management, sessions) |
 | Docker | Container runtime |
 | git | Version control, worktrees |
 | gh | GitHub CLI for PRs |
@@ -293,204 +291,64 @@ Panes embed a virtual terminal emulator to properly handle:
 ```
 ~/.claude-cells/
   state/<repo-id>/
-    state.json              # Workstream state
+    state.json              # Workstream metadata
+    daemon.sock             # Daemon Unix socket
     .ccells.lock            # Per-repo instance lock
   containers/<name>/
-    .claude/                # Mounted as /root/.claude
+    .claude/                # Mounted as /home/claude
       .credentials.json     # OAuth tokens
-  config.yaml               # Global security config
-  ephemeral-query-state.json
+  config.yaml               # Global config
+  logs/                     # Exported logs
 
 /tmp/ccells/
   worktrees/<branch>/       # Git worktrees per workstream
+
+/tmp/tmux-<uid>/
+  ccells-<repo-id>          # tmux server socket
 ```
-
-## Architectural Smells
-
-### 1. Business Logic in TUI Layer (Significantly Improved)
-
-**File:** `internal/tui/container.go` (1356 lines, reduced from 1653)
-
-Container orchestration logic has been extracted to `internal/orchestrator` package. The TUI layer now delegates to the orchestrator for core operations.
-
-**Completed extraction (PR #8):**
-- `orchestrator.go` - `WorkstreamOrchestrator` interface and `Orchestrator` implementation
-- `create.go` - Complete workstream creation flow:
-  - `CreateWorkstream()` - Full orchestration of worktree + container + credentials
-  - `CheckBranchConflict()` - Branch/worktree conflict detection
-  - `resolveImage()` - Auto-detect image from devcontainer or use default
-  - `buildFullContainerConfig()` - Container config with credentials, git identity
-  - `copyUntrackedFiles()` - Copy untracked files to worktree
-- `lifecycle.go` - `PauseWorkstream()`, `ResumeWorkstream()`, `DestroyWorkstream()`, `RebuildWorkstream()`
-- AppModel has `orchestrator` field - accessed via `Orchestrator()` getter
-- `container.go` uses orchestrator for create/destroy operations
-
-**Remaining in `container.go`:**
-- Bubble Tea message types and command wrappers
-- PTY session management
-- Pairing mode integration
-- Title generation via Claude CLI
-- Container tracking/credential registration (global state)
-
-**Impact:** Core business logic is now testable without TUI. ~300 lines extracted.
-
-### 2. God Objects (Improved)
-
-| Object | File | Lines | Fields | Issue |
-|--------|------|-------|--------|-------|
-| AppModel | app.go | 2000+ | 94 | Main event loop - acceptable for Bubble Tea |
-| PaneModel | pane.go | 1321 | 40+ | Core pane logic (reduced from 1701 lines) |
-
-**PaneModel refactoring completed:** Split into focused files:
-- `pane.go` (1321 lines) - Core struct, View, Update, vterm rendering
-- `pane_colors.go` (164 lines) - ANSI color utilities (`muteANSI`, `stripANSI`, `color256ToRGB`)
-- `pane_scroll.go` (77 lines) - Scroll methods (`ScrollPageUp`, `ScrollToBottom`, etc.)
-- `pane_animation.go` (172 lines) - Animation state (`SummarizePhase`, fade/init methods)
-
-### 3. Global Mutable State (Improved)
-
-Package-level state now uses encapsulated structs with thread-safety:
-
-```go
-// container.go:26-32 - Services struct (set once at startup)
-type containerServices struct {
-    tracker   *docker.ContainerTracker
-    refresher *docker.CredentialRefresher
-}
-var services containerServices
-
-// pty.go:60-65 - Mutex-protected program sender
-type programSender struct {
-    mu      sync.RWMutex
-    program *tea.Program
-}
-var sender programSender
-```
-
-**Current state:** Thread-safe (mutex protection, set-once patterns). Tests pass with `-race`.
-**Remaining improvement:** Could move to AppModel fields for true dependency injection, but current pattern is acceptable.
-
-## Design Patterns
-
-### Well-Implemented
-- **Command Pattern** (Bubble Tea tea.Cmd) - Clean async operations
-- **Strategy Pattern** (GitClientFactory) - Test injection without DI framework
-- **Repository Pattern** (Manager) - Thread-safe in-memory registry
-- **Decorator Pattern** (PersistentManager wraps Manager) - Auto-persistence
-- **State Machine** (Workstream.State) - Explicit state transitions
-
-### Anti-Patterns Present
-- **Anemic Domain Model** - Workstream is mostly getters/setters
 
 ## Layer Boundaries
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ main.go (cmd/ccells)                                        │
-│ - Startup, signal handling, crash recovery                  │
+│ CLI Layer (cmd/ccells)                                      │
+│ - Command dispatch, flag parsing, interactive dialogs       │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ Presentation Layer (internal/tui)                          │
-│ - AppModel, PaneModel, DialogModel, PTYSession             │
-│ ⚠️ Also contains business logic (container.go)              │
+│ tmux Layer (internal/tmux)                                  │
+│ - Server management, pane CRUD, chrome, keybindings         │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ Orchestration Layer (internal/orchestrator)         [NEW]  │
-│ - WorkstreamOrchestrator: create, pause, resume, destroy   │
-│ - Pure business logic, no TUI dependencies                 │
+│ Daemon (internal/daemon)                                    │
+│ - Socket server, reconciliation, pairing health             │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ Domain Layer (internal/workstream)                         │
-│ - Manager, PersistentManager, Workstream                   │
+│ Orchestration Layer (internal/orchestrator)                  │
+│ - WorkstreamOrchestrator: create, pause, resume, destroy    │
+│ - Pure business logic, no tmux/daemon dependencies          │
 └─────────────────────────────────────────────────────────────┘
                           ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ Infrastructure (internal/docker, git, sync, claude)        │
-│ - DockerClient, GitClient, Mutagen, Claude CLI             │
+│ Domain Layer (internal/workstream)                          │
+│ - Manager, PersistentManager, Workstream                    │
+└─────────────────────────────────────────────────────────────┘
+                          ↓
+┌─────────────────────────────────────────────────────────────┐
+│ Infrastructure (internal/docker, git, sync, claude)         │
+│ - DockerClient, GitClient, Mutagen, Claude CLI              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## Improvement Roadmap
+## Design Patterns
 
-### Completed
-1. **Extract Orchestration Layer** ✅ (PR #8)
-   - `internal/orchestrator` package with full `WorkstreamOrchestrator` interface
-   - Complete operations: `CreateWorkstream`, `PauseWorkstream`, `ResumeWorkstream`, `DestroyWorkstream`, `RebuildWorkstream`, `CheckBranchConflict`
-   - Image resolution: auto-detect from devcontainer, build with devcontainer CLI, fallback to default
-   - Container config: credentials, git identity, timezone, extra env vars
-   - Worktree management: create, cleanup on error, branch sanitization
-   - AppModel uses orchestrator via `Orchestrator()` getter
-
-2. **Global State Thread-Safety** ✅
-   - `containerServices` struct encapsulates tracker/refresher (set-once pattern)
-   - `programSender` uses `sync.RWMutex` for concurrent PTY goroutine access
-   - All tests pass with `-race` detector
-
-3. **Refactor PaneModel** ✅
-   - Split 1700-line file into focused components:
-   - `pane_colors.go` (164 lines) - ANSI color utilities
-   - `pane_scroll.go` (77 lines) - Scroll methods
-   - `pane_animation.go` (172 lines) - Animation state/methods
-   - Core `pane.go` reduced to 1321 lines
-
-## Next Steps (Prioritized)
-
-### High Priority
-
-4. **Reduce AppModel Field Count**
-   - **Problem:** AppModel has ~94 fields, making it hard to reason about state
-   - **Fix:** Group related fields into sub-structs:
-     - `LayoutState` - width, height, layout mode, pane dimensions
-     - `FocusState` - focused pane index, input mode, scroll mode
-     - `DialogState` - current dialog, dialog history
-   - **Acceptance:** AppModel has <50 direct fields; related state is co-located
-   - **Dependencies:** None - can start immediately
-
-5. **Extract TUI Business Logic from container.go**
-   - **Problem:** `container.go` still contains ~1356 lines mixing TUI commands with business logic
-   - **Fix:** Move to orchestrator or new packages:
-     - PTY session management → `internal/tui/pty_manager.go` or orchestrator
-     - Pairing mode integration → `internal/sync/`
-     - Container tracking/credential registration → orchestrator
-   - **Acceptance:** `container.go` contains only Bubble Tea message types and thin command wrappers (<500 lines)
-   - **Dependencies:** Builds on orchestrator extraction (completed)
-
-### Medium Priority
-
-6. **Further Refactor PaneModel**
-   - **Problem:** `pane.go` still has 1321 lines and 40+ fields
-   - **Fix:**
-     - Extract `PaneRenderer` - View() logic, border/header rendering
-     - Group fields into sub-structs: `VTermState`, `DialogState`
-   - **Acceptance:** `pane.go` <800 lines; PaneModel has <25 direct fields
-   - **Dependencies:** None, but lower impact than AppModel refactoring
-
-7. **Add Observability**
-   - **Problem:** No metrics or tracing for debugging production issues
-   - **Fix:**
-     - Add structured logging with levels (debug/info/warn/error)
-     - Add timing metrics for container operations
-     - Consider OpenTelemetry spans for distributed tracing
-   - **Acceptance:** Can diagnose slow container starts and credential refresh issues from logs
-   - **Dependencies:** None
-
-### Low Priority (Deferred)
-
-8. **Move Global State to AppModel Fields**
-   - Pass `containerServices` via AppModel fields
-   - Pass `programSender` through PTYSession constructor
-   - **Note:** Current encapsulated pattern is thread-safe and acceptable; defer unless causing test issues
-
-### Future Vision
-```
-┌────────────────────────────────────────┐
-│ TUI (Bubble Tea)                       │  ← Presentation only
-├────────────────────────────────────────┤
-│ Orchestrator API                       │  ← Business logic ✅ Created
-├────────────────────────────────────────┤
-│ Docker / Git / Sync                    │  ← Infrastructure
-└────────────────────────────────────────┘
-```
+### Well-Implemented
+- **Sidecar Pattern** (ccells + tmux) - Orchestrator manages, tmux owns terminal
+- **Command Pattern** (daemon request/response) - Clean async operations
+- **Strategy Pattern** (GitClientFactory) - Test injection without DI framework
+- **Repository Pattern** (Manager) - Thread-safe in-memory registry
+- **Decorator Pattern** (PersistentManager wraps Manager) - Auto-persistence
+- **State Machine** (Workstream.State) - Explicit state transitions
+- **Reconciliation Pattern** (daemon) - Cross-reference tmux + Docker for truth

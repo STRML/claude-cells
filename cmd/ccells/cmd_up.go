@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path/filepath"
 
+	"github.com/STRML/claude-cells/internal/daemon"
 	"github.com/STRML/claude-cells/internal/tmux"
 )
 
@@ -29,11 +31,37 @@ func runUp(ctx context.Context, repoID, repoPath, stateDir, runtime string) erro
 		return fmt.Errorf("failed to create tmux session: %w", err)
 	}
 
-	// TODO(task-10): Configure tmux chrome (status line, pane borders, keybindings)
-	// TODO(task-8): Start daemon for credential refresh + state reconciliation
-	// TODO(task-12): Restore workstreams from state file
+	// Resolve path to ccells binary for keybindings
+	ccellsBin, err := os.Executable()
+	if err != nil {
+		ccellsBin = "ccells" // fallback to PATH
+	} else {
+		ccellsBin, _ = filepath.Abs(ccellsBin)
+	}
 
-	return doAttach(client, sessionName)
+	// Configure tmux chrome (status line, pane borders, keybindings)
+	if err := client.ConfigureChrome(ctx, sessionName, ccellsBin); err != nil {
+		fmt.Fprintf(os.Stderr, "Warning: failed to configure tmux chrome: %v\n", err)
+	}
+
+	// Start daemon for credential refresh + state reconciliation
+	daemonSockPath := filepath.Join(stateDir, "daemon.sock")
+	d := daemon.New(daemon.Config{
+		SocketPath: daemonSockPath,
+	})
+	go func() {
+		if err := d.Run(ctx); err != nil && ctx.Err() == nil {
+			fmt.Fprintf(os.Stderr, "daemon error: %v\n", err)
+		}
+	}()
+
+	// Attach to session (blocks until detach or exit)
+	attachErr := doAttach(client, sessionName)
+
+	// Print detach summary after tmux exits
+	printDetachSummary(repoID, stateDir)
+
+	return attachErr
 }
 
 // doAttach execs into the tmux session, replacing the current process's stdio.
@@ -43,4 +71,23 @@ func doAttach(client *tmux.Client, sessionName string) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()
+}
+
+// printDetachSummary prints a summary after tmux detach.
+func printDetachSummary(repoID, stateDir string) {
+	info := DetachInfo{
+		RepoID: repoID,
+	}
+
+	// Try to get daemon PID
+	daemonSock := filepath.Join(stateDir, "daemon.sock")
+	conn, resp, err := sendDaemonRequestWithResponse(daemonSock, "ping", nil)
+	if conn != nil {
+		conn.Close()
+	}
+	if err == nil && resp.OK {
+		info.DaemonPID = os.Getpid() // approximate — daemon is in-process
+	}
+
+	fmt.Print(formatDetachSummary(info))
 }
