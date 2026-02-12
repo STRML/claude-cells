@@ -9,11 +9,18 @@ import (
 	"net"
 	"os"
 	"sync"
+	"time"
 )
+
+// ReconcileFunc is called periodically to reconcile tmux+Docker state.
+// Returns an error only for logging; reconciliation failures are non-fatal.
+type ReconcileFunc func(ctx context.Context) error
 
 // Config holds daemon configuration.
 type Config struct {
-	SocketPath string
+	SocketPath        string
+	ReconcileInterval time.Duration // default 30s
+	ReconcileFunc     ReconcileFunc // nil = skip reconciliation
 }
 
 // Daemon is the background process managing credentials, state, and tmux hooks.
@@ -61,6 +68,30 @@ func (d *Daemon) Run(ctx context.Context) error {
 			}()
 		}
 	}()
+
+	// Background reconciliation loop
+	if d.config.ReconcileFunc != nil {
+		interval := d.config.ReconcileInterval
+		if interval == 0 {
+			interval = 30 * time.Second
+		}
+		d.wg.Add(1)
+		go func() {
+			defer d.wg.Done()
+			ticker := time.NewTicker(interval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if err := d.config.ReconcileFunc(ctx); err != nil {
+						log.Printf("[daemon] reconcile: %v", err)
+					}
+				}
+			}
+		}()
+	}
 
 	// Wait for shutdown
 	<-ctx.Done()

@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 )
@@ -197,4 +198,39 @@ func TestDaemonPauseUnpauseActions(t *testing.T) {
 	if !resp.OK {
 		t.Errorf("unpause: expected OK, got error: %s", resp.Error)
 	}
+}
+
+func TestDaemonReconcileLoop(t *testing.T) {
+	sockPath := testSocketPath(t)
+
+	var callCount int32
+	var mu sync.Mutex
+
+	d := New(Config{
+		SocketPath:        sockPath,
+		ReconcileInterval: 50 * time.Millisecond,
+		ReconcileFunc: func(ctx context.Context) error {
+			mu.Lock()
+			callCount++
+			mu.Unlock()
+			return nil
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go d.Run(ctx)
+	time.Sleep(200 * time.Millisecond)
+
+	mu.Lock()
+	count := callCount
+	mu.Unlock()
+
+	if count < 2 {
+		t.Errorf("expected reconcile to be called at least 2 times, got %d", count)
+	}
+
+	cancel()
+	time.Sleep(100 * time.Millisecond)
 }
