@@ -16,11 +16,35 @@ import (
 // Returns an error only for logging; reconciliation failures are non-fatal.
 type ReconcileFunc func(ctx context.Context) error
 
+// PairingProvider abstracts the sync.Pairing struct for the daemon.
+// This avoids a direct dependency on internal/sync from the daemon.
+type PairingProvider interface {
+	IsActive() bool
+	Enable(ctx context.Context, branchName, containerID, localPath, previousBranch string) error
+	Disable(ctx context.Context) error
+	CheckSyncHealth(ctx context.Context) error
+	GetState() PairingState
+}
+
+// PairingState is the daemon's view of pairing state.
+// Mirrors sync.PairingState but defined here to avoid circular imports.
+type PairingState struct {
+	Active         bool     `json:"active"`
+	CurrentBranch  string   `json:"current_branch"`
+	PreviousBranch string   `json:"previous_branch"`
+	ContainerID    string   `json:"container_id"`
+	SyncHealthy    bool     `json:"sync_healthy"`
+	Conflicts      []string `json:"conflicts,omitempty"`
+	SyncStatusText string   `json:"sync_status_text"`
+}
+
 // Config holds daemon configuration.
 type Config struct {
-	SocketPath        string
-	ReconcileInterval time.Duration // default 30s
-	ReconcileFunc     ReconcileFunc // nil = skip reconciliation
+	SocketPath          string
+	ReconcileInterval   time.Duration   // default 30s
+	ReconcileFunc       ReconcileFunc   // nil = skip reconciliation
+	Pairing             PairingProvider // nil = pairing disabled
+	PairingPollInterval time.Duration   // default 5s
 }
 
 // Daemon is the background process managing credentials, state, and tmux hooks.
@@ -93,6 +117,32 @@ func (d *Daemon) Run(ctx context.Context) error {
 		}()
 	}
 
+	// Pairing health poll loop
+	if d.config.Pairing != nil {
+		pollInterval := d.config.PairingPollInterval
+		if pollInterval == 0 {
+			pollInterval = 5 * time.Second
+		}
+		d.wg.Add(1)
+		go func() {
+			defer d.wg.Done()
+			ticker := time.NewTicker(pollInterval)
+			defer ticker.Stop()
+			for {
+				select {
+				case <-ctx.Done():
+					return
+				case <-ticker.C:
+					if d.config.Pairing.IsActive() {
+						if err := d.config.Pairing.CheckSyncHealth(ctx); err != nil {
+							log.Printf("[daemon] pairing health: %v", err)
+						}
+					}
+				}
+			}
+		}()
+	}
+
 	// Wait for shutdown
 	<-ctx.Done()
 	listener.Close()
@@ -132,6 +182,12 @@ func (d *Daemon) dispatch(ctx context.Context, req Request) Response {
 		return d.handlePause(ctx, req.Params)
 	case "unpause":
 		return d.handleUnpause(ctx, req.Params)
+	case "pair":
+		return d.handlePair(ctx, req.Params)
+	case "unpair":
+		return d.handleUnpair(ctx)
+	case "pair-status":
+		return d.handlePairStatus()
 	case "shutdown":
 		return Response{OK: true} // actual shutdown handled by context cancel
 	default:
@@ -189,6 +245,62 @@ func (d *Daemon) handlePause(ctx context.Context, params json.RawMessage) Respon
 
 	// TODO(task-14): Wire to orchestrator.PauseWorkstream
 	return Response{OK: true}
+}
+
+// PairParams holds parameters for the pair action.
+type PairParams struct {
+	Branch         string `json:"branch"`
+	ContainerID    string `json:"container_id"`
+	LocalPath      string `json:"local_path"`
+	PreviousBranch string `json:"previous_branch"`
+}
+
+func (d *Daemon) handlePair(ctx context.Context, params json.RawMessage) Response {
+	if d.config.Pairing == nil {
+		return Response{Error: "pairing not configured"}
+	}
+
+	var p PairParams
+	if err := json.Unmarshal(params, &p); err != nil {
+		return Response{Error: fmt.Sprintf("invalid pair params: %v", err)}
+	}
+	if p.Branch == "" {
+		return Response{Error: "branch is required"}
+	}
+	if p.ContainerID == "" {
+		return Response{Error: "container_id is required"}
+	}
+	if p.LocalPath == "" {
+		return Response{Error: "local_path is required"}
+	}
+
+	if err := d.config.Pairing.Enable(ctx, p.Branch, p.ContainerID, p.LocalPath, p.PreviousBranch); err != nil {
+		return Response{Error: fmt.Sprintf("pair failed: %v", err)}
+	}
+
+	data, _ := json.Marshal(d.config.Pairing.GetState())
+	return Response{OK: true, Data: data}
+}
+
+func (d *Daemon) handleUnpair(ctx context.Context) Response {
+	if d.config.Pairing == nil {
+		return Response{Error: "pairing not configured"}
+	}
+
+	if err := d.config.Pairing.Disable(ctx); err != nil {
+		return Response{Error: fmt.Sprintf("unpair failed: %v", err)}
+	}
+
+	return Response{OK: true}
+}
+
+func (d *Daemon) handlePairStatus() Response {
+	if d.config.Pairing == nil {
+		return Response{Error: "pairing not configured"}
+	}
+
+	data, _ := json.Marshal(d.config.Pairing.GetState())
+	return Response{OK: true, Data: data}
 }
 
 func (d *Daemon) handleUnpause(ctx context.Context, params json.RawMessage) Response {

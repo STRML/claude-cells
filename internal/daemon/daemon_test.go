@@ -200,6 +200,244 @@ func TestDaemonPauseUnpauseActions(t *testing.T) {
 	}
 }
 
+// mockPairing implements PairingProvider for tests.
+type mockPairing struct {
+	mu          sync.Mutex
+	active      bool
+	branch      string
+	containerID string
+	localPath   string
+	prevBranch  string
+	healthy     bool
+	healthCalls int
+	enableErr   error
+	disableErr  error
+	healthErr   error
+}
+
+func (m *mockPairing) IsActive() bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.active
+}
+
+func (m *mockPairing) Enable(ctx context.Context, branch, containerID, localPath, prevBranch string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.enableErr != nil {
+		return m.enableErr
+	}
+	m.active = true
+	m.branch = branch
+	m.containerID = containerID
+	m.localPath = localPath
+	m.prevBranch = prevBranch
+	m.healthy = true
+	return nil
+}
+
+func (m *mockPairing) Disable(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.disableErr != nil {
+		return m.disableErr
+	}
+	m.active = false
+	m.branch = ""
+	m.containerID = ""
+	return nil
+}
+
+func (m *mockPairing) CheckSyncHealth(ctx context.Context) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.healthCalls++
+	return m.healthErr
+}
+
+func (m *mockPairing) GetState() PairingState {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return PairingState{
+		Active:         m.active,
+		CurrentBranch:  m.branch,
+		PreviousBranch: m.prevBranch,
+		ContainerID:    m.containerID,
+		SyncHealthy:    m.healthy,
+	}
+}
+
+func TestDaemonPairAction(t *testing.T) {
+	sockPath := testSocketPath(t)
+	pairing := &mockPairing{}
+
+	d := New(Config{SocketPath: sockPath, Pairing: pairing})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go d.Run(ctx)
+	time.Sleep(100 * time.Millisecond)
+
+	// Valid pair
+	resp := daemonRequest(t, sockPath, "pair", PairParams{
+		Branch:         "feat/auth",
+		ContainerID:    "container-123",
+		LocalPath:      "/path/to/repo",
+		PreviousBranch: "main",
+	})
+	if !resp.OK {
+		t.Errorf("pair: expected OK, got error: %s", resp.Error)
+	}
+
+	// Verify state returned in response
+	var state PairingState
+	if err := json.Unmarshal(resp.Data, &state); err != nil {
+		t.Fatalf("unmarshal pair response: %v", err)
+	}
+	if !state.Active {
+		t.Error("expected pairing to be active")
+	}
+	if state.CurrentBranch != "feat/auth" {
+		t.Errorf("expected branch feat/auth, got %s", state.CurrentBranch)
+	}
+
+	// Pair without branch — should fail
+	resp = daemonRequest(t, sockPath, "pair", PairParams{
+		ContainerID: "container-123",
+		LocalPath:   "/path/to/repo",
+	})
+	if resp.OK {
+		t.Error("expected error for pair without branch")
+	}
+
+	// Pair without container_id — should fail
+	resp = daemonRequest(t, sockPath, "pair", PairParams{
+		Branch:    "feat/auth",
+		LocalPath: "/path/to/repo",
+	})
+	if resp.OK {
+		t.Error("expected error for pair without container_id")
+	}
+}
+
+func TestDaemonUnpairAction(t *testing.T) {
+	sockPath := testSocketPath(t)
+	pairing := &mockPairing{}
+
+	d := New(Config{SocketPath: sockPath, Pairing: pairing})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go d.Run(ctx)
+	time.Sleep(100 * time.Millisecond)
+
+	// Pair first
+	daemonRequest(t, sockPath, "pair", PairParams{
+		Branch:      "feat/auth",
+		ContainerID: "container-123",
+		LocalPath:   "/path/to/repo",
+	})
+
+	// Unpair
+	resp := daemonRequest(t, sockPath, "unpair", nil)
+	if !resp.OK {
+		t.Errorf("unpair: expected OK, got error: %s", resp.Error)
+	}
+
+	// Verify inactive
+	resp = daemonRequest(t, sockPath, "pair-status", nil)
+	if !resp.OK {
+		t.Fatalf("pair-status: expected OK, got error: %s", resp.Error)
+	}
+	var state PairingState
+	if err := json.Unmarshal(resp.Data, &state); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if state.Active {
+		t.Error("expected pairing to be inactive after unpair")
+	}
+}
+
+func TestDaemonPairStatusAction(t *testing.T) {
+	sockPath := testSocketPath(t)
+	pairing := &mockPairing{}
+
+	d := New(Config{SocketPath: sockPath, Pairing: pairing})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go d.Run(ctx)
+	time.Sleep(100 * time.Millisecond)
+
+	// Status when not paired
+	resp := daemonRequest(t, sockPath, "pair-status", nil)
+	if !resp.OK {
+		t.Errorf("pair-status: expected OK, got error: %s", resp.Error)
+	}
+	var state PairingState
+	json.Unmarshal(resp.Data, &state)
+	if state.Active {
+		t.Error("expected inactive pairing initially")
+	}
+}
+
+func TestDaemonPairNoPairingConfigured(t *testing.T) {
+	sockPath := testSocketPath(t)
+
+	d := New(Config{SocketPath: sockPath}) // no Pairing set
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go d.Run(ctx)
+	time.Sleep(100 * time.Millisecond)
+
+	resp := daemonRequest(t, sockPath, "pair", PairParams{
+		Branch:      "feat/auth",
+		ContainerID: "container-123",
+		LocalPath:   "/path",
+	})
+	if resp.OK {
+		t.Error("expected error when pairing not configured")
+	}
+	if resp.Error != "pairing not configured" {
+		t.Errorf("unexpected error: %s", resp.Error)
+	}
+
+	resp = daemonRequest(t, sockPath, "unpair", nil)
+	if resp.OK {
+		t.Error("expected error when pairing not configured")
+	}
+
+	resp = daemonRequest(t, sockPath, "pair-status", nil)
+	if resp.OK {
+		t.Error("expected error when pairing not configured")
+	}
+}
+
+func TestDaemonPairingHealthPoll(t *testing.T) {
+	sockPath := testSocketPath(t)
+	pairing := &mockPairing{active: true, healthy: true}
+
+	d := New(Config{
+		SocketPath:          sockPath,
+		Pairing:             pairing,
+		PairingPollInterval: 50 * time.Millisecond,
+	})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go d.Run(ctx)
+	time.Sleep(200 * time.Millisecond)
+
+	pairing.mu.Lock()
+	calls := pairing.healthCalls
+	pairing.mu.Unlock()
+
+	if calls < 2 {
+		t.Errorf("expected health check to be called at least 2 times, got %d", calls)
+	}
+}
+
 func TestDaemonReconcileLoop(t *testing.T) {
 	sockPath := testSocketPath(t)
 
