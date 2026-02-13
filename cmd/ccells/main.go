@@ -167,8 +167,9 @@ func printKeybindings() {
   prefix + z      Zoom current pane (toggle)
   prefix + d      Detach from session
 
-  Press q or Esc to close.
+  Press Enter to close.
 `)
+	fmt.Scanln()
 }
 
 func printHelp() {
