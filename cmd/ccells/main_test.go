@@ -2,8 +2,10 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -258,6 +260,229 @@ func TestSpinner_Frames(t *testing.T) {
 			t.Errorf("frame[%d] = %q, want %q", i, frame, expectedFrames[i])
 		}
 	}
+}
+
+func TestExtractBranchFromContainerName(t *testing.T) {
+	tests := []struct {
+		name          string
+		containerName string
+		projectName   string
+		want          string
+	}{
+		{"standard name", "ccells-myproject-fix-bug", "myproject", "fix-bug"},
+		{"with leading slash", "/ccells-myproject-auth-system", "myproject", "auth-system"},
+		{"no match", "other-container", "myproject", ""},
+		{"empty container", "", "myproject", ""},
+		{"empty project", "ccells--fix-bug", "", "fix-bug"},
+		{"branch with hyphens", "ccells-proj-multi-word-branch", "proj", "multi-word-branch"},
+		{"partial prefix match", "ccells-myproj-fix", "myproject", ""},
+		{"exact prefix no branch", "ccells-myproject-", "myproject", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractBranchFromContainerName(tt.containerName, tt.projectName)
+			if got != tt.want {
+				t.Errorf("extractBranchFromContainerName(%q, %q) = %q, want %q",
+					tt.containerName, tt.projectName, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAcquireLock(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "lock-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// First lock should succeed
+	lock, err := acquireLock(tmpDir)
+	if err != nil {
+		t.Fatalf("acquireLock() error = %v", err)
+	}
+	if lock == nil {
+		t.Fatal("acquireLock() returned nil lock")
+	}
+
+	// Lock file should exist
+	lockPath := filepath.Join(tmpDir, lockFileName)
+	if _, err := os.Stat(lockPath); os.IsNotExist(err) {
+		t.Error("lock file should exist after acquireLock()")
+	}
+
+	// Second lock should fail (same process is running)
+	_, err = acquireLock(tmpDir)
+	if err == nil {
+		t.Error("second acquireLock() should fail")
+	}
+
+	// Release lock
+	lock.Release()
+
+	// Lock file should be removed
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Error("lock file should be removed after Release()")
+	}
+
+	// Third lock should succeed after release
+	lock2, err := acquireLock(tmpDir)
+	if err != nil {
+		t.Fatalf("acquireLock() after release error = %v", err)
+	}
+	lock2.Release()
+}
+
+func TestAcquireLock_StaleLock(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "lock-stale-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Write a stale lock file with a non-existent PID
+	lockPath := filepath.Join(tmpDir, lockFileName)
+	if err := os.WriteFile(lockPath, []byte("999999999"), 0644); err != nil {
+		t.Fatalf("Failed to write stale lock: %v", err)
+	}
+
+	// Should succeed because the PID doesn't exist
+	lock, err := acquireLock(tmpDir)
+	if err != nil {
+		t.Fatalf("acquireLock() with stale lock error = %v", err)
+	}
+	lock.Release()
+}
+
+func TestLockFile_ReleaseNil(t *testing.T) {
+	// nil lockFile should not panic
+	var l *lockFile
+	l.Release() // should be a no-op
+}
+
+func TestLockFile_ReleaseEmptyPath(t *testing.T) {
+	l := &lockFile{path: ""}
+	l.Release() // should be a no-op
+}
+
+func TestSetupLogFile(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "logfile-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// Save and restore global state
+	oldLogFilePath := logFilePath
+	defer func() { logFilePath = oldLogFilePath }()
+
+	cleanup := setupLogFile(tmpDir)
+	defer cleanup()
+
+	// Log directory should be created
+	logDir := filepath.Join(tmpDir, "logs")
+	if _, err := os.Stat(logDir); os.IsNotExist(err) {
+		t.Error("logs directory should be created")
+	}
+
+	// Log file should exist
+	logPath := filepath.Join(logDir, "ccells.log")
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		t.Error("ccells.log should be created")
+	}
+
+	// logFilePath global should be set
+	if logFilePath != logPath {
+		t.Errorf("logFilePath = %q, want %q", logFilePath, logPath)
+	}
+}
+
+func TestSetupLogFile_InvalidDir(t *testing.T) {
+	// Save and restore global state
+	oldLogFilePath := logFilePath
+	defer func() { logFilePath = oldLogFilePath }()
+
+	// Use a path that can't be created
+	cleanup := setupLogFile("/dev/null/impossible")
+	defer cleanup()
+
+	// Should return a no-op cleanup without crashing
+}
+
+func TestPrintAbnormalExit_WithError(t *testing.T) {
+	// Save and restore global state
+	oldLogFilePath := logFilePath
+	logFilePath = "/tmp/claude/test.log"
+	defer func() { logFilePath = oldLogFilePath }()
+
+	// Redirect stderr to capture output
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	printAbnormalExit(fmt.Errorf("test error"))
+
+	w.Close()
+	os.Stderr = oldStderr
+
+	buf := make([]byte, 1024)
+	n, _ := r.Read(buf)
+	output := string(buf[:n])
+
+	if !strings.Contains(output, "terminated abnormally") {
+		t.Error("expected 'terminated abnormally' in output")
+	}
+	if !strings.Contains(output, "test error") {
+		t.Error("expected error message in output")
+	}
+	if !strings.Contains(output, "/tmp/claude/test.log") {
+		t.Error("expected log file path in output")
+	}
+}
+
+func TestPrintAbnormalExit_NilError(t *testing.T) {
+	oldLogFilePath := logFilePath
+	logFilePath = ""
+	defer func() { logFilePath = oldLogFilePath }()
+
+	oldStderr := os.Stderr
+	r, w, _ := os.Pipe()
+	os.Stderr = w
+
+	printAbnormalExit(nil)
+
+	w.Close()
+	os.Stderr = oldStderr
+
+	buf := make([]byte, 1024)
+	n, _ := r.Read(buf)
+	output := string(buf[:n])
+
+	if !strings.Contains(output, "terminated abnormally") {
+		t.Error("expected 'terminated abnormally' in output")
+	}
+	// Should not contain "Error:" line when err is nil
+	if strings.Contains(output, "Error:") {
+		t.Error("should not contain 'Error:' when err is nil")
+	}
+	// Should not contain "Log file:" when logFilePath is empty
+	if strings.Contains(output, "Log file:") {
+		t.Error("should not contain 'Log file:' when logFilePath is empty")
+	}
+}
+
+func TestListExistingWorktrees(t *testing.T) {
+	// Create a temp directory to simulate /tmp/ccells/worktrees
+	tmpDir, err := os.MkdirTemp("", "worktree-test-*")
+	if err != nil {
+		t.Fatalf("Failed to create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	// The function reads from /tmp/ccells/worktrees which may or may not exist
+	// Just verify it doesn't panic
+	result := listExistingWorktrees()
+	_ = result
 }
 
 // BenchmarkSpinner benchmarks spinner creation

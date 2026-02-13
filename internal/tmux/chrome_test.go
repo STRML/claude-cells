@@ -346,6 +346,125 @@ func TestFormatPowerlineLeft_LongBranch(t *testing.T) {
 	}
 }
 
+func TestAttachCommand(t *testing.T) {
+	c := NewClient("test-socket")
+	cmd := c.AttachCommand("my-session")
+
+	// Should be a tmux command
+	if !strings.HasSuffix(cmd.Path, "tmux") && cmd.Path != "tmux" {
+		// Path could be absolute or just "tmux"
+		args := cmd.Args
+		if len(args) == 0 || args[0] != "tmux" {
+			t.Errorf("expected tmux command, got path=%q args=%v", cmd.Path, cmd.Args)
+		}
+	}
+
+	// Check args contain socket and session
+	args := cmd.Args
+	wantArgs := []string{"tmux", "-L", "test-socket", "attach-session", "-t", "my-session"}
+	if len(args) != len(wantArgs) {
+		t.Fatalf("Args length = %d, want %d: %v", len(args), len(wantArgs), args)
+	}
+	for i, want := range wantArgs {
+		if args[i] != want {
+			t.Errorf("Args[%d] = %q, want %q", i, args[i], want)
+		}
+	}
+}
+
+func TestAttachCommand_DifferentSockets(t *testing.T) {
+	tests := []struct {
+		socket  string
+		session string
+	}{
+		{"ccells-abc123", "ccells"},
+		{"default", "main-session"},
+		{"my-socket", "session-with-dashes"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.socket+"/"+tt.session, func(t *testing.T) {
+			c := NewClient(tt.socket)
+			cmd := c.AttachCommand(tt.session)
+			args := cmd.Args
+			if args[2] != tt.socket {
+				t.Errorf("socket arg = %q, want %q", args[2], tt.socket)
+			}
+			if args[5] != tt.session {
+				t.Errorf("session arg = %q, want %q", args[5], tt.session)
+			}
+		})
+	}
+}
+
+func TestAbbreviatePath_UTF8(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{"unicode dirs", "/日本語/パス/project", "/日/パ/project"},
+		{"emoji dir", "/🏠/code/project", "/🏠/c/project"},
+		{"mixed", "/ascii/日本語/last", "/a/日/last"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AbbreviatePath(tt.path)
+			if got != tt.want {
+				t.Errorf("AbbreviatePath(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAbbreviatePath_EdgeCases(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+	}{
+		{"double slash", "//double//slash"},
+		{"trailing slash", "/a/b/c/"},
+		{"dot path", "./relative/path"},
+		{"dotdot path", "../parent/path"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Just verify it doesn't panic
+			got := AbbreviatePath(tt.path)
+			if got == "" && tt.path != "" {
+				t.Errorf("AbbreviatePath(%q) returned empty string", tt.path)
+			}
+		})
+	}
+}
+
+func TestFormatPaneBorder_AllStatuses(t *testing.T) {
+	statuses := []struct {
+		status string
+		color  string
+	}{
+		{"running", colorGreen},
+		{"paused", colorYellow},
+		{"exited", colorGray},
+		{"unknown", colorGreen}, // default
+	}
+	for _, tt := range statuses {
+		t.Run(tt.status, func(t *testing.T) {
+			border := FormatPaneBorder("ws", tt.status, 0, "")
+			if !strings.Contains(border, "#[fg="+tt.color+"]●") {
+				t.Errorf("status %q should use color %s", tt.status, tt.color)
+			}
+		})
+	}
+}
+
+func TestFormatStatusLine_Keyhints(t *testing.T) {
+	line := FormatStatusLine([]StatusWorkstream{{Name: "a", Status: "running"}}, "C-a", false)
+	// Single-line mode should include keyhints with the correct prefix
+	if !strings.Contains(line, "^a+n") {
+		t.Error("expected keyhints with ^a prefix in single-line mode")
+	}
+}
+
 func TestColorConstants(t *testing.T) {
 	// Verify color constants match expected tmux colour names
 	tests := []struct {
