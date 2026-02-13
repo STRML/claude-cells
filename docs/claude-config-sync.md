@@ -131,4 +131,4 @@ The PTY startup script creates ccells-specific commands in the mounted config di
 - **`.credentials.json` must be inside `~/.claude/`** for Claude Code to find it (note the leading dot!)
 - **settings.json controls model choice** - must be synced
 - **~/.claude.json is separate** from ~/.claude/ directory
-- **Containers run as root** with `IS_SANDBOX=1` for `--dangerously-skip-permissions`
+- **Containers run as root** with `bypassPermissions` mode set in settings.json (skips workspace trust dialog)

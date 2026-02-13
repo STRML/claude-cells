@@ -23,14 +23,39 @@ type createResultMsg struct {
 	err error
 }
 
+// tickMsg drives the spinner animation.
+type tickMsg time.Time
+
+// Braille spinner frames.
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+const spinnerInterval = 80 * time.Millisecond
+
+// ANSI color helpers for the create dialog.
+const (
+	cBold      = "\033[1m"
+	cDim       = "\033[2m"
+	cReset     = "\033[0m"
+	cCyan      = "\033[36m"
+	cCyanBold  = "\033[1;36m"
+	cMagenta   = "\033[35m"
+	cGreen     = "\033[32m"
+	cGreenBold = "\033[1;32m"
+	cYellow    = "\033[33m"
+	cRed       = "\033[31m"
+	cGray      = "\033[90m"
+	cWhite     = "\033[97m"
+)
+
 // createDialog is a Bubble Tea model for the interactive create dialog.
 // Invoked via: ccells create --interactive
 // Runs inside tmux display-popup or the initial pane.
 //
-// Flow: 0=prompt → 1=summarizing → 2=confirm → 3=creating
+// Flow: 0=prompt → 1=generating (animated) → 2=creating (animated, auto-triggered)
 // Title is generated via Claude CLI, branch name is derived from the title.
+// No confirmation step — creation starts automatically after title generation.
 type createDialog struct {
-	step     int // 0=prompt, 1=summarizing, 2=confirm, 3=creating
+	step     int // 0=prompt, 1=generating, 2=creating
 	prompt   string
 	title    string // AI-generated short title
 	branch   string
@@ -39,6 +64,7 @@ type createDialog struct {
 	done     bool
 	stateDir string
 	runtime  string
+	frame    int // spinner frame index
 }
 
 func newCreateDialog(stateDir, runtime string) createDialog {
@@ -53,8 +79,21 @@ func (m createDialog) Init() tea.Cmd {
 	return nil
 }
 
+func spinnerTick() tea.Cmd {
+	return tea.Tick(spinnerInterval, func(t time.Time) tea.Msg {
+		return tickMsg(t)
+	})
+}
+
 func (m createDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tickMsg:
+		// Advance spinner frame during animated steps
+		if m.step == 1 || m.step == 2 {
+			m.frame = (m.frame + 1) % len(spinnerFrames)
+			return m, spinnerTick()
+		}
+		return m, nil
 	case summarizeResultMsg:
 		if msg.err != nil {
 			// Claude failed — fall back to generating branch from prompt directly
@@ -64,19 +103,32 @@ func (m createDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.title = msg.title
 			m.branch = workstream.GenerateBranchName(msg.title)
 		}
+		// Auto-advance to creating (no confirmation step)
 		m.step = 2
-		return m, nil
+		m.frame = 0
+		stateDir := m.stateDir
+		branch := m.branch
+		prompt := m.prompt
+		runtime := m.runtime
+		return m, tea.Batch(spinnerTick(), func() tea.Msg {
+			return createResultMsg{err: runCreate(stateDir, branch, prompt, runtime)}
+		})
 	case createResultMsg:
 		if msg.err != nil {
 			m.err = msg.err
-			m.step = 2 // back to confirm
+			m.step = 0 // back to prompt for retry
+			m.input = m.prompt
 			return m, nil
 		}
 		m.done = true
 		return m, tea.Quit
 	case tea.KeyMsg:
-		if m.step == 1 || m.step == 3 {
-			// Summarizing or creating — ignore keys
+		if m.step == 1 || m.step == 2 {
+			// Generating or creating — only allow quit
+			if msg.String() == "ctrl+c" || msg.String() == "esc" {
+				m.done = true
+				return m, tea.Quit
+			}
 			return m, nil
 		}
 		switch msg.String() {
@@ -104,31 +156,23 @@ func (m createDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 func (m createDialog) handleEnter() (tea.Model, tea.Cmd) {
-	switch m.step {
-	case 0: // prompt entered → generate title via Claude
-		m.prompt = strings.TrimSpace(m.input)
-		if m.prompt == "" {
-			m.err = fmt.Errorf("prompt cannot be empty")
-			return m, nil
-		}
-		m.err = nil
-		m.input = ""
-		m.step = 1
-		prompt := m.prompt
-		return m, func() tea.Msg {
-			return generateTitle(prompt)
-		}
-	case 2: // confirmed — launch async create
-		m.step = 3
-		stateDir := m.stateDir
-		branch := m.branch
-		prompt := m.prompt
-		runtime := m.runtime
-		return m, func() tea.Msg {
-			return createResultMsg{err: runCreate(stateDir, branch, prompt, runtime)}
-		}
+	if m.step != 0 {
+		return m, nil
 	}
-	return m, nil
+	// prompt entered → generate title via Claude
+	m.prompt = strings.TrimSpace(m.input)
+	if m.prompt == "" {
+		m.err = fmt.Errorf("prompt cannot be empty")
+		return m, nil
+	}
+	m.err = nil
+	m.input = ""
+	m.step = 1
+	m.frame = 0
+	prompt := m.prompt
+	return m, tea.Batch(spinnerTick(), func() tea.Msg {
+		return generateTitle(prompt)
+	})
 }
 
 func (m createDialog) View() tea.View {
@@ -137,37 +181,38 @@ func (m createDialog) View() tea.View {
 	}
 
 	var b strings.Builder
-	b.WriteString("  Create New Workstream\n")
-	b.WriteString("  ─────────────────────\n\n")
+	b.WriteString("\n")
+
+	// Header
+	b.WriteString(fmt.Sprintf("  %s⚡ N E W   W O R K S T R E A M%s\n", cCyanBold, cReset))
+	b.WriteString(fmt.Sprintf("  %s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n", cDim, cReset))
+
+	spinner := spinnerFrames[m.frame%len(spinnerFrames)]
 
 	switch m.step {
 	case 0:
-		b.WriteString("  What should this workstream do?\n\n")
-		b.WriteString(fmt.Sprintf("  > %s█\n", m.input))
+		b.WriteString("\n")
+		b.WriteString(fmt.Sprintf("  %sDescribe your task:%s\n\n", cWhite, cReset))
+		b.WriteString(fmt.Sprintf("  %s›%s %s%s█%s\n", cCyan, cReset, cWhite, m.input, cReset))
 	case 1:
-		b.WriteString(fmt.Sprintf("  Task: %s\n\n", m.prompt))
-		b.WriteString("  Generating title...\n")
+		b.WriteString("\n")
+		b.WriteString(fmt.Sprintf("  %sTask%s  %s\n\n", cGray, cReset, m.prompt))
+		b.WriteString(fmt.Sprintf("  %s%s%s %sGenerating title...%s\n", cCyan, spinner, cReset, cDim, cReset))
 	case 2:
+		b.WriteString("\n")
 		if m.title != "" {
-			b.WriteString(fmt.Sprintf("  Title: %s\n", m.title))
+			b.WriteString(fmt.Sprintf("  %sTitle%s   %s%s%s\n", cGray, cReset, cWhite, m.title, cReset))
 		}
-		b.WriteString(fmt.Sprintf("  Task: %s\n", m.prompt))
-		b.WriteString(fmt.Sprintf("  Branch: %s\n\n", m.branch))
-		b.WriteString("  Press Enter to create, Esc to cancel\n")
-	case 3:
-		if m.title != "" {
-			b.WriteString(fmt.Sprintf("  Title: %s\n", m.title))
-		}
-		b.WriteString(fmt.Sprintf("  Task: %s\n", m.prompt))
-		b.WriteString(fmt.Sprintf("  Branch: %s\n\n", m.branch))
-		b.WriteString("  Creating workstream...\n")
+		b.WriteString(fmt.Sprintf("  %sTask%s    %s\n", cGray, cReset, m.prompt))
+		b.WriteString(fmt.Sprintf("  %sBranch%s  %s%s%s\n\n", cGray, cReset, cGreen, m.branch, cReset))
+		b.WriteString(fmt.Sprintf("  %s%s%s %sCreating workstream...%s\n", cCyan, spinner, cReset, cDim, cReset))
 	}
 
 	if m.err != nil {
-		b.WriteString(fmt.Sprintf("\n  Error: %v\n", m.err))
+		b.WriteString(fmt.Sprintf("\n  %s✗ %v%s\n", cRed, m.err, cReset))
 	}
 
-	b.WriteString("\n  (Esc to cancel)")
+	b.WriteString(fmt.Sprintf("\n  %s(Esc to cancel)%s", cDim, cReset))
 	return tea.NewView(b.String())
 }
 
@@ -191,7 +236,6 @@ Task: %s`, taskPrompt)
 	title = strings.Trim(title, `"'`)
 	// Strip markdown code blocks if wrapped
 	if idx := strings.Index(title, "```"); idx >= 0 {
-		// Simple strip: remove lines starting with ```
 		var lines []string
 		for _, line := range strings.Split(title, "\n") {
 			if !strings.HasPrefix(strings.TrimSpace(line), "```") {
