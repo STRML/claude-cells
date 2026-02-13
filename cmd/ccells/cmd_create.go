@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"strings"
 )
 
@@ -20,11 +21,17 @@ func validateBranchName(branch string) error {
 			return fmt.Errorf("branch name contains invalid character: %q", r)
 		}
 	}
-	if strings.Contains(branch, "..") {
-		return fmt.Errorf("branch name cannot contain '..'")
+	if strings.Contains(branch, "..") || strings.Contains(branch, "//") {
+		return fmt.Errorf("branch name contains invalid sequence")
 	}
 	if strings.HasPrefix(branch, "/") || strings.HasSuffix(branch, "/") {
 		return fmt.Errorf("branch name cannot start or end with '/'")
+	}
+	if strings.HasPrefix(branch, "-") {
+		return fmt.Errorf("branch name cannot start with '-'")
+	}
+	if strings.HasSuffix(branch, ".lock") {
+		return fmt.Errorf("branch name cannot end with '.lock'")
 	}
 	return nil
 }
@@ -35,7 +42,7 @@ func runCreate(stateDir, branch, prompt, runtime string) error {
 		return err
 	}
 
-	daemonSock := stateDir + "/daemon.sock"
+	daemonSock := filepath.Join(stateDir, "daemon.sock")
 
 	params, _ := json.Marshal(map[string]string{
 		"branch":  branch,

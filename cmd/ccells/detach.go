@@ -7,9 +7,9 @@ import (
 
 // DetachInfo holds info for the detach summary.
 type DetachInfo struct {
-	Workstreams []DetachWorkstream
-	DaemonPID   int
-	RepoID      string
+	Workstreams   []DetachWorkstream
+	DaemonRunning bool
+	RepoID        string
 }
 
 // DetachWorkstream holds info about a workstream for the detach summary.
@@ -47,8 +47,8 @@ func formatDetachSummary(info DetachInfo) string {
 		b.WriteString("  No workstreams running.\n\n")
 	}
 
-	if info.DaemonPID > 0 {
-		b.WriteString(fmt.Sprintf("  Daemon: running (PID %d)\n", info.DaemonPID))
+	if info.DaemonRunning {
+		b.WriteString("  Daemon: running\n")
 	}
 
 	b.WriteString(fmt.Sprintf("  Reattach: ccells attach\n"))

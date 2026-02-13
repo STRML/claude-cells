@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	"github.com/STRML/claude-cells/internal/daemon"
 	"github.com/STRML/claude-cells/internal/docker"
@@ -52,7 +53,6 @@ func runUp(ctx context.Context, repoID, repoPath, stateDir, runtime string) erro
 	if err != nil {
 		return fmt.Errorf("docker client: %w", err)
 	}
-	defer dockerClient.Close()
 
 	gitFactory := func(path string) git.GitClient {
 		return git.New(path)
@@ -76,8 +76,10 @@ func runUp(ctx context.Context, repoID, repoPath, stateDir, runtime string) erro
 		OnUnpause:  handlers.handleUnpause,
 	})
 	daemonCtx, daemonCancel := context.WithCancel(ctx)
-	defer daemonCancel()
+	var daemonWg sync.WaitGroup
+	daemonWg.Add(1)
 	go func() {
+		defer daemonWg.Done()
 		if err := d.Run(daemonCtx); err != nil && daemonCtx.Err() == nil {
 			fmt.Fprintf(os.Stderr, "daemon error: %v\n", err)
 		}
@@ -88,6 +90,11 @@ func runUp(ctx context.Context, repoID, repoPath, stateDir, runtime string) erro
 
 	// Print detach summary after tmux exits
 	printDetachSummary(repoID, stateDir)
+
+	// Shut down daemon before closing Docker client to avoid races
+	daemonCancel()
+	daemonWg.Wait()
+	dockerClient.Close()
 
 	return attachErr
 }
@@ -107,11 +114,11 @@ func printDetachSummary(repoID, stateDir string) {
 		RepoID: repoID,
 	}
 
-	// Try to get daemon PID
+	// Check if daemon is still reachable
 	daemonSock := filepath.Join(stateDir, "daemon.sock")
 	resp, err := sendDaemonRequestWithResponse(daemonSock, "ping", nil)
 	if err == nil && resp.OK {
-		info.DaemonPID = os.Getpid() // approximate — daemon is in-process
+		info.DaemonRunning = true
 	}
 
 	fmt.Print(formatDetachSummary(info))

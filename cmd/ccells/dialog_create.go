@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"strings"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 )
@@ -19,7 +20,6 @@ type createDialog struct {
 	step     int // 0=prompt, 1=branch, 2=confirm, 3=creating
 	prompt   string
 	branch   string
-	cursor   int
 	input    string
 	err      error
 	done     bool
@@ -62,7 +62,8 @@ func (m createDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleEnter()
 		case "backspace":
 			if len(m.input) > 0 {
-				m.input = m.input[:len(m.input)-1]
+				_, size := utf8.DecodeLastRuneInString(m.input)
+				m.input = m.input[:len(m.input)-size]
 			}
 		default:
 			if len(msg.String()) == 1 {

@@ -15,13 +15,11 @@ type mergeDialog struct {
 	selected int
 	err      error
 	done     bool
-	stateDir string
 }
 
-func newMergeDialog(stateDir string, workstreams []string) mergeDialog {
+func newMergeDialog(workstreams []string) mergeDialog {
 	return mergeDialog{
-		stateDir: stateDir,
-		items:    workstreams,
+		items: workstreams,
 	}
 }
 
@@ -85,11 +83,9 @@ func (m mergeDialog) View() tea.View {
 			}
 			b.WriteString(fmt.Sprintf("  %s%s\n", cursor, ws))
 		}
-	} else if len(m.items) > 0 {
+	} else {
 		b.WriteString(fmt.Sprintf("  Create PR for '%s'?\n\n", m.items[m.selected]))
 		b.WriteString("  Press Enter to create PR, Esc to cancel\n")
-	} else {
-		b.WriteString("  No workstreams available.\n")
 	}
 
 	if m.err != nil {

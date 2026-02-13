@@ -8,6 +8,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"strings"
 	"sync"
 	"time"
 )
@@ -93,6 +94,7 @@ func (d *Daemon) Run(ctx context.Context) error {
 					return
 				default:
 					log.Printf("[daemon] accept: %v", err)
+					time.Sleep(100 * time.Millisecond)
 					continue
 				}
 			}
@@ -228,13 +230,40 @@ type WorkstreamParams struct {
 	Name string `json:"name"`
 }
 
+// isValidBranchName validates branch names at the daemon level.
+func isValidBranchName(branch string) error {
+	if branch == "" {
+		return fmt.Errorf("branch is required")
+	}
+	if len(branch) > 200 {
+		return fmt.Errorf("branch name too long")
+	}
+	for _, r := range branch {
+		if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
+			r == '.' || r == '_' || r == '/' || r == '-') {
+			return fmt.Errorf("branch name contains invalid character: %q", r)
+		}
+	}
+	if strings.Contains(branch, "..") || strings.Contains(branch, "//") {
+		return fmt.Errorf("branch name contains invalid sequence")
+	}
+	if strings.HasPrefix(branch, "/") || strings.HasSuffix(branch, "/") ||
+		strings.HasPrefix(branch, "-") || strings.HasSuffix(branch, ".lock") {
+		return fmt.Errorf("branch name has invalid prefix or suffix")
+	}
+	return nil
+}
+
 func (d *Daemon) handleCreate(ctx context.Context, params json.RawMessage) Response {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
 	var p CreateParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return Response{Error: fmt.Sprintf("invalid create params: %v", err)}
 	}
-	if p.Branch == "" {
-		return Response{Error: "branch is required"}
+	if err := isValidBranchName(p.Branch); err != nil {
+		return Response{Error: err.Error()}
 	}
 
 	if d.config.OnCreate == nil {
@@ -244,11 +273,17 @@ func (d *Daemon) handleCreate(ctx context.Context, params json.RawMessage) Respo
 		return Response{Error: fmt.Sprintf("create failed: %v", err)}
 	}
 
-	data, _ := json.Marshal(map[string]string{"status": "created", "branch": p.Branch})
+	data, err := json.Marshal(map[string]string{"status": "created", "branch": p.Branch})
+	if err != nil {
+		return Response{Error: fmt.Sprintf("marshal response: %v", err)}
+	}
 	return Response{OK: true, Data: data}
 }
 
 func (d *Daemon) handleRemove(ctx context.Context, params json.RawMessage) Response {
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+
 	var p WorkstreamParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return Response{Error: fmt.Sprintf("invalid rm params: %v", err)}
@@ -267,6 +302,9 @@ func (d *Daemon) handleRemove(ctx context.Context, params json.RawMessage) Respo
 }
 
 func (d *Daemon) handlePause(ctx context.Context, params json.RawMessage) Response {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
 	var p WorkstreamParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return Response{Error: fmt.Sprintf("invalid pause params: %v", err)}
@@ -293,6 +331,9 @@ type PairParams struct {
 }
 
 func (d *Daemon) handlePair(ctx context.Context, params json.RawMessage) Response {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
 	if d.config.Pairing == nil {
 		return Response{Error: "pairing not configured"}
 	}
@@ -315,11 +356,17 @@ func (d *Daemon) handlePair(ctx context.Context, params json.RawMessage) Respons
 		return Response{Error: fmt.Sprintf("pair failed: %v", err)}
 	}
 
-	data, _ := json.Marshal(d.config.Pairing.GetState())
+	data, err := json.Marshal(d.config.Pairing.GetState())
+	if err != nil {
+		return Response{Error: fmt.Sprintf("marshal response: %v", err)}
+	}
 	return Response{OK: true, Data: data}
 }
 
 func (d *Daemon) handleUnpair(ctx context.Context) Response {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
 	if d.config.Pairing == nil {
 		return Response{Error: "pairing not configured"}
 	}
@@ -336,11 +383,17 @@ func (d *Daemon) handlePairStatus() Response {
 		return Response{Error: "pairing not configured"}
 	}
 
-	data, _ := json.Marshal(d.config.Pairing.GetState())
+	data, err := json.Marshal(d.config.Pairing.GetState())
+	if err != nil {
+		return Response{Error: fmt.Sprintf("marshal response: %v", err)}
+	}
 	return Response{OK: true, Data: data}
 }
 
 func (d *Daemon) handleUnpause(ctx context.Context, params json.RawMessage) Response {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+
 	var p WorkstreamParams
 	if err := json.Unmarshal(params, &p); err != nil {
 		return Response{Error: fmt.Sprintf("invalid unpause params: %v", err)}
@@ -359,5 +412,7 @@ func (d *Daemon) handleUnpause(ctx context.Context, params json.RawMessage) Resp
 }
 
 func writeResponse(conn net.Conn, resp Response) {
-	json.NewEncoder(conn).Encode(resp)
+	if err := json.NewEncoder(conn).Encode(resp); err != nil {
+		log.Printf("[daemon] write response: %v", err)
+	}
 }

@@ -51,9 +51,15 @@ func (c *Client) ListPanes(ctx context.Context, session string) ([]PaneInfo, err
 		if len(fields) >= 7 {
 			p.Dead = fields[6] == "1"
 		}
-		fmt.Sscanf(fields[1], "%d", &p.Index)
-		fmt.Sscanf(fields[3], "%d", &p.Width)
-		fmt.Sscanf(fields[4], "%d", &p.Height)
+		if _, err := fmt.Sscanf(fields[1], "%d", &p.Index); err != nil {
+			continue
+		}
+		if _, err := fmt.Sscanf(fields[3], "%d", &p.Width); err != nil {
+			continue
+		}
+		if _, err := fmt.Sscanf(fields[4], "%d", &p.Height); err != nil {
+			continue
+		}
 		panes = append(panes, p)
 	}
 	return panes, nil

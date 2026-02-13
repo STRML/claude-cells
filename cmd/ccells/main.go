@@ -536,7 +536,7 @@ func runMergeInteractive(ctx context.Context, repoID, stateDir string) error {
 	if err != nil {
 		return err
 	}
-	m := newMergeDialog(stateDir, names)
+	m := newMergeDialog(names)
 	p := tea.NewProgram(m)
 	_, err = p.Run()
 	return err

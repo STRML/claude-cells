@@ -11,8 +11,8 @@ func TestFormatDetachSummary(t *testing.T) {
 			{Name: "auth-system", Status: "running", CPU: "2.3%", Memory: "128MB", PR: "#42"},
 			{Name: "fix-bug", Status: "paused", CPU: "0.0%", Memory: "64MB"},
 		},
-		DaemonPID: 12345,
-		RepoID:    "test-repo",
+		DaemonRunning: true,
+		RepoID:        "test-repo",
 	}
 
 	out := formatDetachSummary(info)
@@ -20,8 +20,8 @@ func TestFormatDetachSummary(t *testing.T) {
 	if !strings.Contains(out, "auth-system") {
 		t.Error("expected auth-system in output")
 	}
-	if !strings.Contains(out, "PID 12345") {
-		t.Error("expected daemon PID in output")
+	if !strings.Contains(out, "Daemon: running") {
+		t.Error("expected daemon status in output")
 	}
 	if !strings.Contains(out, "ccells attach") {
 		t.Error("expected reattach command")

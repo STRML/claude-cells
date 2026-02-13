@@ -3,6 +3,7 @@ package tmux
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"strings"
 )
 
@@ -75,6 +76,38 @@ func FormatPrefixHint(prefix string) string {
 	return prefix
 }
 
+// tmuxVersionAtLeast returns true if the tmux version is >= major.minor.
+func tmuxVersionAtLeast(c *Client, ctx context.Context, major, minor int) bool {
+	ver, err := c.Version(ctx)
+	if err != nil {
+		return false
+	}
+	parts := strings.SplitN(ver, ".", 3)
+	if len(parts) < 1 {
+		return false
+	}
+	maj, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return false
+	}
+	if maj > major {
+		return true
+	}
+	if maj < major {
+		return false
+	}
+	if len(parts) < 2 {
+		return minor == 0
+	}
+	// Strip non-numeric suffix (e.g., "4a" → "4")
+	minStr := strings.TrimRight(parts[1], "abcdefghijklmnopqrstuvwxyz")
+	min, err := strconv.Atoi(minStr)
+	if err != nil {
+		return false
+	}
+	return min >= minor
+}
+
 // escapeShellArg quotes a string for safe embedding in shell commands.
 // Uses single-quoting with proper escaping of embedded single quotes.
 func escapeShellArg(s string) string {
@@ -116,9 +149,10 @@ func (c *Client) ConfigureChrome(ctx context.Context, session, ccellsBin string)
 	}
 
 	// Multi-line status if tmux >= 3.4
-	ver, _ := c.Version(ctx)
-	if ver >= "3.4" {
-		c.run(ctx, "set-option", "-t", session, "-g", "status", "2")
+	if tmuxVersionAtLeast(c, ctx, 3, 4) {
+		if _, err := c.run(ctx, "set-option", "-t", session, "-g", "status", "2"); err != nil {
+			return fmt.Errorf("set status lines: %w", err)
+		}
 	}
 
 	// Keybindings
@@ -126,8 +160,8 @@ func (c *Client) ConfigureChrome(ctx context.Context, session, ccellsBin string)
 		"n": fmt.Sprintf("display-popup -E -w 60 -h 20 %s create --interactive", bin),
 		"d": fmt.Sprintf("display-popup -E -w 60 -h 15 %s rm --interactive", bin),
 		"m": fmt.Sprintf("display-popup -E -w 70 -h 20 %s merge --interactive", bin),
-		"p": fmt.Sprintf("run-shell '%s pause #{@ccells-workstream}'", bin),
-		"r": fmt.Sprintf("run-shell '%s unpause #{@ccells-workstream}'", bin),
+		"p": fmt.Sprintf("run-shell \"%s pause #{@ccells-workstream}\"", bin),
+		"r": fmt.Sprintf("run-shell \"%s unpause #{@ccells-workstream}\"", bin),
 		"s": "refresh-client -S",
 		"?": fmt.Sprintf("display-popup -E -w 50 -h 15 %s help --keybindings", bin),
 	}
