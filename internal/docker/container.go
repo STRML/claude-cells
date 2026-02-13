@@ -107,6 +107,9 @@ func (c *Client) CreateContainer(ctx context.Context, cfg *ContainerConfig) (str
 		env = append(env, fmt.Sprintf("TZ=%s", cfg.Timezone))
 	}
 
+	// Mark as a ccells-managed container to prevent nesting
+	env = append(env, "CCELLS_SESSION=1")
+
 	containerCfg := &container.Config{
 		Image: cfg.Image,
 		Cmd:   []string{"sleep", "infinity"},

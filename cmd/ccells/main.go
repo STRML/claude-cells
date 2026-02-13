@@ -216,6 +216,13 @@ func main() {
 		}
 	}
 
+	// Prevent nesting: ccells cannot run inside a ccells-managed container
+	if os.Getenv("CCELLS_SESSION") == "1" {
+		fmt.Fprintf(os.Stderr, "Error: ccells cannot run inside a ccells-managed container.\n")
+		fmt.Fprintf(os.Stderr, "You are already in a Claude Code workstream.\n")
+		os.Exit(1)
+	}
+
 	// Determine command
 	cmd := parseCommand(args)
 
@@ -562,7 +569,8 @@ func listWorkstreamNames(ctx context.Context, repoID string) ([]string, error) {
 	return names, nil
 }
 
-// runStatusTmux prints a compact status string for the tmux status line.
+// runStatusTmux updates the tmux session variable with colored workstream status.
+// Prints nothing to stdout — tmux reads the session variable directly.
 func runStatusTmux(ctx context.Context, repoID string) error {
 	socketName := fmt.Sprintf("ccells-%s", repoID)
 	client := tmux.NewClient(socketName)
@@ -580,14 +588,30 @@ func runStatusTmux(ctx context.Context, repoID string) error {
 		if ws == "" {
 			continue
 		}
+
+		// Determine status from pane metadata
+		status := "running"
+		if paneStatus, _ := client.GetPaneOption(ctx, p.ID, "@ccells-status"); paneStatus == "paused" {
+			status = "paused"
+		} else if p.Dead {
+			status = "exited"
+		}
+
 		sw := tmux.StatusWorkstream{
 			Name:   ws,
-			Status: "running",
+			Status: status,
 		}
 		workstreams = append(workstreams, sw)
 	}
 
-	fmt.Print(tmux.FormatStatusLine(workstreams, prefix, false))
+	// Build colored status line and set as session variable
+	// tmux interprets #[...] format sequences in option values
+	colored := tmux.FormatStatusLine(workstreams, prefix, false)
+	if err := client.SetSessionOption(ctx, "ccells", "@ccells-ws-text", colored); err != nil {
+		// Fallback: print plain text (tmux will show it as-is from #() output)
+		fmt.Print(colored)
+	}
+
 	return nil
 }
 
