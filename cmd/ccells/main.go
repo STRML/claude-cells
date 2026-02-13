@@ -614,6 +614,31 @@ func runCreateInteractive(stateDir, runtime string) error {
 	if err != nil {
 		return fmt.Errorf("docker not found: %w", err)
 	}
+
+	// Spawn background auto-accepter for the "Bypass Permissions mode" prompt.
+	// Claude Code shows an interactive confirmation when --dangerously-skip-permissions is used.
+	// The old PTY-based TUI auto-accepted this; in tmux we use send-keys instead.
+	// This process survives syscall.Exec since it's a separate child process.
+	exec.Command("sh", "-c", `
+		sleep 2
+		for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+			content=$(tmux capture-pane -p 2>/dev/null)
+			if echo "$content" | grep -q "Bypass Permissions mode"; then
+				sleep 0.2
+				tmux send-keys Down
+				sleep 0.1
+				tmux send-keys Enter
+				exit 0
+			fi
+			if echo "$content" | grep -q "Enter to confirm"; then
+				sleep 0.2
+				tmux send-keys Enter
+				exit 0
+			fi
+			sleep 1
+		done
+	`).Start()
+
 	return syscall.Exec(dockerPath, []string{
 		"docker", "exec", "-it", final.containerName,
 		rt, "--dangerously-skip-permissions",
