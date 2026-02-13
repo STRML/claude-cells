@@ -202,10 +202,9 @@ func (c *Client) ConfigureChrome(ctx context.Context, session, ccellsBin string)
 		return fmt.Errorf("set status-left-length: %w", err)
 	}
 
-	// Status right: reads colored content from session variable (set by `ccells status --format=tmux`)
-	// The command updates the session variable, then status-right reads it.
-	// This allows full #[...] color support since tmux interprets format sequences in option values.
-	statusRight := fmt.Sprintf("#(%s status --format=tmux)#{@ccells-ws-text}", bin)
+	// Status right: uses #() command substitution which interprets #[...] color sequences in the output.
+	// tmux does NOT interpret #[...] inside #{@variable} expansions, so we use #() directly.
+	statusRight := fmt.Sprintf("#(%s status --format=tmux)", bin)
 	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "status-right", statusRight); err != nil {
 		return fmt.Errorf("set status-right: %w", err)
 	}
@@ -247,5 +246,11 @@ func (c *Client) ConfigureChrome(ctx context.Context, session, ccellsBin string)
 // SetSessionOption sets a session-level option on the tmux session.
 func (c *Client) SetSessionOption(ctx context.Context, session, option, value string) error {
 	_, err := c.run(ctx, "set-option", "-t", session, option, value)
+	return err
+}
+
+// SetHook sets a tmux hook on a session. The hookName should include the index (e.g., "client-attached[99]").
+func (c *Client) SetHook(ctx context.Context, session, hookName, command string) error {
+	_, err := c.run(ctx, "set-hook", "-t", session, hookName, command)
 	return err
 }

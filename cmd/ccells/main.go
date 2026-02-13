@@ -514,6 +514,12 @@ func main() {
 			fmt.Println("Usage: ccells merge --interactive (or use prefix+m keybinding)")
 		}
 
+	case "welcome":
+		if err := runWelcome(stateDir, runtime); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
 	case "logs":
 		// TODO: implement logs command
 		fmt.Println("logs command not yet implemented")
@@ -576,8 +582,8 @@ func listWorkstreamNames(ctx context.Context, repoID string) ([]string, error) {
 	return names, nil
 }
 
-// runStatusTmux updates the tmux session variable with colored workstream status.
-// Prints nothing to stdout — tmux reads the session variable directly.
+// runStatusTmux prints the colored workstream status to stdout.
+// tmux's #() command substitution interprets the #[...] color sequences in the output.
 func runStatusTmux(ctx context.Context, repoID string) error {
 	socketName := fmt.Sprintf("ccells-%s", repoID)
 	client := tmux.NewClient(socketName)
@@ -611,14 +617,9 @@ func runStatusTmux(ctx context.Context, repoID string) error {
 		workstreams = append(workstreams, sw)
 	}
 
-	// Build colored status line and set as session variable
-	// tmux interprets #[...] format sequences in option values
+	// Print colored status line to stdout — tmux #() interprets the #[...] sequences
 	colored := tmux.FormatStatusLine(workstreams, prefix, false)
-	if err := client.SetSessionOption(ctx, "ccells", "@ccells-ws-text", colored); err != nil {
-		// Fallback: print plain text (tmux will show it as-is from #() output)
-		fmt.Print(colored)
-	}
-
+	fmt.Print(colored)
 	return nil
 }
 

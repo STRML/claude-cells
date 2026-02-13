@@ -12,6 +12,7 @@ import (
 	"github.com/STRML/claude-cells/internal/git"
 	"github.com/STRML/claude-cells/internal/orchestrator"
 	"github.com/STRML/claude-cells/internal/tmux"
+	"github.com/STRML/claude-cells/internal/workstream"
 )
 
 // runUp starts the tmux session + daemon if not running, then attaches.
@@ -48,6 +49,22 @@ func runUp(ctx context.Context, repoID, repoPath, stateDir, runtime string) erro
 	// Configure tmux chrome (status line, pane borders, keybindings)
 	if err := client.ConfigureChrome(ctx, sessionName, ccellsBin); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to configure tmux chrome: %v\n", err)
+	}
+
+	// Launch welcome or create dialog in the initial pane.
+	// First time ever (no state file): show full welcome screen with intro.
+	// Returning with 0 workstreams: go straight to create dialog.
+	firstTime := !workstream.StateExists(stateDir)
+	if firstTime {
+		welcomeCmd := fmt.Sprintf("'%s' welcome", ccellsBin)
+		if err := client.SendKeys(ctx, sessionName+":0.0", welcomeCmd, "Enter"); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to launch welcome: %v\n", err)
+		}
+	} else {
+		createCmd := fmt.Sprintf("'%s' create --interactive", ccellsBin)
+		if err := client.SendKeys(ctx, sessionName+":0.0", createCmd, "Enter"); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to launch create dialog: %v\n", err)
+		}
 	}
 
 	// Create Docker client and orchestrator for workstream operations
