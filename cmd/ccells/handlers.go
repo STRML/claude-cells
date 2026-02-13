@@ -55,7 +55,12 @@ func (h *actionHandlers) handleCreate(ctx context.Context, branch, prompt, runti
 	if rt == "" {
 		rt = "claude"
 	}
-	cmd := dockerExecWithAutoAccept(result.ContainerName, rt)
+	var cmd string
+	if prompt != "" {
+		cmd = dockerExecWithAutoAccept(result.ContainerName, rt, "-p", tmux.EscapeShellArg(prompt))
+	} else {
+		cmd = dockerExecWithAutoAccept(result.ContainerName, rt)
+	}
 
 	// Check if we should respawn the initial empty pane or split
 	panes, err := h.tmux.ListPanes(ctx, h.session)

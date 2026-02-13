@@ -667,10 +667,11 @@ func runCreateInteractive(stateDir, runtime string) error {
 		done
 	`, paneID)).Start()
 
-	return syscall.Exec(dockerPath, []string{
-		"docker", "exec", "-it", final.containerName,
-		rt, "--dangerously-skip-permissions",
-	}, os.Environ())
+	args := []string{"docker", "exec", "-it", final.containerName, rt, "--dangerously-skip-permissions"}
+	if final.prompt != "" {
+		args = append(args, "-p", final.prompt)
+	}
+	return syscall.Exec(dockerPath, args, os.Environ())
 }
 
 // runRmInteractive launches the interactive rm dialog as a Bubble Tea program.

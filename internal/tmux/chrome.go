@@ -172,9 +172,9 @@ func tmuxVersionAtLeast(c *Client, ctx context.Context, major, minor int) bool {
 	return min >= minor
 }
 
-// escapeShellArg quotes a string for safe embedding in shell commands.
+// EscapeShellArg quotes a string for safe embedding in shell commands.
 // Uses single-quoting with proper escaping of embedded single quotes.
-func escapeShellArg(s string) string {
+func EscapeShellArg(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
@@ -227,7 +227,7 @@ func FormatPowerlineLeft(repoPath, branch string) string {
 
 // ConfigureChrome sets up tmux status line, pane borders, and keybindings.
 func (c *Client) ConfigureChrome(ctx context.Context, session, ccellsBin, repoPath, branch string) error {
-	bin := escapeShellArg(ccellsBin)
+	bin := EscapeShellArg(ccellsBin)
 
 	// Pane border styling with color support
 	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "pane-border-format",
