@@ -146,7 +146,7 @@ func printKeybindings() {
   ══════════════════════════
 
   prefix + n     Create new workstream
-  prefix + d     Destroy workstream
+  prefix + x     Destroy workstream
   prefix + p     Pause current workstream
   prefix + r     Resume current workstream
   prefix + m     Create/view pull request
@@ -190,7 +190,7 @@ Options:
 
 Keybindings (in tmux session, prefix + key):
   n     Create new workstream
-  d     Destroy workstream (with confirmation)
+  x     Destroy workstream (with confirmation)
   p     Pause workstream
   r     Resume workstream
   m     Create/view PR

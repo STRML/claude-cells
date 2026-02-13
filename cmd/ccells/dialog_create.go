@@ -93,6 +93,10 @@ func (m createDialog) handleEnter() (tea.Model, tea.Cmd) {
 			m.err = fmt.Errorf("branch name cannot be empty")
 			return m, nil
 		}
+		if err := validateBranchName(m.branch); err != nil {
+			m.err = err
+			return m, nil
+		}
 		m.err = nil
 		m.input = ""
 		m.step = 2

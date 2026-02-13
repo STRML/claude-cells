@@ -80,7 +80,7 @@ func FormatStatusLine(workstreams []StatusWorkstream, prefix string, multiLine b
 func formatColoredKeyhints(hint string) string {
 	keys := []struct{ key, label string }{
 		{"n", "new"},
-		{"d", "destroy"},
+		{"x", "destroy"},
 		{"m", "merge"},
 		{"?", "help"},
 	}
@@ -224,9 +224,10 @@ func (c *Client) ConfigureChrome(ctx context.Context, session, ccellsBin string)
 	}
 
 	// Keybindings
+	// Note: "d" is reserved for tmux's default detach, so destroy uses "x"
 	bindings := map[string]string{
 		"n": fmt.Sprintf("display-popup -E -w 60 -h 20 %s create --interactive", bin),
-		"d": fmt.Sprintf("display-popup -E -w 60 -h 15 %s rm --interactive", bin),
+		"x": fmt.Sprintf("display-popup -E -w 60 -h 15 %s rm --interactive", bin),
 		"m": fmt.Sprintf("display-popup -E -w 70 -h 20 %s merge --interactive", bin),
 		"p": fmt.Sprintf("run-shell \"%s pause #{@ccells-workstream}\"", bin),
 		"r": fmt.Sprintf("run-shell \"%s unpause #{@ccells-workstream}\"", bin),

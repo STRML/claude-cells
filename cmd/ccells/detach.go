@@ -51,9 +51,9 @@ func formatDetachSummary(info DetachInfo) string {
 		b.WriteString("  Daemon: running\n")
 	}
 
-	b.WriteString(fmt.Sprintf("  Reattach: ccells attach\n"))
-	b.WriteString(fmt.Sprintf("  Stop all: ccells down\n"))
-	b.WriteString(fmt.Sprintf("  Destroy:  ccells down --rm\n"))
+	b.WriteString("  Reattach: ccells attach\n")
+	b.WriteString("  Stop all: ccells down\n")
+	b.WriteString("  Destroy:  ccells down --rm\n")
 	b.WriteString("\n")
 
 	return b.String()

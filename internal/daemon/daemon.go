@@ -412,6 +412,10 @@ func (d *Daemon) handleUnpause(ctx context.Context, params json.RawMessage) Resp
 }
 
 func writeResponse(conn net.Conn, resp Response) {
+	if err := conn.SetWriteDeadline(time.Now().Add(30 * time.Second)); err != nil {
+		log.Printf("[daemon] set write deadline: %v", err)
+		return
+	}
 	if err := json.NewEncoder(conn).Encode(resp); err != nil {
 		log.Printf("[daemon] write response: %v", err)
 	}
