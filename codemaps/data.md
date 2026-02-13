@@ -1,6 +1,6 @@
 # Data Models and Schemas
 
-Last updated: 2026-02-12 (Updated: removed TUI models, added daemon types)
+Last updated: 2026-02-13 (Updated: create dialog 4-step flow, welcome dialog, chrome color constants)
 
 ## Overview
 
@@ -333,12 +333,36 @@ type PaneInfo struct {
 ```go
 // tmux/chrome.go
 type StatusWorkstream struct {
-    Name      string
-    Branch    string
-    PRNumber  int
-    HasPR     bool
-    Running   bool
+    Name     string
+    Status   string // "running", "paused", "exited"
+    HasPR    bool
+    PRMerged bool
 }
+```
+
+### Chrome Color Constants
+
+```go
+// tmux/chrome.go
+const (
+    colorGreen    = "colour46"  // Running dot, PR merged, workstream count
+    colorYellow   = "colour226" // Paused
+    colorGray     = "colour240" // Exited, inactive border
+    colorMagenta  = "colour201" // Workstream name, key letter
+    colorHintGray = "colour244" // Key hint text
+    colorCyan     = "colour38"  // Active border, PR open
+    colorBarBg    = "colour236" // Status bar background
+    colorWhite    = "colour255" // Default text
+
+    // Powerline status-left colors
+    colorPathBg   = "colour34"  // Green background for path segment
+    colorBranchBg = "colour142" // Olive/yellow-green for branch segment
+    colorDarkText = "colour234" // Dark text on colored backgrounds
+
+    // Powerline separator (U+E0B0) and git branch icon (U+E0A0)
+    powerlineSep = "\ue0b0"
+    branchIcon   = "\ue0a0"
+)
 ```
 
 ---
@@ -423,16 +447,43 @@ type PairingProvider interface {
 
 ```go
 // cmd/ccells/dialog_create.go
+
+// summarizeResultMsg is the result of async title generation via Claude CLI.
+type summarizeResultMsg struct {
+    title string
+    err   error
+}
+
+// createResultMsg is the result of an async create operation.
+type createResultMsg struct {
+    err error
+}
+
+// Flow: 0=prompt → 1=summarizing (Claude CLI) → 2=confirm → 3=creating
+// Title generated via Claude CLI, branch derived from title via GenerateBranchName().
 type createDialog struct {
-    step     int    // 0=prompt, 1=branch, 2=confirm
+    step     int    // 0=prompt, 1=summarizing, 2=confirm, 3=creating
     prompt   string
+    title    string // AI-generated short title
     branch   string
-    cursor   int
     input    string
     err      error
     done     bool
     stateDir string
     runtime  string
+}
+```
+
+### Welcome Dialog
+
+```go
+// cmd/ccells/dialog_welcome.go
+// First-run welcome screen. Shows intro + keybindings, then chains to create dialog.
+type welcomeDialog struct {
+    stateDir string
+    runtime  string
+    done     bool
+    create   bool // whether user chose to create a workstream
 }
 ```
 

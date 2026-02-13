@@ -1,6 +1,6 @@
 # Backend Structure
 
-Last updated: 2026-02-12 (Updated: tmux migration, TUI removed)
+Last updated: 2026-02-13 (Updated: powerline chrome, welcome dialog, create dialog AI flow)
 
 ## Quick Reference: Key Files
 
@@ -8,9 +8,10 @@ Last updated: 2026-02-12 (Updated: tmux migration, TUI removed)
 |------|-------|-------|
 | `cmd/ccells/main.go` | ~850 | Entry point, arg parsing, command dispatch |
 | `cmd/ccells/commands.go` | ~100 | Command registry + flag parsing |
-| `cmd/ccells/dialog_create.go` | ~200 | Interactive create popup (Bubble Tea) |
-| `internal/tmux/tmux.go` | ~110 | tmux server lifecycle |
-| `internal/tmux/chrome.go` | ~120 | Status line, pane borders, keybindings |
+| `cmd/ccells/dialog_create.go` | ~210 | Interactive create popup (4-step with AI title gen) |
+| `cmd/ccells/dialog_welcome.go` | ~85 | First-run welcome screen (Bubble Tea) |
+| `internal/tmux/tmux.go` | ~115 | tmux server lifecycle |
+| `internal/tmux/chrome.go` | ~320 | Powerline status, pane borders, keybindings, path utils |
 | `internal/daemon/daemon.go` | ~320 | Socket server, background loops |
 | `orchestrator/create.go` | ~310 | Creation flow (worktree + container) |
 | `git/branch.go` | ~700 | Acceptable |
@@ -30,7 +31,8 @@ cmd/ccells/           # CLI entry point + compose-style subcommands
   cmd_pause.go        # pause/unpause workstreams
   cmd_ps.go           # ps: list workstreams from tmux panes
   cmd_pair.go         # pair/unpair/status: pairing mode
-  dialog_create.go    # Interactive create popup (Bubble Tea)
+  dialog_create.go    # Interactive create popup (4-step with AI title gen)
+  dialog_welcome.go   # First-run welcome screen (intro + keybindings)
   dialog_merge.go     # Interactive merge popup
   dialog_rm.go        # Interactive destroy popup
   detach.go           # Detach summary formatting
@@ -73,6 +75,7 @@ tmux server and pane management. Each ccells session uses a dedicated tmux serve
 - `Version()` - Get tmux version string
 - `Prefix()` - Get user's tmux prefix key
 - `NewSession()` - Create detached session
+- `NewSessionWithCommand()` - Create session with initial pane command
 - `HasSession()` - Check if session exists
 - `KillServer()` - Kill tmux server
 - `KillSession()` - Kill specific session
@@ -85,10 +88,14 @@ tmux server and pane management. Each ccells session uses a dedicated tmux serve
 - `ListPanes()` - Query panes with custom format string
 
 **chrome.go:**
-- `ConfigureChrome()` - Set up status line, pane borders, keybindings
-- `FormatStatusLine()` - Render status line content
+- `ConfigureChrome(ctx, session, ccellsBin, repoPath, branch)` - Set up powerline status, pane borders, keybindings
+- `FormatPowerlineLeft(repoPath, branch)` - Build powerline-style status-left with abbreviated path + branch icon
+- `AbbreviatePath(path)` - Shorten path (e.g., `~/g/o/claude-cells`)
+- `FormatStatusLine()` - Render status-right content (workstream indicators + keyhints)
 - `FormatPaneBorder()` - Render pane border text
 - `FormatPrefixHint()` - Convert "C-b" to "^b" for display
+- `SetSessionOption()` - Set session-level tmux options
+- `SetHook()` - Set tmux hooks on a session
 
 ---
 
@@ -144,8 +151,10 @@ CLI entry point with compose-style subcommands.
 ### Key Functions
 
 **main.go:**
-- `main()` - Parse args, resolve repo, dispatch command
-- `getRepoInfo()` - Get repo ID, path, state dir
+- `main()` - Parse args, resolve repo, dispatch command (includes `welcome` dispatch)
+- `getRepoInfo()` - Returns `(repoID, repoPath, stateDir, error)` with proper error propagation
+- `getStateDir()` - Returns `(stateDir, error)` convenience wrapper
+- `runStatusTmux()` - Prints colored workstream status to stdout (for tmux `#()` command substitution)
 - `validatePrerequisites()` - Check Docker, build image if needed
 - `cleanupOrphanedContainers()` - Remove containers from crashed sessions
 - `cleanupOrphanedWorktrees()` - Remove stale worktrees
@@ -153,7 +162,7 @@ CLI entry point with compose-style subcommands.
 - `runStateRepair()` - Validate and repair state file
 
 **cmd_up.go:**
-- `runUp()` - Create tmux session, configure chrome, start daemon, attach
+- `runUp()` - Smart session startup: determines initial pane command based on state, creates tmux session, gets git branch for powerline, configures chrome, starts daemon, attaches
 - `doAttach()` - Attach to tmux session (blocks until detach)
 - `printDetachSummary()` - Print summary after detach
 
@@ -167,8 +176,16 @@ CLI entry point with compose-style subcommands.
 - `parseFlags()` - Extract global flags (--runtime, --help, etc.)
 
 **dialog_create.go:**
-- `CreateDialogModel` - Bubble Tea model for interactive create popup
-- Fields: branch, prompt inputs
+- `createDialog` - Bubble Tea model for interactive create popup
+- 4-step flow: `0=prompt` -> `1=summarizing` (Claude CLI) -> `2=confirm` -> `3=creating`
+- `generateTitle()` - Calls Claude CLI to generate short 3-5 word title from task prompt
+- Uses `workstream.GenerateBranchName()` for branch derivation from AI-generated title
+- `summarizeResultMsg` - Async message type for title generation result
+
+**dialog_welcome.go:**
+- `welcomeDialog` - Bubble Tea model for first-run welcome screen
+- Shows intro text, keybindings overview, then chains to create dialog on Enter/n
+- `runWelcome()` - Entry point; runs welcome dialog, optionally chains to create
 
 **detach.go:**
 - `formatDetachSummary()` - Format detach summary text

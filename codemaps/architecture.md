@@ -1,6 +1,6 @@
 # Architecture Overview
 
-Last updated: 2026-02-12 (Updated: tmux migration, TUI removed)
+Last updated: 2026-02-13 (Updated: powerline chrome, welcome dialog, create dialog AI flow)
 
 ## Architecture Assessment: 8/10
 
@@ -34,13 +34,14 @@ cmd/keytest/main.go         # Keyboard testing utility (dev tool)
 
 ```
 main() -> parseCommand() -> dispatch:
-  "up"     -> validatePrerequisites() -> runUp() -> tmux session + daemon + attach
-  "attach" -> runAttach() -> tmux attach
-  "down"   -> runDown() -> daemon shutdown + tmux kill
-  "create" -> runCreate() -> daemon request
-  "rm"     -> runRemove() -> daemon request
-  "ps"     -> runPS() -> tmux list-panes query
-  "pair"   -> runPair() -> daemon request
+  "up"      -> validatePrerequisites() -> runUp() -> tmux session + daemon + attach
+  "attach"  -> runAttach() -> tmux attach
+  "down"    -> runDown() -> daemon shutdown + tmux kill
+  "create"  -> runCreate() -> daemon request
+  "rm"      -> runRemove() -> daemon request
+  "ps"      -> runPS() -> tmux list-panes query
+  "pair"    -> runPair() -> daemon request
+  "welcome" -> runWelcome() -> welcome screen + optional create chain
 ```
 
 Key startup operations (in `up`):
@@ -48,11 +49,16 @@ Key startup operations (in `up`):
 2. Acquire per-repo lock (prevents multiple instances)
 3. Clean up orphaned containers/worktrees
 4. Start heartbeat for crash recovery
-5. Create tmux session (detached)
-6. Configure chrome (status line, pane borders, keybindings)
-7. Start background daemon (credential refresh, reconciliation)
-8. Attach to tmux session (blocks until detach)
-9. Print detach summary on exit
+5. Determine initial pane command based on state:
+   - First time (no state file): welcome screen via `NewSessionWithCommand`
+   - Returning with 0 workstreams: auto-launch create dialog
+   - Has workstreams: normal shell (workstream panes restore separately)
+6. Create tmux session (with initial command or plain shell)
+7. Get git branch for powerline status bar
+8. Configure chrome (powerline status-left, status-right, pane borders, keybindings)
+9. Start background daemon (credential refresh, reconciliation)
+10. Attach to tmux session (blocks until detach)
+11. Print detach summary on exit
 
 ## Main Components
 
@@ -63,10 +69,13 @@ Manages the tmux server, sessions, and panes. ccells owns a dedicated tmux serve
 ```
 Client                      # tmux CLI wrapper for a specific socket
   |-- NewSession()          # Create detached session
+  |-- NewSessionWithCommand() # Create session with initial pane command
   |-- HasSession()          # Check if session exists
   |-- KillServer()          # Kill tmux server
   |-- AttachCommand()       # Returns exec.Cmd for attach
-  |-- ConfigureChrome()     # Set up status line, borders, keybindings
+  |-- ConfigureChrome()     # Set up powerline status, borders, keybindings
+  |-- SetSessionOption()    # Set session-level tmux options
+  |-- SetHook()             # Set tmux hooks on a session
   |-- CreatePane()          # Split window to add pane
   |-- KillPane()            # Kill a specific pane
   |-- SetPaneOption()       # Set per-pane metadata
@@ -76,7 +85,7 @@ Client                      # tmux CLI wrapper for a specific socket
 **Key files:**
 - `tmux.go` - Server lifecycle, session management, version detection
 - `pane.go` - Pane CRUD, metadata (workstream/container vars)
-- `chrome.go` - Status line formatting, pane border formatting, keybindings, help
+- `chrome.go` - Powerline status-left, status line formatting, pane border formatting, keybindings, path abbreviation
 
 ### Daemon (`internal/daemon/`)
 
@@ -124,7 +133,8 @@ runtime.go     # Runtime selection (claude/claudesp)
 ```
 
 **Interactive dialogs (Bubble Tea programs for tmux display-popup):**
-- `dialog_create.go` - New workstream form (prompt → branch → confirm)
+- `dialog_create.go` - New workstream form (prompt → AI title gen → confirm → create)
+- `dialog_welcome.go` - First-run welcome screen (intro + keybindings → create)
 - `dialog_merge.go` - PR/merge flow (generate → edit → confirm)
 - `dialog_rm.go` - Destroy confirmation (confirm → delete branch option)
 
