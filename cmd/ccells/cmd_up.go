@@ -3,9 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
+	"time"
 
 	"github.com/STRML/claude-cells/internal/daemon"
 	"github.com/STRML/claude-cells/internal/docker"
@@ -119,6 +121,11 @@ func runUp(ctx context.Context, repoID, repoPath, stateDir, runtime string) erro
 		}
 	}()
 
+	// Wait for daemon socket to be ready before attaching.
+	// The subprocess (ccells welcome / ccells create) needs the daemon
+	// to be listening before it can send create requests.
+	waitForDaemon(daemonSockPath, 5*time.Second)
+
 	// Attach to session (blocks until detach or exit)
 	attachErr := doAttach(client, sessionName)
 
@@ -131,6 +138,21 @@ func runUp(ctx context.Context, repoID, repoPath, stateDir, runtime string) erro
 	dockerClient.Close()
 
 	return attachErr
+}
+
+// waitForDaemon polls for the daemon socket to appear, up to the given timeout.
+// This ensures the daemon is ready before the user can interact with subprocesses
+// (like welcome/create dialogs) that need to send daemon requests.
+func waitForDaemon(sockPath string, timeout time.Duration) {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if _, err := os.Stat(sockPath); err == nil {
+			log.Printf("daemon socket ready: %s", sockPath)
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	log.Printf("warning: daemon socket not ready after %v: %s", timeout, sockPath)
 }
 
 // doAttach execs into the tmux session, replacing the current process's stdio.

@@ -65,13 +65,25 @@ func sendDaemonRequest(sockPath, action string) error {
 // sendDaemonRequestWithResponse sends a request with optional params and returns the response.
 // The connection is always closed before returning.
 // An optional timeout can be provided; defaults to 5 seconds.
+// Retries up to 3 times on connection refused errors (daemon may be starting up).
 func sendDaemonRequestWithResponse(sockPath, action string, params json.RawMessage, timeout ...time.Duration) (*daemonResponse, error) {
 	t := 5 * time.Second
 	if len(timeout) > 0 {
 		t = timeout[0]
 	}
 
-	conn, err := net.DialTimeout("unix", sockPath, 2*time.Second)
+	var conn net.Conn
+	var err error
+	for attempt := 0; attempt < 3; attempt++ {
+		conn, err = net.DialTimeout("unix", sockPath, 2*time.Second)
+		if err == nil {
+			break
+		}
+		// Retry on connection refused (daemon still starting)
+		if attempt < 2 {
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
 	if err != nil {
 		return nil, fmt.Errorf("daemon not reachable: %w", err)
 	}
