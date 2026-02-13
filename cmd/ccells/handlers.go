@@ -61,7 +61,8 @@ func (h *actionHandlers) handleCreate(ctx context.Context, branch, prompt, runti
 	}
 	var cmd string
 	if prompt != "" {
-		cmd = dockerExecWithAutoAccept(result.ContainerName, rt, "-p", tmux.EscapeShellArg(prompt))
+		// Pass prompt as positional arg, NOT -p (which is pipe/print mode)
+		cmd = dockerExecWithAutoAccept(result.ContainerName, rt, tmux.EscapeShellArg(prompt))
 	} else {
 		cmd = dockerExecWithAutoAccept(result.ContainerName, rt)
 	}

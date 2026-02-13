@@ -284,6 +284,42 @@ For more information: https://github.com/STRML/claude-cells
 `)
 }
 
+// logFilePath is set when the log file is initialized, used by the panic handler.
+var logFilePath string
+
+// setupLogFile creates and opens a log file in the state directory.
+// Returns a cleanup function to close the file.
+func setupLogFile(stateDir string) func() {
+	logDir := filepath.Join(stateDir, "logs")
+	os.MkdirAll(logDir, 0755)
+	logPath := filepath.Join(logDir, "ccells.log")
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err != nil {
+		// Fall back to stderr
+		return func() {}
+	}
+	logFilePath = logPath
+	log.SetOutput(f)
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	log.Printf("=== ccells started (pid=%d, version=%s) ===", os.Getpid(), Version)
+	return func() {
+		log.Printf("=== ccells exiting ===")
+		f.Close()
+	}
+}
+
+// printAbnormalExit prints a message about abnormal termination with the log file path.
+func printAbnormalExit(err interface{}) {
+	fmt.Fprintf(os.Stderr, "\n\033[1;31mccells terminated abnormally\033[0m\n")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  Error: %v\n", err)
+	}
+	if logFilePath != "" {
+		fmt.Fprintf(os.Stderr, "  Log file: %s\n", logFilePath)
+	}
+	fmt.Fprintf(os.Stderr, "\n")
+}
+
 func main() {
 	// Suppress log output to stderr unless debugging
 	log.SetOutput(os.Stderr)
@@ -342,6 +378,19 @@ func main() {
 		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 		os.Exit(1)
 	}
+
+	// Set up log file for diagnostics
+	closeLog := setupLogFile(stateDir)
+	defer closeLog()
+
+	// Catch panics and print helpful message
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC: %v", r)
+			printAbnormalExit(r)
+			os.Exit(2)
+		}
+	}()
 
 	// Resolve runtime from flag + config
 	runtime, err := ResolveRuntime(runtimeFlag, repoPath)
@@ -406,7 +455,8 @@ func main() {
 		}
 
 		if err := runUp(appCtx, repoID, repoPath, stateDir, runtime); err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			log.Printf("runUp error: %v", err)
+			printAbnormalExit(err)
 			os.Exit(1)
 		}
 
@@ -669,7 +719,7 @@ func runCreateInteractive(stateDir, runtime string) error {
 
 	args := []string{"docker", "exec", "-it", final.containerName, rt, "--dangerously-skip-permissions"}
 	if final.prompt != "" {
-		args = append(args, "-p", final.prompt)
+		args = append(args, final.prompt) // positional arg, NOT -p (which is pipe/print mode)
 	}
 	return syscall.Exec(dockerPath, args, os.Environ())
 }
