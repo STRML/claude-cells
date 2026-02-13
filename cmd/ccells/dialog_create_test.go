@@ -100,7 +100,7 @@ func TestCreateDialog_StepTransitions(t *testing.T) {
 		t.Errorf("after typing, input = %q, want 'Add auth'", cd.input)
 	}
 
-	// Press enter to move to step 1 (branch)
+	// Press enter to move to step 1 (confirm with auto-generated branch)
 	model, _ = cd.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	cd = model.(createDialog)
 	if cd.step != 1 {
@@ -113,8 +113,9 @@ func TestCreateDialog_StepTransitions(t *testing.T) {
 	if cd.branch != "add-auth" {
 		t.Errorf("branch = %q, want 'add-auth'", cd.branch)
 	}
-	if cd.input != "add-auth" {
-		t.Errorf("input should be branch name, got %q", cd.input)
+	// Input should be cleared
+	if cd.input != "" {
+		t.Errorf("input should be cleared after step 0, got %q", cd.input)
 	}
 }
 
@@ -132,55 +133,19 @@ func TestCreateDialog_EmptyPromptRejected(t *testing.T) {
 	}
 }
 
-func TestCreateDialog_EmptyBranchRejected(t *testing.T) {
-	m := newCreateDialog("/tmp/state", "claude")
-	// Set up at step 1 with empty branch input
-	m.step = 1
-	m.prompt = "test"
-	m.input = ""
-
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	cd := updated.(createDialog)
-	if cd.step != 1 {
-		t.Errorf("empty branch should stay at step 1, got step %d", cd.step)
-	}
-	if cd.err == nil {
-		t.Error("empty branch should set error")
-	}
-}
-
-func TestCreateDialog_InvalidBranchRejected(t *testing.T) {
+func TestCreateDialog_ConfirmAdvancesToCreating(t *testing.T) {
 	m := newCreateDialog("/tmp/state", "claude")
 	m.step = 1
-	m.prompt = "test"
-	m.input = "my;branch"
+	m.prompt = "test task"
+	m.branch = "test-task"
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
-	cd := updated.(createDialog)
-	if cd.step != 1 {
-		t.Errorf("invalid branch should stay at step 1, got step %d", cd.step)
-	}
-	if cd.err == nil {
-		t.Error("invalid branch should set error")
-	}
-}
-
-func TestCreateDialog_ValidBranchAdvances(t *testing.T) {
-	m := newCreateDialog("/tmp/state", "claude")
-	m.step = 1
-	m.prompt = "test"
-	m.input = "valid-branch"
-
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	cd := updated.(createDialog)
 	if cd.step != 2 {
-		t.Errorf("valid branch should advance to step 2, got step %d", cd.step)
+		t.Errorf("confirm should advance to step 2 (creating), got step %d", cd.step)
 	}
-	if cd.err != nil {
-		t.Errorf("valid branch should not set error: %v", cd.err)
-	}
-	if cd.branch != "valid-branch" {
-		t.Errorf("branch = %q, want 'valid-branch'", cd.branch)
+	if cmd == nil {
+		t.Error("confirm should produce an async create command")
 	}
 }
 
@@ -206,6 +171,21 @@ func TestCreateDialog_BackspaceEmpty(t *testing.T) {
 	}
 }
 
+func TestCreateDialog_BackspaceIgnoredAtConfirm(t *testing.T) {
+	m := newCreateDialog("/tmp/state", "claude")
+	m.step = 1
+	m.prompt = "test"
+	m.branch = "test"
+	m.input = ""
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
+	cd := updated.(createDialog)
+	// Backspace guarded by m.step == 0 check, should have no effect at step 1
+	if cd.input != "" {
+		t.Errorf("backspace at step 1 should be ignored, input = %q", cd.input)
+	}
+}
+
 func TestCreateDialog_SpaceKey(t *testing.T) {
 	m := newCreateDialog("/tmp/state", "claude")
 	m.input = "hello"
@@ -215,6 +195,19 @@ func TestCreateDialog_SpaceKey(t *testing.T) {
 	cd := updated.(createDialog)
 	if cd.input != "hello " {
 		t.Errorf("after space, input = %q, want 'hello '", cd.input)
+	}
+}
+
+func TestCreateDialog_SpaceIgnoredAtConfirm(t *testing.T) {
+	m := newCreateDialog("/tmp/state", "claude")
+	m.step = 1
+	m.input = ""
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace})
+	cd := updated.(createDialog)
+	// Space guarded by m.step == 0 check
+	if cd.input != "" {
+		t.Errorf("space at step 1 should be ignored, input = %q", cd.input)
 	}
 }
 
@@ -246,7 +239,7 @@ func TestCreateDialog_CtrlCQuits(t *testing.T) {
 
 func TestCreateDialog_IgnoresKeysWhileCreating(t *testing.T) {
 	m := newCreateDialog("/tmp/state", "claude")
-	m.step = 3 // creating state
+	m.step = 2 // creating state
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	cd := updated.(createDialog)
@@ -266,10 +259,11 @@ func TestCreateDialog_ViewSteps(t *testing.T) {
 		branch  string
 		wantStr string
 	}{
-		{"step 0", 0, "", "", "What should this workstream do?"},
-		{"step 1", 1, "Add auth", "", "Branch name:"},
-		{"step 2", 2, "Add auth", "add-auth", "Press Enter to create"},
-		{"step 3", 3, "Add auth", "add-auth", "Creating workstream"},
+		{"step 0 prompt", 0, "", "", "What should this workstream do?"},
+		{"step 1 confirm", 1, "Add auth", "add-auth", "Press Enter to create"},
+		{"step 1 shows task", 1, "Add auth", "add-auth", "Task: Add auth"},
+		{"step 1 shows branch", 1, "Add auth", "add-auth", "Branch: add-auth"},
+		{"step 2 creating", 2, "Add auth", "add-auth", "Creating workstream"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -307,7 +301,7 @@ func TestCreateDialog_DoneViewEmpty(t *testing.T) {
 
 func TestCreateDialog_AsyncCreateResult(t *testing.T) {
 	m := newCreateDialog("/tmp/state", "claude")
-	m.step = 3
+	m.step = 2
 
 	// Success result
 	updated, cmd := m.Update(createResultMsg{err: nil})
@@ -322,7 +316,7 @@ func TestCreateDialog_AsyncCreateResult(t *testing.T) {
 
 func TestCreateDialog_AsyncCreateError(t *testing.T) {
 	m := newCreateDialog("/tmp/state", "claude")
-	m.step = 3
+	m.step = 2
 
 	// Error result
 	updated, _ := m.Update(createResultMsg{err: fmt.Errorf("create failed")})
@@ -330,8 +324,8 @@ func TestCreateDialog_AsyncCreateError(t *testing.T) {
 	if cd.done {
 		t.Error("error result should not set done")
 	}
-	if cd.step != 2 {
-		t.Errorf("error result should return to step 2, got step %d", cd.step)
+	if cd.step != 1 {
+		t.Errorf("error result should return to step 1 (confirm), got step %d", cd.step)
 	}
 	if cd.err == nil || cd.err.Error() != "create failed" {
 		t.Errorf("error should be set, got: %v", cd.err)

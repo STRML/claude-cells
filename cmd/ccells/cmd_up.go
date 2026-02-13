@@ -70,8 +70,15 @@ func runUp(ctx context.Context, repoID, repoPath, stateDir, runtime string) erro
 		}
 	}
 
+	// Get git branch for status bar
+	gitOps := git.New(repoPath)
+	branch, _ := gitOps.CurrentBranch(ctx)
+	if branch == "" {
+		branch = "main"
+	}
+
 	// Configure tmux chrome (status line, pane borders, keybindings)
-	if err := client.ConfigureChrome(ctx, sessionName, ccellsBin); err != nil {
+	if err := client.ConfigureChrome(ctx, sessionName, ccellsBin, repoPath, branch); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to configure tmux chrome: %v\n", err)
 	}
 

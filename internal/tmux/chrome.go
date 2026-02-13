@@ -3,8 +3,10 @@ package tmux
 import (
 	"context"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 // tmux color constants matching the old Bubble Tea TUI palette.
@@ -17,6 +19,16 @@ const (
 	colorCyan     = "colour38"  // Active border, PR open
 	colorBarBg    = "colour236" // Status bar background
 	colorWhite    = "colour255" // Default text
+
+	// Powerline status-left colors
+	colorPathBg   = "colour34"  // Green background for path segment
+	colorBranchBg = "colour142" // Olive/yellow-green for branch segment
+	colorDarkText = "colour234" // Dark text on colored backgrounds
+
+	// Powerline separator character (U+E0B0)
+	powerlineSep = "\ue0b0"
+	// Git branch icon (U+E0A0)
+	branchIcon = "\ue0a0"
 )
 
 // StatusWorkstream is the data needed to render a workstream in the status line.
@@ -166,8 +178,55 @@ func escapeShellArg(s string) string {
 	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
 }
 
+// AbbreviatePath shortens a path by abbreviating all directory components
+// except the last to their first character. Replaces $HOME with ~.
+// Example: /Users/sam/git/oss/claude-cells → ~/g/o/claude-cells
+func AbbreviatePath(path string) string {
+	home, _ := os.UserHomeDir()
+	if home != "" && strings.HasPrefix(path, home) {
+		path = "~" + path[len(home):]
+	}
+
+	parts := strings.Split(path, "/")
+	if len(parts) <= 1 {
+		return path
+	}
+
+	// Abbreviate all but the last component
+	for i := 0; i < len(parts)-1; i++ {
+		if parts[i] == "" || parts[i] == "~" {
+			continue
+		}
+		r, _ := utf8.DecodeRuneInString(parts[i])
+		if r != utf8.RuneError {
+			parts[i] = string(r)
+		}
+	}
+
+	return strings.Join(parts, "/")
+}
+
+// FormatPowerlineLeft builds a powerline-style tmux status-left string
+// with path and branch segments.
+func FormatPowerlineLeft(repoPath, branch string) string {
+	abbrev := AbbreviatePath(repoPath)
+
+	var b strings.Builder
+	// Path segment: green bg, white bold text
+	b.WriteString(fmt.Sprintf("#[bg=%s,fg=%s,bold] %s ", colorPathBg, colorWhite, abbrev))
+	// Separator: path→branch transition
+	b.WriteString(fmt.Sprintf("#[fg=%s,bg=%s,nobold]%s", colorPathBg, colorBranchBg, powerlineSep))
+	// Branch segment: olive bg, dark text
+	b.WriteString(fmt.Sprintf("#[fg=%s,bg=%s] %s %s ", colorDarkText, colorBranchBg, branchIcon, branch))
+	// Separator: branch→bar bg transition
+	b.WriteString(fmt.Sprintf("#[fg=%s,bg=%s]%s", colorBranchBg, colorBarBg, powerlineSep))
+	b.WriteString("#[default]")
+
+	return b.String()
+}
+
 // ConfigureChrome sets up tmux status line, pane borders, and keybindings.
-func (c *Client) ConfigureChrome(ctx context.Context, session, ccellsBin string) error {
+func (c *Client) ConfigureChrome(ctx context.Context, session, ccellsBin, repoPath, branch string) error {
 	bin := escapeShellArg(ccellsBin)
 
 	// Pane border styling with color support
@@ -193,12 +252,12 @@ func (c *Client) ConfigureChrome(ctx context.Context, session, ccellsBin string)
 		return fmt.Errorf("set status-style: %w", err)
 	}
 
-	// Status left: colored [ccells] label
-	statusLeft := fmt.Sprintf("#[fg=%s,bold] [ccells] #[default]", colorGreen)
+	// Status left: powerline-style path + branch
+	statusLeft := FormatPowerlineLeft(repoPath, branch)
 	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "status-left", statusLeft); err != nil {
 		return fmt.Errorf("set status-left: %w", err)
 	}
-	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "status-left-length", "20"); err != nil {
+	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "status-left-length", "80"); err != nil {
 		return fmt.Errorf("set status-left-length: %w", err)
 	}
 

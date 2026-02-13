@@ -258,6 +258,94 @@ func TestFormatPrefixHint_NonCtrl(t *testing.T) {
 	}
 }
 
+func TestAbbreviatePath(t *testing.T) {
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{"single component", "claude-cells", "claude-cells"},
+		{"root path", "/", "/"},
+		{"absolute with dirs", "/usr/local/bin/tool", "/u/l/b/tool"},
+		{"empty", "", ""},
+		{"trailing slash dirs", "/a/b/c/last", "/a/b/c/last"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AbbreviatePath(tt.path)
+			if got != tt.want {
+				t.Errorf("AbbreviatePath(%q) = %q, want %q", tt.path, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestAbbreviatePath_HomeTilde(t *testing.T) {
+	// Test that paths under $HOME get ~ substitution
+	// We can't hardcode HOME, but we can verify the function doesn't panic
+	path := "/some/deep/nested/project"
+	got := AbbreviatePath(path)
+	if got == "" {
+		t.Error("AbbreviatePath should not return empty for non-empty path")
+	}
+	// All intermediate dirs should be abbreviated to 1 char
+	parts := strings.Split(got, "/")
+	for i := 1; i < len(parts)-1; i++ { // skip leading empty and last
+		if parts[i] == "~" {
+			continue
+		}
+		if len([]rune(parts[i])) > 1 {
+			t.Errorf("intermediate component %q should be 1 char", parts[i])
+		}
+	}
+}
+
+func TestFormatPowerlineLeft(t *testing.T) {
+	result := FormatPowerlineLeft("/Users/sam/git/oss/claude-cells", "main")
+
+	// Should contain abbreviated path
+	if !strings.Contains(result, "claude-cells") {
+		t.Error("expected last path component in powerline left")
+	}
+
+	// Should contain branch name
+	if !strings.Contains(result, "main") {
+		t.Error("expected branch name in powerline left")
+	}
+
+	// Should contain powerline separator
+	if !strings.Contains(result, powerlineSep) {
+		t.Error("expected powerline separator character")
+	}
+
+	// Should contain branch icon
+	if !strings.Contains(result, branchIcon) {
+		t.Error("expected branch icon character")
+	}
+
+	// Should contain path background color
+	if !strings.Contains(result, colorPathBg) {
+		t.Error("expected path background color")
+	}
+
+	// Should contain branch background color
+	if !strings.Contains(result, colorBranchBg) {
+		t.Error("expected branch background color")
+	}
+
+	// Should end with #[default] reset
+	if !strings.HasSuffix(result, "#[default]") {
+		t.Error("expected #[default] reset at end")
+	}
+}
+
+func TestFormatPowerlineLeft_LongBranch(t *testing.T) {
+	result := FormatPowerlineLeft("/repo", "feature/very-long-branch-name-here")
+	if !strings.Contains(result, "feature/very-long-branch-name-here") {
+		t.Error("expected full branch name even when long")
+	}
+}
+
 func TestColorConstants(t *testing.T) {
 	// Verify color constants match expected tmux colour names
 	tests := []struct {
