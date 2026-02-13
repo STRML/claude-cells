@@ -183,12 +183,11 @@ func printKeybindings() {
 	// Workstream keys
 	b.WriteString(fmt.Sprintf("\n  %sWorkstreams%s\n\n", white, reset))
 	keys := []struct{ key, label string }{
-		{"n", "Create new workstream"},
+		{"n / \" / %", "Create new workstream"},
 		{"x", "Destroy workstream"},
 		{"p", "Pause current workstream"},
 		{"r", "Resume current workstream"},
 		{"m", "Create/view pull request"},
-		{"s", "Refresh status line"},
 		{"?", "Show this help"},
 	}
 	for _, k := range keys {
@@ -208,14 +207,43 @@ func printKeybindings() {
 			green, prefix, k.key, reset, gray, k.label, reset))
 	}
 
+	// Pane resizing
+	b.WriteString(fmt.Sprintf("\n  %sResize Panes%s\n\n", white, reset))
+	resize := []struct{ key, label string }{
+		{"Alt+←→↑↓", "Resize in direction"},
+	}
+	for _, k := range resize {
+		b.WriteString(fmt.Sprintf("    %s%s%s  %s%s%s\n",
+			green, k.key, reset, gray, k.label, reset))
+	}
+
 	// Tmux reference
 	b.WriteString(fmt.Sprintf("\n  %s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n", dim, reset))
 	b.WriteString(fmt.Sprintf("  %sTmux Reference%s  %s%shttps://tmuxcheatsheet.com/%s\n",
 		dim, reset, under, cyan, reset))
 
-	b.WriteString(fmt.Sprintf("\n  %sPress Enter to close.%s\n", dim, reset))
+	b.WriteString(fmt.Sprintf("\n  %sPress any key to close.%s\n", dim, reset))
 	fmt.Print(b.String())
-	fmt.Scanln()
+
+	// Read any single keypress to close (not just Enter).
+	// Put terminal in raw mode to capture a single byte.
+	if f, err := os.Open("/dev/tty"); err == nil {
+		defer f.Close()
+		// Save terminal state and set raw mode
+		rawCmd := exec.Command("stty", "raw", "-echo")
+		rawCmd.Stdin = f
+		if rawCmd.Run() == nil {
+			buf := make([]byte, 1)
+			f.Read(buf)
+			// Restore terminal
+			restoreCmd := exec.Command("stty", "-raw", "echo")
+			restoreCmd.Stdin = f
+			restoreCmd.Run()
+		}
+	} else {
+		// Fallback: wait for Enter
+		fmt.Scanln()
+	}
 }
 
 func printHelp() {
