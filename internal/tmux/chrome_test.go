@@ -170,3 +170,115 @@ func TestFormatColoredKeyhints(t *testing.T) {
 		t.Error("expected gray hint text color in keyhints")
 	}
 }
+
+func TestFormatColoredKeyhints_DestroyUsesX(t *testing.T) {
+	hints := formatColoredKeyhints("^b")
+	// Verify destroy key is "x" (not "d" which conflicts with tmux detach)
+	if !strings.Contains(hints, "^b+x") {
+		t.Error("expected ^b+x for destroy keyhint")
+	}
+	if !strings.Contains(hints, "destroy") {
+		t.Error("expected 'destroy' label in keyhints")
+	}
+	// Should NOT use "d" for destroy
+	if strings.Contains(hints, "^b+d") {
+		t.Error("should not use ^b+d for destroy (conflicts with tmux detach)")
+	}
+}
+
+func TestFormatColoredKeyhints_AllKeys(t *testing.T) {
+	hints := formatColoredKeyhints("^b")
+	expectedKeys := []struct {
+		key   string
+		label string
+	}{
+		{"^b+n", "new"},
+		{"^b+x", "destroy"},
+		{"^b+m", "merge"},
+		{"^b+?", "help"},
+	}
+	for _, expected := range expectedKeys {
+		if !strings.Contains(hints, expected.key) {
+			t.Errorf("expected key %q in keyhints", expected.key)
+		}
+		if !strings.Contains(hints, expected.label) {
+			t.Errorf("expected label %q in keyhints", expected.label)
+		}
+	}
+}
+
+func TestEscapeShellArg(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"simple", "hello", "'hello'"},
+		{"with spaces", "hello world", "'hello world'"},
+		{"with single quote", "it's", "'it'\"'\"'s'"},
+		{"with special chars", "hello;rm -rf /", "'hello;rm -rf /'"},
+		{"empty", "", "''"},
+		{"with newline", "hello\nworld", "'hello\nworld'"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := escapeShellArg(tt.input)
+			if got != tt.want {
+				t.Errorf("escapeShellArg(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFormatStatusLine_Empty(t *testing.T) {
+	line := FormatStatusLine(nil, "C-b", false)
+	// Should contain count 0
+	if !strings.Contains(line, "0#[default] workstreams") {
+		t.Errorf("empty workstreams should show count 0, got: %s", line)
+	}
+}
+
+func TestFormatPaneBorder_Structure(t *testing.T) {
+	border := FormatPaneBorder("test", "running", 0, "")
+	// Should start with border chars
+	if !strings.HasPrefix(border, "─── ") {
+		t.Errorf("border should start with '─── ', got: %q", border)
+	}
+	// Should end with border chars
+	if !strings.HasSuffix(border, " ───") {
+		t.Errorf("border should end with ' ───', got: %q", border)
+	}
+}
+
+func TestFormatPrefixHint_NonCtrl(t *testing.T) {
+	// Non-Ctrl prefix should be returned as-is
+	hint := FormatPrefixHint("M-a")
+	if hint != "M-a" {
+		t.Errorf("FormatPrefixHint('M-a') = %q, want 'M-a'", hint)
+	}
+}
+
+func TestColorConstants(t *testing.T) {
+	// Verify color constants match expected tmux colour names
+	tests := []struct {
+		name     string
+		constant string
+		want     string
+	}{
+		{"green", colorGreen, "colour46"},
+		{"yellow", colorYellow, "colour226"},
+		{"gray", colorGray, "colour240"},
+		{"magenta", colorMagenta, "colour201"},
+		{"hint gray", colorHintGray, "colour244"},
+		{"cyan", colorCyan, "colour38"},
+		{"bar bg", colorBarBg, "colour236"},
+		{"white", colorWhite, "colour255"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.constant != tt.want {
+				t.Errorf("%s = %q, want %q", tt.name, tt.constant, tt.want)
+			}
+		})
+	}
+}

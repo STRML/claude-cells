@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -451,6 +452,162 @@ func TestDaemonPairingHealthPoll(t *testing.T) {
 
 	if calls < 2 {
 		t.Errorf("expected health check to be called at least 2 times, got %d", calls)
+	}
+}
+
+func TestDaemonShutdownAction(t *testing.T) {
+	sockPath := testSocketPath(t)
+
+	d := New(Config{SocketPath: sockPath})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- d.Run(ctx) }()
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Send shutdown action
+	resp := daemonRequest(t, sockPath, "shutdown", nil)
+	if !resp.OK {
+		t.Errorf("shutdown: expected OK, got error: %s", resp.Error)
+	}
+
+	// Daemon should stop
+	select {
+	case err := <-errCh:
+		if err != nil && err != context.Canceled {
+			t.Fatalf("Run returned unexpected error: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("daemon did not stop after shutdown action")
+	}
+}
+
+func TestDaemonWriteResponse(t *testing.T) {
+	sockPath := testSocketPath(t)
+	onCreate, onRemove, onPause, onUnpause := noopHandlers()
+
+	d := New(Config{SocketPath: sockPath, OnCreate: onCreate, OnRemove: onRemove, OnPause: onPause, OnUnpause: onUnpause})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go d.Run(ctx)
+	time.Sleep(100 * time.Millisecond)
+
+	// Valid create should return data in response
+	resp := daemonRequest(t, sockPath, "create", CreateParams{
+		Branch: "feat/test",
+		Prompt: "Test write response",
+	})
+	if !resp.OK {
+		t.Fatalf("create: expected OK, got error: %s", resp.Error)
+	}
+	if resp.Data == nil {
+		t.Error("expected response data for create action")
+	}
+
+	// Verify data contains branch info
+	var data map[string]string
+	if err := json.Unmarshal(resp.Data, &data); err != nil {
+		t.Fatalf("unmarshal response data: %v", err)
+	}
+	if data["branch"] != "feat/test" {
+		t.Errorf("expected branch 'feat/test' in response, got %q", data["branch"])
+	}
+	if data["status"] != "created" {
+		t.Errorf("expected status 'created' in response, got %q", data["status"])
+	}
+}
+
+func TestDaemonHandlerNotConfigured(t *testing.T) {
+	sockPath := testSocketPath(t)
+
+	// Create daemon with NO handlers
+	d := New(Config{SocketPath: sockPath})
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go d.Run(ctx)
+	time.Sleep(100 * time.Millisecond)
+
+	tests := []struct {
+		action string
+		params interface{}
+	}{
+		{"create", CreateParams{Branch: "test", Prompt: "test"}},
+		{"rm", WorkstreamParams{Name: "test"}},
+		{"pause", WorkstreamParams{Name: "test"}},
+		{"unpause", WorkstreamParams{Name: "test"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.action, func(t *testing.T) {
+			resp := daemonRequest(t, sockPath, tt.action, tt.params)
+			if resp.OK {
+				t.Errorf("%s without handler should fail", tt.action)
+			}
+			if !strings.Contains(resp.Error, "not configured") {
+				t.Errorf("%s error = %q, want 'not configured'", tt.action, resp.Error)
+			}
+		})
+	}
+}
+
+func TestDaemonCreateHandlerError(t *testing.T) {
+	sockPath := testSocketPath(t)
+
+	d := New(Config{
+		SocketPath: sockPath,
+		OnCreate: func(ctx context.Context, branch, prompt, runtime string) error {
+			return fmt.Errorf("container creation failed")
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go d.Run(ctx)
+	time.Sleep(100 * time.Millisecond)
+
+	resp := daemonRequest(t, sockPath, "create", CreateParams{
+		Branch: "test",
+		Prompt: "test",
+	})
+	if resp.OK {
+		t.Error("expected error when handler fails")
+	}
+	if !strings.Contains(resp.Error, "container creation failed") {
+		t.Errorf("error = %q, want to contain 'container creation failed'", resp.Error)
+	}
+}
+
+func TestIsValidBranchName(t *testing.T) {
+	tests := []struct {
+		name    string
+		branch  string
+		wantErr bool
+	}{
+		{"valid", "feat/auth", false},
+		{"valid simple", "my-branch", false},
+		{"empty", "", true},
+		{"too long", strings.Repeat("a", 201), true},
+		{"invalid char", "my;branch", true},
+		{"double dots", "my..branch", true},
+		{"double slash", "my//branch", true},
+		{"starts with slash", "/branch", true},
+		{"ends with slash", "branch/", true},
+		{"starts with dash", "-branch", true},
+		{"ends with .lock", "branch.lock", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := isValidBranchName(tt.branch)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("isValidBranchName(%q) error = %v, wantErr %v", tt.branch, err, tt.wantErr)
+			}
+		})
 	}
 }
 
