@@ -285,11 +285,12 @@ func (c *Client) ConfigureChrome(ctx context.Context, session, ccellsBin, repoPa
 	// Keybindings
 	// Note: "d" is reserved for tmux's default detach, so destroy uses "x"
 	createCmd := fmt.Sprintf("split-window %s create --interactive", bin)
+	createCmdH := fmt.Sprintf("split-window -h %s create --interactive", bin)
 	bindings := map[string]string{
 		"n": createCmd,
 		"N": createCmd,
-		`"`: createCmd, // Override tmux split-horizontal with create
-		"%": createCmd, // Override tmux split-vertical with create
+		`"`: createCmd,  // Override tmux split-vertical with create
+		"%": createCmdH, // Override tmux split-horizontal with create
 		"x": fmt.Sprintf("display-popup -E -w 60 -h 15 %s rm --interactive", bin),
 		"m": fmt.Sprintf("display-popup -E -w 70 -h 20 %s merge --interactive", bin),
 		"p": fmt.Sprintf("run-shell \"%s pause #{@ccells-workstream}\"", bin),
