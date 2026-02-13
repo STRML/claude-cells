@@ -45,13 +45,17 @@ func (m mergeDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selected++
 			}
 		case "enter":
+			if len(m.items) == 0 {
+				return m, nil
+			}
 			if m.step == 0 {
 				m.step = 1
 			} else {
-				// TODO(task-14): Send merge/PR request to daemon
-				fmt.Printf("Creating PR for %s...\n", m.items[m.selected])
 				m.done = true
-				return m, tea.Quit
+				return m, tea.Sequence(
+					tea.Printf("Creating PR for %s...", m.items[m.selected]),
+					tea.Quit,
+				)
 			}
 		}
 	}
@@ -81,9 +85,11 @@ func (m mergeDialog) View() tea.View {
 			}
 			b.WriteString(fmt.Sprintf("  %s%s\n", cursor, ws))
 		}
-	} else {
+	} else if len(m.items) > 0 {
 		b.WriteString(fmt.Sprintf("  Create PR for '%s'?\n\n", m.items[m.selected]))
 		b.WriteString("  Press Enter to create PR, Esc to cancel\n")
+	} else {
+		b.WriteString("  No workstreams available.\n")
 	}
 
 	if m.err != nil {

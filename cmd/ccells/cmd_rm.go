@@ -13,10 +13,7 @@ func runRemove(stateDir, name string) error {
 		"name": name,
 	})
 
-	conn, resp, err := sendDaemonRequestWithResponse(daemonSock, "rm", params)
-	if conn != nil {
-		defer conn.Close()
-	}
+	resp, err := sendDaemonRequestWithResponse(daemonSock, "rm", params)
 	if err != nil {
 		return err
 	}

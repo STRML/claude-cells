@@ -7,11 +7,16 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
+// createResultMsg is the result of an async create operation.
+type createResultMsg struct {
+	err error
+}
+
 // createDialog is a Bubble Tea model for the interactive create dialog.
 // Invoked via: ccells create --interactive
 // Runs inside tmux display-popup.
 type createDialog struct {
-	step     int // 0=prompt, 1=branch, 2=confirm
+	step     int // 0=prompt, 1=branch, 2=confirm, 3=creating
 	prompt   string
 	branch   string
 	cursor   int
@@ -36,7 +41,19 @@ func (m createDialog) Init() tea.Cmd {
 
 func (m createDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case createResultMsg:
+		if msg.err != nil {
+			m.err = msg.err
+			m.step = 2 // back to confirm
+			return m, nil
+		}
+		m.done = true
+		return m, tea.Quit
 	case tea.KeyMsg:
+		if m.step == 3 {
+			// Creating — ignore keys
+			return m, nil
+		}
 		switch msg.String() {
 		case "ctrl+c", "esc":
 			m.done = true
@@ -78,14 +95,15 @@ func (m createDialog) handleEnter() (tea.Model, tea.Cmd) {
 		m.err = nil
 		m.input = ""
 		m.step = 2
-	case 2: // confirmed
-		// Send create request
-		if err := runCreate(m.stateDir, m.branch, m.prompt, m.runtime); err != nil {
-			m.err = err
-			return m, nil
+	case 2: // confirmed — launch async create
+		m.step = 3
+		stateDir := m.stateDir
+		branch := m.branch
+		prompt := m.prompt
+		runtime := m.runtime
+		return m, func() tea.Msg {
+			return createResultMsg{err: runCreate(stateDir, branch, prompt, runtime)}
 		}
-		m.done = true
-		return m, tea.Quit
 	}
 	return m, nil
 }
@@ -111,6 +129,10 @@ func (m createDialog) View() tea.View {
 		b.WriteString(fmt.Sprintf("  Task: %s\n", m.prompt))
 		b.WriteString(fmt.Sprintf("  Branch: %s\n\n", m.branch))
 		b.WriteString("  Press Enter to create, Esc to cancel\n")
+	case 3:
+		b.WriteString(fmt.Sprintf("  Task: %s\n", m.prompt))
+		b.WriteString(fmt.Sprintf("  Branch: %s\n\n", m.branch))
+		b.WriteString("  Creating workstream...\n")
 	}
 
 	if m.err != nil {

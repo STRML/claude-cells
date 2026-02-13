@@ -13,10 +13,7 @@ func runPause(stateDir, name string) error {
 		"name": name,
 	})
 
-	conn, resp, err := sendDaemonRequestWithResponse(daemonSock, "pause", params)
-	if conn != nil {
-		defer conn.Close()
-	}
+	resp, err := sendDaemonRequestWithResponse(daemonSock, "pause", params)
 	if err != nil {
 		return err
 	}
@@ -36,10 +33,7 @@ func runUnpause(stateDir, name string) error {
 		"name": name,
 	})
 
-	conn, resp, err := sendDaemonRequestWithResponse(daemonSock, "unpause", params)
-	if conn != nil {
-		defer conn.Close()
-	}
+	resp, err := sendDaemonRequestWithResponse(daemonSock, "unpause", params)
 	if err != nil {
 		return err
 	}

@@ -370,6 +370,12 @@ func main() {
 				os.Exit(1)
 			}
 		} else {
+			if branch != "" {
+				if err := validateBranchName(branch); err != nil {
+					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+					os.Exit(1)
+				}
+			}
 			if err := runCreate(stateDir, branch, prompt, runtime); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				os.Exit(1)

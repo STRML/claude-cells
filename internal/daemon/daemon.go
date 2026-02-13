@@ -59,6 +59,7 @@ type Daemon struct {
 	config   Config
 	listener net.Listener
 	wg       sync.WaitGroup
+	cancel   context.CancelFunc // set during Run, called on shutdown
 }
 
 // New creates a new daemon.
@@ -68,6 +69,9 @@ func New(config Config) *Daemon {
 
 // Run starts the daemon and blocks until ctx is cancelled.
 func (d *Daemon) Run(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	d.cancel = cancel
+
 	// Clean up stale socket
 	os.Remove(d.config.SocketPath)
 
@@ -162,10 +166,17 @@ func (d *Daemon) Run(ctx context.Context) error {
 
 func (d *Daemon) handleConnection(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
+
+	// Set read deadline to prevent stalled clients from leaking goroutines
+	conn.SetReadDeadline(time.Now().Add(30 * time.Second))
+
 	scanner := bufio.NewScanner(conn)
 	if !scanner.Scan() {
 		return
 	}
+
+	// Clear deadline for processing + response
+	conn.SetReadDeadline(time.Time{})
 
 	var req Request
 	if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
@@ -196,7 +207,10 @@ func (d *Daemon) dispatch(ctx context.Context, req Request) Response {
 	case "pair-status":
 		return d.handlePairStatus()
 	case "shutdown":
-		return Response{OK: true} // actual shutdown handled by context cancel
+		if d.cancel != nil {
+			d.cancel()
+		}
+		return Response{OK: true}
 	default:
 		return Response{Error: fmt.Sprintf("unknown action: %s", req.Action)}
 	}

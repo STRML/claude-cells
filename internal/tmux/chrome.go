@@ -75,21 +75,45 @@ func FormatPrefixHint(prefix string) string {
 	return prefix
 }
 
+// escapeShellArg quotes a string for safe embedding in shell commands.
+// Uses single-quoting with proper escaping of embedded single quotes.
+func escapeShellArg(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'"
+}
+
 // ConfigureChrome sets up tmux status line, pane borders, and keybindings.
 func (c *Client) ConfigureChrome(ctx context.Context, session, ccellsBin string) error {
+	bin := escapeShellArg(ccellsBin)
+
 	// Pane border styling
-	c.run(ctx, "set-option", "-t", session, "-g", "pane-border-format",
-		" #{@ccells-border-text} ")
-	c.run(ctx, "set-option", "-t", session, "-g", "pane-border-status", "top")
-	c.run(ctx, "set-option", "-t", session, "-g", "pane-active-border-style", "fg=cyan")
-	c.run(ctx, "set-option", "-t", session, "-g", "pane-border-style", "fg=colour240")
+	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "pane-border-format",
+		" #{@ccells-border-text} "); err != nil {
+		return fmt.Errorf("set pane-border-format: %w", err)
+	}
+	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "pane-border-status", "top"); err != nil {
+		return fmt.Errorf("set pane-border-status: %w", err)
+	}
+	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "pane-active-border-style", "fg=cyan"); err != nil {
+		return fmt.Errorf("set pane-active-border-style: %w", err)
+	}
+	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "pane-border-style", "fg=colour240"); err != nil {
+		return fmt.Errorf("set pane-border-style: %w", err)
+	}
 
 	// Status line — polls ccells status every 5s
-	c.run(ctx, "set-option", "-t", session, "-g", "status-right",
-		fmt.Sprintf("#(%s status --format=tmux)", ccellsBin))
-	c.run(ctx, "set-option", "-t", session, "-g", "status-right-length", "120")
-	c.run(ctx, "set-option", "-t", session, "-g", "status-interval", "5")
-	c.run(ctx, "set-option", "-t", session, "-g", "status-left", "[ccells] ")
+	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "status-right",
+		fmt.Sprintf("#(%s status --format=tmux)", bin)); err != nil {
+		return fmt.Errorf("set status-right: %w", err)
+	}
+	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "status-right-length", "120"); err != nil {
+		return fmt.Errorf("set status-right-length: %w", err)
+	}
+	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "status-interval", "5"); err != nil {
+		return fmt.Errorf("set status-interval: %w", err)
+	}
+	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "status-left", "[ccells] "); err != nil {
+		return fmt.Errorf("set status-left: %w", err)
+	}
 
 	// Multi-line status if tmux >= 3.4
 	ver, _ := c.Version(ctx)
@@ -99,17 +123,19 @@ func (c *Client) ConfigureChrome(ctx context.Context, session, ccellsBin string)
 
 	// Keybindings
 	bindings := map[string]string{
-		"n": fmt.Sprintf("display-popup -E -w 60 -h 20 '%s create --interactive'", ccellsBin),
-		"d": fmt.Sprintf("display-popup -E -w 60 -h 15 '%s rm --interactive'", ccellsBin),
-		"m": fmt.Sprintf("display-popup -E -w 70 -h 20 '%s merge --interactive'", ccellsBin),
-		"p": fmt.Sprintf("run-shell '%s pause #{@ccells-workstream}'", ccellsBin),
-		"r": fmt.Sprintf("run-shell '%s unpause #{@ccells-workstream}'", ccellsBin),
+		"n": fmt.Sprintf("display-popup -E -w 60 -h 20 %s create --interactive", bin),
+		"d": fmt.Sprintf("display-popup -E -w 60 -h 15 %s rm --interactive", bin),
+		"m": fmt.Sprintf("display-popup -E -w 70 -h 20 %s merge --interactive", bin),
+		"p": fmt.Sprintf("run-shell '%s pause #{@ccells-workstream}'", bin),
+		"r": fmt.Sprintf("run-shell '%s unpause #{@ccells-workstream}'", bin),
 		"s": "refresh-client -S",
-		"?": fmt.Sprintf("display-popup -E -w 50 -h 15 '%s help --keybindings'", ccellsBin),
+		"?": fmt.Sprintf("display-popup -E -w 50 -h 15 %s help --keybindings", bin),
 	}
 
 	for key, cmd := range bindings {
-		c.run(ctx, "bind-key", key, cmd)
+		if _, err := c.run(ctx, "bind-key", key, cmd); err != nil {
+			return fmt.Errorf("bind-key %s: %w", key, err)
+		}
 	}
 
 	return nil

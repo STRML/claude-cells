@@ -45,6 +45,9 @@ func (m rmDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.selected++
 			}
 		case "enter":
+			if len(m.workstreams) == 0 {
+				return m, nil
+			}
 			if !m.confirmed {
 				m.confirmed = true
 			} else {

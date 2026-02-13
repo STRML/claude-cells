@@ -11,6 +11,7 @@ type PaneInfo struct {
 	ID      string // e.g., "%0"
 	Index   int
 	Active  bool
+	Dead    bool
 	Width   int
 	Height  int
 	Command string
@@ -28,7 +29,7 @@ func (c *Client) SplitWindow(ctx context.Context, session, command string) (stri
 
 // ListPanes returns all panes in a session.
 func (c *Client) ListPanes(ctx context.Context, session string) ([]PaneInfo, error) {
-	format := "#{pane_id}\t#{pane_index}\t#{pane_active}\t#{pane_width}\t#{pane_height}\t#{pane_current_command}"
+	format := "#{pane_id}\t#{pane_index}\t#{pane_active}\t#{pane_width}\t#{pane_height}\t#{pane_current_command}\t#{pane_dead}"
 	out, err := c.run(ctx, "list-panes", "-t", session, "-F", format)
 	if err != nil {
 		return nil, fmt.Errorf("list-panes: %w", err)
@@ -38,7 +39,7 @@ func (c *Client) ListPanes(ctx context.Context, session string) ([]PaneInfo, err
 		if line == "" {
 			continue
 		}
-		fields := strings.SplitN(line, "\t", 6)
+		fields := strings.SplitN(line, "\t", 7)
 		if len(fields) < 6 {
 			continue
 		}
@@ -46,6 +47,9 @@ func (c *Client) ListPanes(ctx context.Context, session string) ([]PaneInfo, err
 			ID:      fields[0],
 			Active:  fields[2] == "1",
 			Command: fields[5],
+		}
+		if len(fields) >= 7 {
+			p.Dead = fields[6] == "1"
 		}
 		fmt.Sscanf(fields[1], "%d", &p.Index)
 		fmt.Sscanf(fields[3], "%d", &p.Width)

@@ -78,10 +78,13 @@ func runPS(ctx context.Context, repoID string) error {
 			continue // non-ccells pane
 		}
 		status := "running"
-		if !p.Active {
-			// Check if pane command indicates paused/exited
-			if p.Command == "" {
-				status = "exited"
+		if p.Dead {
+			status = "exited"
+		} else {
+			// Check for paused state via pane option
+			paneStatus, _ := client.GetPaneOption(ctx, p.ID, "@ccells-status")
+			if paneStatus == "paused" {
+				status = "paused"
 			}
 		}
 

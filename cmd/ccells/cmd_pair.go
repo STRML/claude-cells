@@ -21,10 +21,7 @@ func runPair(stateDir, workstreamName string) error {
 		"local_path":   ".",            // placeholder
 	})
 
-	conn, resp, err := sendDaemonRequestWithResponse(daemonSock, "pair", params)
-	if conn != nil {
-		defer conn.Close()
-	}
+	resp, err := sendDaemonRequestWithResponse(daemonSock, "pair", params)
 	if err != nil {
 		return err
 	}
@@ -50,10 +47,7 @@ func runPair(stateDir, workstreamName string) error {
 func runUnpair(stateDir string) error {
 	daemonSock := stateDir + "/daemon.sock"
 
-	conn, resp, err := sendDaemonRequestWithResponse(daemonSock, "unpair", nil)
-	if conn != nil {
-		defer conn.Close()
-	}
+	resp, err := sendDaemonRequestWithResponse(daemonSock, "unpair", nil)
 	if err != nil {
 		return err
 	}
@@ -69,10 +63,7 @@ func runUnpair(stateDir string) error {
 func runPairStatus(stateDir string) error {
 	daemonSock := stateDir + "/daemon.sock"
 
-	conn, resp, err := sendDaemonRequestWithResponse(daemonSock, "pair-status", nil)
-	if conn != nil {
-		defer conn.Close()
-	}
+	resp, err := sendDaemonRequestWithResponse(daemonSock, "pair-status", nil)
 	if err != nil {
 		return err
 	}

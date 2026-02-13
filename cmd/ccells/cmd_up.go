@@ -75,8 +75,10 @@ func runUp(ctx context.Context, repoID, repoPath, stateDir, runtime string) erro
 		OnPause:    handlers.handlePause,
 		OnUnpause:  handlers.handleUnpause,
 	})
+	daemonCtx, daemonCancel := context.WithCancel(ctx)
+	defer daemonCancel()
 	go func() {
-		if err := d.Run(ctx); err != nil && ctx.Err() == nil {
+		if err := d.Run(daemonCtx); err != nil && daemonCtx.Err() == nil {
 			fmt.Fprintf(os.Stderr, "daemon error: %v\n", err)
 		}
 	}()
@@ -107,10 +109,7 @@ func printDetachSummary(repoID, stateDir string) {
 
 	// Try to get daemon PID
 	daemonSock := filepath.Join(stateDir, "daemon.sock")
-	conn, resp, err := sendDaemonRequestWithResponse(daemonSock, "ping", nil)
-	if conn != nil {
-		conn.Close()
-	}
+	resp, err := sendDaemonRequestWithResponse(daemonSock, "ping", nil)
 	if err == nil && resp.OK {
 		info.DaemonPID = os.Getpid() // approximate — daemon is in-process
 	}

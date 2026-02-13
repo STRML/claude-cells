@@ -15,17 +15,18 @@ func runDown(ctx context.Context, repoID, stateDir string, destroyContainers boo
 	socketName := fmt.Sprintf("ccells-%s", repoID)
 	client := tmux.NewClient(socketName)
 
-	// Try to signal daemon to shut down gracefully
 	daemonSock := stateDir + "/daemon.sock"
-	if err := sendDaemonRequest(daemonSock, "shutdown"); err != nil {
-		// Daemon may not be running — that's OK
-	}
 
-	// If --rm, send destroy-all request first
+	// If --rm, send destroy-all request before shutdown
 	if destroyContainers {
 		if err := sendDaemonRequest(daemonSock, "destroy-all"); err != nil {
 			// Fall through — we'll still kill the tmux server
 		}
+	}
+
+	// Signal daemon to shut down gracefully
+	if err := sendDaemonRequest(daemonSock, "shutdown"); err != nil {
+		// Daemon may not be running — that's OK
 	}
 
 	// Kill tmux server
@@ -51,10 +52,7 @@ type daemonResponse struct {
 
 // sendDaemonRequest sends a simple action to the daemon (no params, no response data).
 func sendDaemonRequest(sockPath, action string) error {
-	conn, resp, err := sendDaemonRequestWithResponse(sockPath, action, nil)
-	if conn != nil {
-		conn.Close()
-	}
+	resp, err := sendDaemonRequestWithResponse(sockPath, action, nil)
 	if err != nil {
 		return err
 	}
@@ -65,12 +63,13 @@ func sendDaemonRequest(sockPath, action string) error {
 }
 
 // sendDaemonRequestWithResponse sends a request with optional params and returns the response.
-// Caller must close the returned connection.
-func sendDaemonRequestWithResponse(sockPath, action string, params json.RawMessage) (net.Conn, *daemonResponse, error) {
+// The connection is always closed before returning.
+func sendDaemonRequestWithResponse(sockPath, action string, params json.RawMessage) (*daemonResponse, error) {
 	conn, err := net.DialTimeout("unix", sockPath, 2*time.Second)
 	if err != nil {
-		return nil, nil, fmt.Errorf("daemon not reachable: %w", err)
+		return nil, fmt.Errorf("daemon not reachable: %w", err)
 	}
+	defer conn.Close()
 
 	conn.SetDeadline(time.Now().Add(5 * time.Second))
 
@@ -80,14 +79,12 @@ func sendDaemonRequestWithResponse(sockPath, action string, params json.RawMessa
 	}{Action: action, Params: params}
 
 	if err := json.NewEncoder(conn).Encode(req); err != nil {
-		conn.Close()
-		return nil, nil, fmt.Errorf("send: %w", err)
+		return nil, fmt.Errorf("send: %w", err)
 	}
 
 	var resp daemonResponse
 	if err := json.NewDecoder(conn).Decode(&resp); err != nil {
-		conn.Close()
-		return nil, nil, fmt.Errorf("recv: %w", err)
+		return nil, fmt.Errorf("recv: %w", err)
 	}
-	return conn, &resp, nil
+	return &resp, nil
 }
