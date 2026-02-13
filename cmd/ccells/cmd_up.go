@@ -27,7 +27,9 @@ func runUp(ctx context.Context, repoID, repoPath, stateDir, runtime string) erro
 
 	if running {
 		// Already running — just attach
-		return doAttach(client, sessionName)
+		attachErr := doAttach(client, sessionName)
+		printDetachSummary(repoID, stateDir)
+		return attachErr
 	}
 
 	// Create new session

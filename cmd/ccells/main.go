@@ -135,9 +135,16 @@ func getRepoInfo() (repoID, repoPath, stateDir string, err error) {
 }
 
 // getStateDir returns the state directory for the current repo.
-func getStateDir() string {
-	_, _, stateDir, _ := getRepoInfo()
-	return stateDir
+// Returns an error if the repo info cannot be determined.
+func getStateDir() (string, error) {
+	_, _, stateDir, err := getRepoInfo()
+	if err != nil {
+		return "", err
+	}
+	if stateDir == "" {
+		return "", fmt.Errorf("could not determine state directory (not in a git repository?)")
+	}
+	return stateDir, nil
 }
 
 func printKeybindings() {
@@ -327,7 +334,7 @@ func main() {
 		}
 
 	case "attach":
-		if err := runAttach(appCtx, repoID); err != nil {
+		if err := runAttach(appCtx, repoID, stateDir); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
@@ -747,7 +754,10 @@ func cleanupOrphanedContainers(tracker *docker.ContainerTracker) {
 	}
 
 	projectName := filepath.Base(cwd)
-	stateDir := getStateDir()
+	stateDir, err := getStateDir()
+	if err != nil {
+		return
+	}
 
 	var knownIDs []string
 	if workstream.StateExists(stateDir) {
@@ -938,7 +948,10 @@ func extractBranchFromContainerName(containerName, projectName string) string {
 
 // runStateRepair validates and repairs the state file by extracting session IDs from running containers
 func runStateRepair() error {
-	stateDir := getStateDir()
+	stateDir, err := getStateDir()
+	if err != nil {
+		return fmt.Errorf("failed to determine state directory: %w", err)
+	}
 
 	if !workstream.StateExists(stateDir) {
 		fmt.Printf("No state file found at %s. Nothing to repair.\n", stateDir)

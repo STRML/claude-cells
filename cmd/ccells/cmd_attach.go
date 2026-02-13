@@ -8,7 +8,7 @@ import (
 )
 
 // runAttach attaches to an existing session or errors if none is running.
-func runAttach(ctx context.Context, repoID string) error {
+func runAttach(ctx context.Context, repoID, stateDir string) error {
 	socketName := fmt.Sprintf("ccells-%s", repoID)
 	client := tmux.NewClient(socketName)
 
@@ -17,5 +17,7 @@ func runAttach(ctx context.Context, repoID string) error {
 		return fmt.Errorf("no ccells session running for this repo. Run 'ccells up' first")
 	}
 
-	return doAttach(client, "ccells")
+	attachErr := doAttach(client, "ccells")
+	printDetachSummary(repoID, stateDir)
+	return attachErr
 }
