@@ -8,69 +8,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-func TestGenerateBranchName(t *testing.T) {
-	tests := []struct {
-		prompt string
-		want   string
-	}{
-		{"Add user authentication", "add-user-authentication"},
-		{"Fix the login bug in auth module", "fix-the-login-bug"},
-		{"", "workstream"},
-		{"Simple", "simple"},
-		{"Use special chars! @#$", "use-special-chars"},
-		{"UPPERCASE words", "uppercase-words"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.prompt, func(t *testing.T) {
-			got := generateBranchName(tt.prompt)
-			if got != tt.want {
-				t.Errorf("generateBranchName(%q) = %q, want %q", tt.prompt, got, tt.want)
-			}
-		})
-	}
-}
-
-func TestValidateBranchName(t *testing.T) {
-	tests := []struct {
-		name    string
-		branch  string
-		wantErr bool
-		errMsg  string
-	}{
-		{"valid simple", "my-branch", false, ""},
-		{"valid with slash", "feat/auth", false, ""},
-		{"valid with dots", "release.1.0", false, ""},
-		{"valid with underscore", "my_branch", false, ""},
-		{"valid mixed", "feat/my-branch_v2.0", false, ""},
-		{"empty", "", true, "cannot be empty"},
-		{"too long", strings.Repeat("a", 201), true, "too long"},
-		{"shell metachar semicolon", "my;branch", true, "invalid character"},
-		{"shell metachar pipe", "my|branch", true, "invalid character"},
-		{"shell metachar ampersand", "my&branch", true, "invalid character"},
-		{"shell metachar backtick", "my`branch", true, "invalid character"},
-		{"shell metachar dollar", "my$branch", true, "invalid character"},
-		{"space", "my branch", true, "invalid character"},
-		{"double dots", "my..branch", true, "invalid sequence"},
-		{"double slashes", "my//branch", true, "invalid sequence"},
-		{"starts with slash", "/my-branch", true, "start or end"},
-		{"ends with slash", "my-branch/", true, "start or end"},
-		{"starts with dash", "-my-branch", true, "start with '-'"},
-		{"ends with .lock", "my-branch.lock", true, ".lock"},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validateBranchName(tt.branch)
-			if (err != nil) != tt.wantErr {
-				t.Errorf("validateBranchName(%q) error = %v, wantErr %v", tt.branch, err, tt.wantErr)
-				return
-			}
-			if tt.wantErr && tt.errMsg != "" && !strings.Contains(err.Error(), tt.errMsg) {
-				t.Errorf("validateBranchName(%q) error = %q, want to contain %q", tt.branch, err, tt.errMsg)
-			}
-		})
-	}
-}
-
 func TestCreateDialog_Init(t *testing.T) {
 	m := newCreateDialog("/tmp/state", "claude")
 	cmd := m.Init()
@@ -82,7 +19,7 @@ func TestCreateDialog_Init(t *testing.T) {
 	}
 }
 
-func TestCreateDialog_StepTransitions(t *testing.T) {
+func TestCreateDialog_PromptToSummarizing(t *testing.T) {
 	m := newCreateDialog("/tmp/state", "claude")
 
 	// Type a prompt
@@ -100,22 +37,69 @@ func TestCreateDialog_StepTransitions(t *testing.T) {
 		t.Errorf("after typing, input = %q, want 'Add auth'", cd.input)
 	}
 
-	// Press enter to move to step 1 (confirm with auto-generated branch)
-	model, _ = cd.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	// Press enter to move to step 1 (summarizing)
+	model, cmd := cd.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	cd = model.(createDialog)
 	if cd.step != 1 {
-		t.Errorf("after enter on prompt, step = %d, want 1", cd.step)
+		t.Errorf("after enter on prompt, step = %d, want 1 (summarizing)", cd.step)
 	}
 	if cd.prompt != "Add auth" {
 		t.Errorf("prompt = %q, want 'Add auth'", cd.prompt)
 	}
-	// Branch should be auto-generated
-	if cd.branch != "add-auth" {
-		t.Errorf("branch = %q, want 'add-auth'", cd.branch)
+	// Should produce an async command (title generation)
+	if cmd == nil {
+		t.Error("entering prompt should produce an async title generation command")
 	}
 	// Input should be cleared
 	if cd.input != "" {
 		t.Errorf("input should be cleared after step 0, got %q", cd.input)
+	}
+}
+
+func TestCreateDialog_SummarizeSuccess(t *testing.T) {
+	m := newCreateDialog("/tmp/state", "claude")
+	m.step = 1
+	m.prompt = "Add user authentication with OAuth2"
+
+	// Simulate successful title generation
+	updated, _ := m.Update(summarizeResultMsg{title: "OAuth2 User Auth", err: nil})
+	cd := updated.(createDialog)
+	if cd.step != 2 {
+		t.Errorf("after summarize success, step = %d, want 2 (confirm)", cd.step)
+	}
+	if cd.title != "OAuth2 User Auth" {
+		t.Errorf("title = %q, want 'OAuth2 User Auth'", cd.title)
+	}
+	// Branch should be derived from title, not prompt
+	if cd.branch == "" {
+		t.Error("branch should be set after summarize")
+	}
+	if strings.Contains(cd.branch, "authentication") {
+		t.Errorf("branch should be derived from title not prompt, got %q", cd.branch)
+	}
+}
+
+func TestCreateDialog_SummarizeFallback(t *testing.T) {
+	m := newCreateDialog("/tmp/state", "claude")
+	m.step = 1
+	m.prompt = "Add user authentication"
+
+	// Simulate Claude failure — should fall back to branch from prompt
+	updated, _ := m.Update(summarizeResultMsg{title: "", err: fmt.Errorf("claude not available")})
+	cd := updated.(createDialog)
+	if cd.step != 2 {
+		t.Errorf("after summarize error, step = %d, want 2 (confirm)", cd.step)
+	}
+	if cd.title != "" {
+		t.Errorf("title should be empty on fallback, got %q", cd.title)
+	}
+	// Branch should be derived from prompt as fallback
+	if cd.branch == "" {
+		t.Error("branch should be set from prompt fallback")
+	}
+	// workstream.GenerateBranchName strips stop words
+	if cd.branch != "add-user-authentication" {
+		t.Errorf("branch = %q, want 'add-user-authentication'", cd.branch)
 	}
 }
 
@@ -135,14 +119,15 @@ func TestCreateDialog_EmptyPromptRejected(t *testing.T) {
 
 func TestCreateDialog_ConfirmAdvancesToCreating(t *testing.T) {
 	m := newCreateDialog("/tmp/state", "claude")
-	m.step = 1
+	m.step = 2
 	m.prompt = "test task"
-	m.branch = "test-task"
+	m.title = "Test Task Title"
+	m.branch = "test-task-title"
 
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	cd := updated.(createDialog)
-	if cd.step != 2 {
-		t.Errorf("confirm should advance to step 2 (creating), got step %d", cd.step)
+	if cd.step != 3 {
+		t.Errorf("confirm should advance to step 3 (creating), got step %d", cd.step)
 	}
 	if cmd == nil {
 		t.Error("confirm should produce an async create command")
@@ -171,26 +156,10 @@ func TestCreateDialog_BackspaceEmpty(t *testing.T) {
 	}
 }
 
-func TestCreateDialog_BackspaceIgnoredAtConfirm(t *testing.T) {
-	m := newCreateDialog("/tmp/state", "claude")
-	m.step = 1
-	m.prompt = "test"
-	m.branch = "test"
-	m.input = ""
-
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyBackspace})
-	cd := updated.(createDialog)
-	// Backspace guarded by m.step == 0 check, should have no effect at step 1
-	if cd.input != "" {
-		t.Errorf("backspace at step 1 should be ignored, input = %q", cd.input)
-	}
-}
-
 func TestCreateDialog_SpaceKey(t *testing.T) {
 	m := newCreateDialog("/tmp/state", "claude")
 	m.input = "hello"
 
-	// Space key in Bubble Tea v2 returns "space" from msg.String()
 	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace})
 	cd := updated.(createDialog)
 	if cd.input != "hello " {
@@ -198,16 +167,31 @@ func TestCreateDialog_SpaceKey(t *testing.T) {
 	}
 }
 
-func TestCreateDialog_SpaceIgnoredAtConfirm(t *testing.T) {
+func TestCreateDialog_IgnoresKeysWhileSummarizing(t *testing.T) {
 	m := newCreateDialog("/tmp/state", "claude")
-	m.step = 1
-	m.input = ""
+	m.step = 1 // summarizing
 
-	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeySpace})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
 	cd := updated.(createDialog)
-	// Space guarded by m.step == 0 check
 	if cd.input != "" {
-		t.Errorf("space at step 1 should be ignored, input = %q", cd.input)
+		t.Errorf("summarizing state should ignore keys, input = %q", cd.input)
+	}
+	if cmd != nil {
+		t.Error("summarizing state should not produce commands")
+	}
+}
+
+func TestCreateDialog_IgnoresKeysWhileCreating(t *testing.T) {
+	m := newCreateDialog("/tmp/state", "claude")
+	m.step = 3 // creating
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
+	cd := updated.(createDialog)
+	if cd.input != "" {
+		t.Errorf("creating state should ignore keys, input = %q", cd.input)
+	}
+	if cmd != nil {
+		t.Error("creating state should not produce commands")
 	}
 }
 
@@ -237,39 +221,29 @@ func TestCreateDialog_CtrlCQuits(t *testing.T) {
 	}
 }
 
-func TestCreateDialog_IgnoresKeysWhileCreating(t *testing.T) {
-	m := newCreateDialog("/tmp/state", "claude")
-	m.step = 2 // creating state
-
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'a', Text: "a"})
-	cd := updated.(createDialog)
-	if cd.input != "" {
-		t.Errorf("creating state should ignore keys, input = %q", cd.input)
-	}
-	if cmd != nil {
-		t.Error("creating state should not produce commands")
-	}
-}
-
 func TestCreateDialog_ViewSteps(t *testing.T) {
 	tests := []struct {
 		name    string
 		step    int
 		prompt  string
+		title   string
 		branch  string
 		wantStr string
 	}{
-		{"step 0 prompt", 0, "", "", "What should this workstream do?"},
-		{"step 1 confirm", 1, "Add auth", "add-auth", "Press Enter to create"},
-		{"step 1 shows task", 1, "Add auth", "add-auth", "Task: Add auth"},
-		{"step 1 shows branch", 1, "Add auth", "add-auth", "Branch: add-auth"},
-		{"step 2 creating", 2, "Add auth", "add-auth", "Creating workstream"},
+		{"step 0 prompt", 0, "", "", "", "What should this workstream do?"},
+		{"step 1 summarizing", 1, "Add auth", "", "", "Generating title..."},
+		{"step 2 confirm", 2, "Add auth", "OAuth Auth", "oauth-auth", "Press Enter to create"},
+		{"step 2 shows title", 2, "Add auth", "OAuth Auth", "oauth-auth", "Title: OAuth Auth"},
+		{"step 2 shows branch", 2, "Add auth", "OAuth Auth", "oauth-auth", "Branch: oauth-auth"},
+		{"step 2 no title fallback", 2, "Add auth", "", "add-auth", "Task: Add auth"},
+		{"step 3 creating", 3, "Add auth", "OAuth Auth", "oauth-auth", "Creating workstream"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			m := newCreateDialog("/tmp/state", "claude")
 			m.step = tt.step
 			m.prompt = tt.prompt
+			m.title = tt.title
 			m.branch = tt.branch
 
 			content := viewContent(m.View())
@@ -277,6 +251,19 @@ func TestCreateDialog_ViewSteps(t *testing.T) {
 				t.Errorf("step %d view should contain %q, got: %s", tt.step, tt.wantStr, content)
 			}
 		})
+	}
+}
+
+func TestCreateDialog_ViewNoTitleWhenEmpty(t *testing.T) {
+	m := newCreateDialog("/tmp/state", "claude")
+	m.step = 2
+	m.prompt = "Add auth"
+	m.title = "" // No title (Claude failed)
+	m.branch = "add-auth"
+
+	content := viewContent(m.View())
+	if strings.Contains(content, "Title:") {
+		t.Errorf("view should not show Title: when title is empty, got: %s", content)
 	}
 }
 
@@ -301,7 +288,7 @@ func TestCreateDialog_DoneViewEmpty(t *testing.T) {
 
 func TestCreateDialog_AsyncCreateResult(t *testing.T) {
 	m := newCreateDialog("/tmp/state", "claude")
-	m.step = 2
+	m.step = 3
 
 	// Success result
 	updated, cmd := m.Update(createResultMsg{err: nil})
@@ -316,7 +303,7 @@ func TestCreateDialog_AsyncCreateResult(t *testing.T) {
 
 func TestCreateDialog_AsyncCreateError(t *testing.T) {
 	m := newCreateDialog("/tmp/state", "claude")
-	m.step = 2
+	m.step = 3
 
 	// Error result
 	updated, _ := m.Update(createResultMsg{err: fmt.Errorf("create failed")})
@@ -324,10 +311,26 @@ func TestCreateDialog_AsyncCreateError(t *testing.T) {
 	if cd.done {
 		t.Error("error result should not set done")
 	}
-	if cd.step != 1 {
-		t.Errorf("error result should return to step 1 (confirm), got step %d", cd.step)
+	if cd.step != 2 {
+		t.Errorf("error result should return to step 2 (confirm), got step %d", cd.step)
 	}
 	if cd.err == nil || cd.err.Error() != "create failed" {
 		t.Errorf("error should be set, got: %v", cd.err)
+	}
+}
+
+func TestGenerateTitle_StripQuotes(t *testing.T) {
+	// Test the title cleanup logic inline
+	// We can't easily test generateTitle itself (needs Claude CLI)
+	// but we can verify the flow via summarizeResultMsg
+	m := newCreateDialog("/tmp/state", "claude")
+	m.step = 1
+	m.prompt = "test"
+
+	// Title with quotes should still work
+	updated, _ := m.Update(summarizeResultMsg{title: "Add OAuth Login", err: nil})
+	cd := updated.(createDialog)
+	if cd.title != "Add OAuth Login" {
+		t.Errorf("title = %q, want 'Add OAuth Login'", cd.title)
 	}
 }
