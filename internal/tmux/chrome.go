@@ -7,6 +7,18 @@ import (
 	"strings"
 )
 
+// tmux color constants matching the old Bubble Tea TUI palette.
+const (
+	colorGreen    = "colour46"  // Running dot, PR merged, workstream count
+	colorYellow   = "colour226" // Paused
+	colorGray     = "colour240" // Exited, inactive border
+	colorMagenta  = "colour201" // Workstream name, key letter
+	colorHintGray = "colour244" // Key hint text
+	colorCyan     = "colour38"  // Active border, PR open
+	colorBarBg    = "colour236" // Status bar background
+	colorWhite    = "colour255" // Default text
+)
+
 // StatusWorkstream is the data needed to render a workstream in the status line.
 type StatusWorkstream struct {
 	Name     string
@@ -15,54 +27,94 @@ type StatusWorkstream struct {
 	PRMerged bool
 }
 
-// FormatStatusLine renders the tmux status line content.
-// If multiLine is true, returns a two-line format (workstream tabs + keyhints).
+// FormatStatusLine renders the tmux status line content with color formatting.
+// Returns tmux #[fg=...] style sequences for use in tmux session variables.
 func FormatStatusLine(workstreams []StatusWorkstream, prefix string, multiLine bool) string {
-	hint := FormatPrefixHint(prefix)
-
-	// Build workstream indicators
+	// Build colored workstream indicators
 	var wsItems []string
 	for _, ws := range workstreams {
-		indicator := ws.Name
+		var indicator string
+
+		// Status dot
 		switch ws.Status {
 		case "paused":
-			indicator += " [paused]"
+			indicator = fmt.Sprintf("#[fg=%s]●#[default] ", colorYellow)
 		case "exited":
-			indicator += " [exited]"
+			indicator = fmt.Sprintf("#[fg=%s]●#[default] ", colorGray)
+		default:
+			indicator = fmt.Sprintf("#[fg=%s]●#[default] ", colorGreen)
 		}
+
+		// Workstream name in magenta
+		indicator += fmt.Sprintf("#[fg=%s]%s#[default]", colorMagenta, ws.Name)
+
+		// PR badge
 		if ws.HasPR && ws.PRMerged {
-			indicator += " ✓"
+			indicator += fmt.Sprintf(" #[fg=%s]✓#[default]", colorGreen)
 		} else if ws.HasPR {
-			indicator += " ●"
+			indicator += fmt.Sprintf(" #[fg=%s]●#[default]", colorCyan)
 		}
+
 		wsItems = append(wsItems, indicator)
 	}
 
-	wsPart := strings.Join(wsItems, " | ")
-	keyhints := fmt.Sprintf("%s+n new  %s+d destroy  %s+m merge  %s+? help", hint, hint, hint, hint)
+	wsPart := strings.Join(wsItems, "  ")
+
+	// Workstream count
+	countPart := fmt.Sprintf("#[fg=%s]%d#[default] workstream", colorGreen, len(workstreams))
+	if len(workstreams) != 1 {
+		countPart += "s"
+	}
 
 	if multiLine {
-		return fmt.Sprintf("[ccells] %s\n%s", wsPart, keyhints)
+		return fmt.Sprintf("%s  %s", wsPart, countPart)
 	}
 
 	// Single line: compact
-	return fmt.Sprintf("[ccells] %s | %s", wsPart, keyhints)
+	hint := FormatPrefixHint(prefix)
+	keyhints := formatColoredKeyhints(hint)
+	return fmt.Sprintf("%s  %s | %s", wsPart, countPart, keyhints)
 }
 
-// FormatPaneBorder renders the text for a pane's top border.
-func FormatPaneBorder(name, status string, prNumber int, synopsis string) string {
-	parts := []string{name}
+// formatColoredKeyhints returns keyhints with tmux color codes.
+func formatColoredKeyhints(hint string) string {
+	keys := []struct{ key, label string }{
+		{"n", "new"},
+		{"d", "destroy"},
+		{"m", "merge"},
+		{"?", "help"},
+	}
+	var parts []string
+	for _, k := range keys {
+		parts = append(parts, fmt.Sprintf("#[fg=%s]%s+%s#[fg=%s] %s#[default]",
+			colorMagenta, hint, k.key, colorHintGray, k.label))
+	}
+	return strings.Join(parts, "  ")
+}
 
-	if status != "running" {
-		parts = append(parts, fmt.Sprintf("[%s]", status))
+// FormatPaneBorder renders the text for a pane's top border with tmux color codes.
+func FormatPaneBorder(name, status string, prNumber int, synopsis string) string {
+	var parts []string
+
+	// Status dot
+	switch status {
+	case "paused":
+		parts = append(parts, fmt.Sprintf("#[fg=%s]●#[default]", colorYellow))
+	case "exited":
+		parts = append(parts, fmt.Sprintf("#[fg=%s]●#[default]", colorGray))
+	default:
+		parts = append(parts, fmt.Sprintf("#[fg=%s]●#[default]", colorGreen))
 	}
 
+	// Workstream name in magenta
+	parts = append(parts, fmt.Sprintf("#[fg=%s]%s#[default]", colorMagenta, name))
+
 	if prNumber > 0 {
-		parts = append(parts, fmt.Sprintf("PR#%d", prNumber))
+		parts = append(parts, fmt.Sprintf("#[fg=%s]PR#%d#[default]", colorCyan, prNumber))
 	}
 
 	if synopsis != "" {
-		parts = append(parts, "- "+synopsis)
+		parts = append(parts, fmt.Sprintf("#[fg=%s]- %s#[default]", colorHintGray, synopsis))
 	}
 
 	return "─── " + strings.Join(parts, " ") + " ───"
@@ -118,7 +170,7 @@ func escapeShellArg(s string) string {
 func (c *Client) ConfigureChrome(ctx context.Context, session, ccellsBin string) error {
 	bin := escapeShellArg(ccellsBin)
 
-	// Pane border styling
+	// Pane border styling with color support
 	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "pane-border-format",
 		" #{@ccells-border-text} "); err != nil {
 		return fmt.Errorf("set pane-border-format: %w", err)
@@ -126,29 +178,45 @@ func (c *Client) ConfigureChrome(ctx context.Context, session, ccellsBin string)
 	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "pane-border-status", "top"); err != nil {
 		return fmt.Errorf("set pane-border-status: %w", err)
 	}
-	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "pane-active-border-style", "fg=cyan"); err != nil {
+	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "pane-active-border-style",
+		fmt.Sprintf("fg=%s", colorCyan)); err != nil {
 		return fmt.Errorf("set pane-active-border-style: %w", err)
 	}
-	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "pane-border-style", "fg=colour240"); err != nil {
+	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "pane-border-style",
+		fmt.Sprintf("fg=%s", colorGray)); err != nil {
 		return fmt.Errorf("set pane-border-style: %w", err)
 	}
 
-	// Status line — polls ccells status every 5s
-	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "status-right",
-		fmt.Sprintf("#(%s status --format=tmux)", bin)); err != nil {
+	// Status bar background and foreground
+	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "status-style",
+		fmt.Sprintf("bg=%s,fg=%s", colorBarBg, colorWhite)); err != nil {
+		return fmt.Errorf("set status-style: %w", err)
+	}
+
+	// Status left: colored [ccells] label
+	statusLeft := fmt.Sprintf("#[fg=%s,bold] [ccells] #[default]", colorGreen)
+	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "status-left", statusLeft); err != nil {
+		return fmt.Errorf("set status-left: %w", err)
+	}
+	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "status-left-length", "20"); err != nil {
+		return fmt.Errorf("set status-left-length: %w", err)
+	}
+
+	// Status right: reads colored content from session variable (set by `ccells status --format=tmux`)
+	// The command updates the session variable, then status-right reads it.
+	// This allows full #[...] color support since tmux interprets format sequences in option values.
+	statusRight := fmt.Sprintf("#(%s status --format=tmux)#{@ccells-ws-text}", bin)
+	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "status-right", statusRight); err != nil {
 		return fmt.Errorf("set status-right: %w", err)
 	}
-	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "status-right-length", "120"); err != nil {
+	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "status-right-length", "200"); err != nil {
 		return fmt.Errorf("set status-right-length: %w", err)
 	}
 	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "status-interval", "5"); err != nil {
 		return fmt.Errorf("set status-interval: %w", err)
 	}
-	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "status-left", "[ccells] "); err != nil {
-		return fmt.Errorf("set status-left: %w", err)
-	}
 
-	// Multi-line status if tmux >= 3.4
+	// Multi-line status if tmux >= 3.4: line 1 = workstreams, line 2 = keyhints
 	if tmuxVersionAtLeast(c, ctx, 3, 4) {
 		if _, err := c.run(ctx, "set-option", "-t", session, "-g", "status", "2"); err != nil {
 			return fmt.Errorf("set status lines: %w", err)
@@ -173,4 +241,10 @@ func (c *Client) ConfigureChrome(ctx context.Context, session, ccellsBin string)
 	}
 
 	return nil
+}
+
+// SetSessionOption sets a session-level option on the tmux session.
+func (c *Client) SetSessionOption(ctx context.Context, session, option, value string) error {
+	_, err := c.run(ctx, "set-option", "-t", session, option, value)
+	return err
 }
