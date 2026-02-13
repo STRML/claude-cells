@@ -133,12 +133,12 @@ func daemonRequest(t *testing.T, sockPath string, action string, params interfac
 
 // noopHandlers returns handler functions that always succeed (for testing).
 func noopHandlers() (
-	func(context.Context, string, string, string, bool) (string, error),
+	func(context.Context, string, string, string, bool, CreateExtraOpts) (string, error),
 	func(context.Context, string) error,
 	func(context.Context, string) error,
 	func(context.Context, string) error,
 ) {
-	return func(ctx context.Context, branch, prompt, runtime string, skipPane bool) (string, error) {
+	return func(ctx context.Context, branch, prompt, runtime string, skipPane bool, extraOpts CreateExtraOpts) (string, error) {
 			return "test-container", nil
 		},
 		func(ctx context.Context, name string) error { return nil },
@@ -565,7 +565,7 @@ func TestDaemonCreateHandlerError(t *testing.T) {
 
 	d := New(Config{
 		SocketPath: sockPath,
-		OnCreate: func(ctx context.Context, branch, prompt, runtime string, skipPane bool) (string, error) {
+		OnCreate: func(ctx context.Context, branch, prompt, runtime string, skipPane bool, extraOpts CreateExtraOpts) (string, error) {
 			return "", fmt.Errorf("container creation failed")
 		},
 	})
@@ -585,6 +585,45 @@ func TestDaemonCreateHandlerError(t *testing.T) {
 	}
 	if !strings.Contains(resp.Error, "container creation failed") {
 		t.Errorf("error = %q, want to contain 'container creation failed'", resp.Error)
+	}
+}
+
+func TestDaemonCreateExtraOptsPassthrough(t *testing.T) {
+	sockPath := testSocketPath(t)
+
+	var receivedOpts CreateExtraOpts
+	d := New(Config{
+		SocketPath: sockPath,
+		OnCreate: func(ctx context.Context, branch, prompt, runtime string, skipPane bool, extraOpts CreateExtraOpts) (string, error) {
+			receivedOpts = extraOpts
+			return "test-container", nil
+		},
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	go d.Run(ctx)
+	time.Sleep(100 * time.Millisecond)
+
+	// Send create with untracked files options
+	resp := daemonRequest(t, sockPath, "create", CreateParams{
+		Branch:         "test",
+		Prompt:         "test",
+		CopyUntracked:  true,
+		UntrackedFiles: []string{"file1.txt", "file2.go"},
+	})
+	if !resp.OK {
+		t.Fatalf("expected OK, got error: %s", resp.Error)
+	}
+	if !receivedOpts.CopyUntracked {
+		t.Error("expected CopyUntracked to be true")
+	}
+	if len(receivedOpts.UntrackedFiles) != 2 {
+		t.Errorf("expected 2 untracked files, got %d", len(receivedOpts.UntrackedFiles))
+	}
+	if receivedOpts.UntrackedFiles[0] != "file1.txt" || receivedOpts.UntrackedFiles[1] != "file2.go" {
+		t.Errorf("unexpected untracked files: %v", receivedOpts.UntrackedFiles)
 	}
 }
 

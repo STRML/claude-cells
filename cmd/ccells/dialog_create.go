@@ -3,18 +3,26 @@ package main
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"time"
 	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 	"github.com/STRML/claude-cells/internal/claude"
+	"github.com/STRML/claude-cells/internal/git"
 	"github.com/STRML/claude-cells/internal/workstream"
 )
 
 // summarizeResultMsg is the result of an async title generation via Claude CLI.
 type summarizeResultMsg struct {
 	title string
+	err   error
+}
+
+// untrackedFilesMsg is the result of checking for untracked files.
+type untrackedFilesMsg struct {
+	files []string
 	err   error
 }
 
@@ -52,9 +60,9 @@ const (
 // Invoked via: ccells create --interactive
 // Runs inside tmux display-popup or the initial pane.
 //
-// Flow: 0=prompt → 1=generating (animated) → 2=creating (animated, auto-triggered)
+// Flow: 0=prompt → 1=generating (animated) → [untracked files prompt] → 2=creating (animated)
 // Title is generated via Claude CLI, branch name is derived from the title.
-// No confirmation step — creation starts automatically after title generation.
+// If untracked files are found, user is prompted before creation starts.
 type createDialog struct {
 	step          int // 0=prompt, 1=generating, 2=creating
 	prompt        string
@@ -67,6 +75,14 @@ type createDialog struct {
 	runtime       string
 	frame         int    // spinner frame index
 	containerName string // set after successful creation (for exec)
+
+	// Untracked files flow
+	untrackedFiles []string // populated after title gen
+	copyUntracked  bool     // user's choice (default true)
+	showUntracked  bool     // true when showing the untracked files Y/n prompt
+
+	// For testability: override the function that checks for untracked files
+	checkUntrackedFn func() ([]string, error)
 }
 
 func newCreateDialog(stateDir, runtime string) createDialog {
@@ -105,21 +121,25 @@ func (m createDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.title = msg.title
 			m.branch = workstream.GenerateBranchName(msg.title)
 		}
-		// Auto-advance to creating (no confirmation step)
-		m.step = 2
-		m.frame = 0
-		stateDir := m.stateDir
-		branch := m.branch
-		prompt := m.prompt
-		runtime := m.runtime
-		return m, tea.Batch(spinnerTick(), func() tea.Msg {
-			// skipPane=true: the dialog pane will exec into the container
-			result, err := runCreate(stateDir, branch, prompt, runtime, true)
-			if err != nil {
-				return createResultMsg{err: err}
-			}
-			return createResultMsg{containerName: result.ContainerName}
-		})
+		// Check for untracked files before creating
+		checkFn := m.checkUntrackedFn
+		if checkFn == nil {
+			checkFn = defaultCheckUntracked
+		}
+		return m, func() tea.Msg {
+			files, err := checkFn()
+			return untrackedFilesMsg{files: files, err: err}
+		}
+	case untrackedFilesMsg:
+		// Ignore errors — just skip the prompt
+		if msg.err == nil && len(msg.files) > 0 {
+			m.untrackedFiles = msg.files
+			m.copyUntracked = true // default to Yes
+			m.showUntracked = true
+			return m, nil // show Y/n prompt, no spinner
+		}
+		// No untracked files — proceed directly to create
+		return m.startCreate()
 	case createResultMsg:
 		if msg.err != nil {
 			m.err = msg.err
@@ -131,6 +151,10 @@ func (m createDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.done = true
 		return m, tea.Quit
 	case tea.KeyMsg:
+		// Handle untracked files prompt
+		if m.showUntracked {
+			return m.handleUntrackedKey(msg)
+		}
 		if m.step == 1 || m.step == 2 {
 			// Generating or creating — only allow quit
 			if msg.String() == "ctrl+c" || msg.String() == "esc" {
@@ -161,6 +185,53 @@ func (m createDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	}
 	return m, nil
+}
+
+// handleUntrackedKey processes key input during the untracked files Y/n prompt.
+func (m createDialog) handleUntrackedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c", "esc":
+		m.done = true
+		return m, tea.Quit
+	case "enter", "y", "Y":
+		// Yes — copy untracked files
+		m.copyUntracked = true
+		m.showUntracked = false
+		return m.startCreate()
+	case "n", "N":
+		// No — skip untracked files
+		m.copyUntracked = false
+		m.showUntracked = false
+		return m.startCreate()
+	}
+	return m, nil
+}
+
+// startCreate advances to step 2 and dispatches the async create operation.
+func (m createDialog) startCreate() (tea.Model, tea.Cmd) {
+	m.step = 2
+	m.frame = 0
+	stateDir := m.stateDir
+	branch := m.branch
+	prompt := m.prompt
+	runtime := m.runtime
+	copyUntracked := m.copyUntracked
+	untrackedFiles := m.untrackedFiles
+	return m, tea.Batch(spinnerTick(), func() tea.Msg {
+		var opts []createOpts
+		if copyUntracked && len(untrackedFiles) > 0 {
+			opts = append(opts, createOpts{
+				CopyUntracked:  true,
+				UntrackedFiles: untrackedFiles,
+			})
+		}
+		// skipPane=true: the dialog pane will exec into the container
+		result, err := runCreate(stateDir, branch, prompt, runtime, true, opts...)
+		if err != nil {
+			return createResultMsg{err: err}
+		}
+		return createResultMsg{containerName: result.ContainerName}
+	})
 }
 
 func (m createDialog) handleEnter() (tea.Model, tea.Cmd) {
@@ -205,7 +276,29 @@ func (m createDialog) View() tea.View {
 	case 1:
 		b.WriteString("\n")
 		b.WriteString(fmt.Sprintf("  %sTask%s  %s\n\n", cGray, cReset, m.prompt))
-		b.WriteString(fmt.Sprintf("  %s%s%s %sGenerating title...%s\n", cCyan, spinner, cReset, cDim, cReset))
+		if m.showUntracked {
+			// Show title/branch info + untracked files prompt
+			if m.title != "" {
+				b.WriteString(fmt.Sprintf("  %sTitle%s   %s%s%s\n", cGray, cReset, cWhite, m.title, cReset))
+			}
+			b.WriteString(fmt.Sprintf("  %sBranch%s  %s%s%s\n\n", cGray, cReset, cGreen, m.branch, cReset))
+			count := len(m.untrackedFiles)
+			b.WriteString(fmt.Sprintf("  %s%d untracked file(s) found.%s\n", cYellow, count, cReset))
+			// Show up to 5 files
+			shown := m.untrackedFiles
+			if len(shown) > 5 {
+				shown = shown[:5]
+			}
+			for _, f := range shown {
+				b.WriteString(fmt.Sprintf("    %s%s%s\n", cDim, f, cReset))
+			}
+			if count > 5 {
+				b.WriteString(fmt.Sprintf("    %s... and %d more%s\n", cDim, count-5, cReset))
+			}
+			b.WriteString(fmt.Sprintf("\n  %sCopy untracked files? [Y/n]%s\n", cWhite, cReset))
+		} else {
+			b.WriteString(fmt.Sprintf("  %s%s%s %sGenerating title...%s\n", cCyan, spinner, cReset, cDim, cReset))
+		}
 	case 2:
 		b.WriteString("\n")
 		if m.title != "" {
@@ -222,6 +315,18 @@ func (m createDialog) View() tea.View {
 
 	b.WriteString(fmt.Sprintf("\n  %s(Esc to cancel)%s", cDim, cReset))
 	return tea.NewView(b.String())
+}
+
+// defaultCheckUntracked checks for untracked files in the current working directory.
+func defaultCheckUntracked() ([]string, error) {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	gitOps := git.New(cwd)
+	return gitOps.GetUntrackedFiles(ctx)
 }
 
 // generateTitle calls Claude CLI to generate a short title from a task prompt.

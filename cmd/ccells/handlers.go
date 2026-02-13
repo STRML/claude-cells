@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/STRML/claude-cells/internal/daemon"
 	"github.com/STRML/claude-cells/internal/orchestrator"
 	"github.com/STRML/claude-cells/internal/tmux"
 	"github.com/STRML/claude-cells/internal/workstream"
@@ -32,14 +33,17 @@ func dockerExecWithAutoAccept(containerName, runtime string, extraFlags ...strin
 // handleCreate creates a workstream (container + worktree) and optionally a tmux pane.
 // When skipPane is true, the caller handles pane management (interactive mode — the dialog
 // pane will exec into the container). Returns the container name.
-func (h *actionHandlers) handleCreate(ctx context.Context, branch, prompt, runtime string, skipPane bool) (string, error) {
+func (h *actionHandlers) handleCreate(ctx context.Context, branch, prompt, runtime string, skipPane bool, extraOpts daemon.CreateExtraOpts) (string, error) {
 	// Create workstream object
 	ws := workstream.New(prompt)
 	ws.BranchName = branch // override auto-generated name with user-specified
 	ws.Runtime = runtime
 
 	// Create via orchestrator (worktree + container)
-	result, err := h.orch.CreateWorkstream(ctx, ws, orchestrator.CreateOptions{})
+	result, err := h.orch.CreateWorkstream(ctx, ws, orchestrator.CreateOptions{
+		CopyUntracked:  extraOpts.CopyUntracked,
+		UntrackedFiles: extraOpts.UntrackedFiles,
+	})
 	if err != nil {
 		return "", fmt.Errorf("create workstream: %w", err)
 	}

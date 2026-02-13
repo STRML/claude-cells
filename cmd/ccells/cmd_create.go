@@ -43,10 +43,16 @@ type createResult struct {
 	ContainerName string
 }
 
+// createOpts holds optional parameters for the create request.
+type createOpts struct {
+	CopyUntracked  bool
+	UntrackedFiles []string
+}
+
 // runCreate sends a create request to the daemon.
 // When skipPane is true, the daemon skips tmux pane management (caller handles it).
 // Returns the container name on success.
-func runCreate(stateDir, branch, prompt, runtime string, skipPane bool) (*createResult, error) {
+func runCreate(stateDir, branch, prompt, runtime string, skipPane bool, opts ...createOpts) (*createResult, error) {
 	if err := validateBranchName(branch); err != nil {
 		return nil, err
 	}
@@ -54,17 +60,24 @@ func runCreate(stateDir, branch, prompt, runtime string, skipPane bool) (*create
 	daemonSock := filepath.Join(stateDir, "daemon.sock")
 
 	type createParams struct {
-		Branch   string `json:"branch"`
-		Prompt   string `json:"prompt"`
-		Runtime  string `json:"runtime"`
-		SkipPane bool   `json:"skip_pane,omitempty"`
+		Branch         string   `json:"branch"`
+		Prompt         string   `json:"prompt"`
+		Runtime        string   `json:"runtime"`
+		SkipPane       bool     `json:"skip_pane,omitempty"`
+		CopyUntracked  bool     `json:"copy_untracked,omitempty"`
+		UntrackedFiles []string `json:"untracked_files,omitempty"`
 	}
-	params, _ := json.Marshal(createParams{
+	cp := createParams{
 		Branch:   branch,
 		Prompt:   prompt,
 		Runtime:  runtime,
 		SkipPane: skipPane,
-	})
+	}
+	if len(opts) > 0 {
+		cp.CopyUntracked = opts[0].CopyUntracked
+		cp.UntrackedFiles = opts[0].UntrackedFiles
+	}
+	params, _ := json.Marshal(cp)
 
 	// Create operations can take minutes (image build + container start).
 	resp, err := sendDaemonRequestWithResponse(daemonSock, "create", params, 3*time.Minute)

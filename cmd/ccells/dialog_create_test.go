@@ -64,26 +64,237 @@ func TestCreateDialog_PromptToGenerating(t *testing.T) {
 	}
 }
 
-func TestCreateDialog_SummarizeAutoCreates(t *testing.T) {
+// noUntrackedFiles is a test helper that returns no untracked files.
+func noUntrackedFiles() ([]string, error) {
+	return nil, nil
+}
+
+func TestCreateDialog_SummarizeDispatchesUntrackedCheck(t *testing.T) {
 	m := newCreateDialog("/tmp/state", "claude")
 	m.step = 1
 	m.prompt = "Add user authentication with OAuth2"
+	m.checkUntrackedFn = noUntrackedFiles
 
-	// Simulate successful title generation — should auto-advance to step 2 (creating)
+	// Simulate successful title generation — should dispatch untracked files check (not auto-create)
 	updated, cmd := m.Update(summarizeResultMsg{title: "OAuth2 User Auth", err: nil})
 	cd := updated.(createDialog)
-	if cd.step != 2 {
-		t.Errorf("after summarize success, step = %d, want 2 (creating)", cd.step)
-	}
 	if cd.title != "OAuth2 User Auth" {
 		t.Errorf("title = %q, want 'OAuth2 User Auth'", cd.title)
 	}
 	if cd.branch == "" {
 		t.Error("branch should be set after summarize")
 	}
-	// Should produce a batch command (create + spinner tick)
+	// Step should still be 1 (waiting for untracked check result)
+	if cd.step != 1 {
+		t.Errorf("after summarize, step = %d, want 1 (still generating, waiting for untracked check)", cd.step)
+	}
+	// Should produce an async command (untracked files check)
 	if cmd == nil {
-		t.Error("summarize success should produce async create command")
+		t.Error("summarize success should produce async untracked check command")
+	}
+}
+
+func TestCreateDialog_NoUntrackedAutoCreates(t *testing.T) {
+	m := newCreateDialog("/tmp/state", "claude")
+	m.step = 1
+	m.prompt = "Add user authentication"
+	m.title = "OAuth2 User Auth"
+	m.branch = "oauth2-user-auth"
+
+	// No untracked files → should auto-advance to step 2 (creating)
+	updated, cmd := m.Update(untrackedFilesMsg{files: nil, err: nil})
+	cd := updated.(createDialog)
+	if cd.step != 2 {
+		t.Errorf("after no untracked files, step = %d, want 2 (creating)", cd.step)
+	}
+	if cmd == nil {
+		t.Error("no untracked files should trigger create command")
+	}
+}
+
+func TestCreateDialog_UntrackedFilesShowPrompt(t *testing.T) {
+	m := newCreateDialog("/tmp/state", "claude")
+	m.step = 1
+	m.prompt = "Add auth"
+	m.title = "OAuth Auth"
+	m.branch = "oauth-auth"
+
+	// Untracked files found → should show Y/n prompt
+	updated, cmd := m.Update(untrackedFilesMsg{files: []string{"foo.txt", "bar.go"}, err: nil})
+	cd := updated.(createDialog)
+	if !cd.showUntracked {
+		t.Error("expected showUntracked to be true")
+	}
+	if cd.step != 1 {
+		t.Errorf("step should remain 1 while showing untracked prompt, got %d", cd.step)
+	}
+	if len(cd.untrackedFiles) != 2 {
+		t.Errorf("expected 2 untracked files, got %d", len(cd.untrackedFiles))
+	}
+	if !cd.copyUntracked {
+		t.Error("copyUntracked should default to true")
+	}
+	if cmd != nil {
+		t.Error("showing untracked prompt should not produce a command (waits for user input)")
+	}
+}
+
+func TestCreateDialog_UntrackedYesCopies(t *testing.T) {
+	m := newCreateDialog("/tmp/state", "claude")
+	m.step = 1
+	m.prompt = "Add auth"
+	m.branch = "add-auth"
+	m.showUntracked = true
+	m.untrackedFiles = []string{"foo.txt"}
+	m.copyUntracked = true
+
+	// Press 'y' to confirm
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	cd := updated.(createDialog)
+	if cd.showUntracked {
+		t.Error("showUntracked should be false after confirming")
+	}
+	if !cd.copyUntracked {
+		t.Error("copyUntracked should be true after pressing y")
+	}
+	if cd.step != 2 {
+		t.Errorf("step = %d, want 2 (creating)", cd.step)
+	}
+	if cmd == nil {
+		t.Error("confirming untracked should produce create command")
+	}
+}
+
+func TestCreateDialog_UntrackedEnterCopies(t *testing.T) {
+	m := newCreateDialog("/tmp/state", "claude")
+	m.step = 1
+	m.prompt = "Add auth"
+	m.branch = "add-auth"
+	m.showUntracked = true
+	m.untrackedFiles = []string{"foo.txt"}
+	m.copyUntracked = true
+
+	// Press Enter to confirm (default Yes)
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
+	cd := updated.(createDialog)
+	if cd.showUntracked {
+		t.Error("showUntracked should be false after Enter")
+	}
+	if !cd.copyUntracked {
+		t.Error("copyUntracked should be true after pressing Enter")
+	}
+	if cd.step != 2 {
+		t.Errorf("step = %d, want 2 (creating)", cd.step)
+	}
+	if cmd == nil {
+		t.Error("Enter should produce create command")
+	}
+}
+
+func TestCreateDialog_UntrackedNoSkips(t *testing.T) {
+	m := newCreateDialog("/tmp/state", "claude")
+	m.step = 1
+	m.prompt = "Add auth"
+	m.branch = "add-auth"
+	m.showUntracked = true
+	m.untrackedFiles = []string{"foo.txt"}
+	m.copyUntracked = true
+
+	// Press 'n' to decline
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	cd := updated.(createDialog)
+	if cd.showUntracked {
+		t.Error("showUntracked should be false after declining")
+	}
+	if cd.copyUntracked {
+		t.Error("copyUntracked should be false after pressing n")
+	}
+	if cd.step != 2 {
+		t.Errorf("step = %d, want 2 (creating)", cd.step)
+	}
+	if cmd == nil {
+		t.Error("declining untracked should still produce create command")
+	}
+}
+
+func TestCreateDialog_UntrackedEscQuits(t *testing.T) {
+	m := newCreateDialog("/tmp/state", "claude")
+	m.step = 1
+	m.showUntracked = true
+	m.untrackedFiles = []string{"foo.txt"}
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	cd := updated.(createDialog)
+	if !cd.done {
+		t.Error("esc during untracked prompt should set done")
+	}
+	if cmd == nil {
+		t.Error("esc during untracked prompt should produce quit command")
+	}
+}
+
+func TestCreateDialog_UntrackedErrorSkipsPrompt(t *testing.T) {
+	m := newCreateDialog("/tmp/state", "claude")
+	m.step = 1
+	m.prompt = "Add auth"
+	m.title = "Auth"
+	m.branch = "auth"
+
+	// Error checking untracked files → should skip prompt and auto-create
+	updated, cmd := m.Update(untrackedFilesMsg{files: nil, err: fmt.Errorf("git error")})
+	cd := updated.(createDialog)
+	if cd.showUntracked {
+		t.Error("error should skip the untracked prompt")
+	}
+	if cd.step != 2 {
+		t.Errorf("step = %d, want 2 (creating)", cd.step)
+	}
+	if cmd == nil {
+		t.Error("should produce create command even on error")
+	}
+}
+
+func TestCreateDialog_ViewUntrackedPrompt(t *testing.T) {
+	m := newCreateDialog("/tmp/state", "claude")
+	m.step = 1
+	m.prompt = "Add auth"
+	m.title = "OAuth Auth"
+	m.branch = "oauth-auth"
+	m.showUntracked = true
+	m.untrackedFiles = []string{"file1.txt", "file2.go", "dir/file3.rs"}
+
+	content := viewContent(m.View())
+	if !strings.Contains(content, "3 untracked file(s) found") {
+		t.Errorf("view should show file count, got: %s", content)
+	}
+	if !strings.Contains(content, "file1.txt") {
+		t.Errorf("view should show file names, got: %s", content)
+	}
+	if !strings.Contains(content, "Copy untracked files? [Y/n]") {
+		t.Errorf("view should show Y/n prompt, got: %s", content)
+	}
+	// Should show branch info
+	if !strings.Contains(content, "oauth-auth") {
+		t.Errorf("view should show branch, got: %s", content)
+	}
+}
+
+func TestCreateDialog_ViewUntrackedTruncatesLongList(t *testing.T) {
+	m := newCreateDialog("/tmp/state", "claude")
+	m.step = 1
+	m.prompt = "Add auth"
+	m.showUntracked = true
+	m.branch = "auth"
+	m.untrackedFiles = []string{"f1", "f2", "f3", "f4", "f5", "f6", "f7"}
+
+	content := viewContent(m.View())
+	// Should show "... and 2 more" (7 - 5 = 2)
+	if !strings.Contains(content, "... and 2 more") {
+		t.Errorf("view should truncate long file list, got: %s", content)
+	}
+	// Should NOT show f6 or f7
+	if strings.Contains(content, "f6") {
+		t.Errorf("view should not show files beyond first 5, got: %s", content)
 	}
 }
 
@@ -91,13 +302,11 @@ func TestCreateDialog_SummarizeFallback(t *testing.T) {
 	m := newCreateDialog("/tmp/state", "claude")
 	m.step = 1
 	m.prompt = "Add user authentication"
+	m.checkUntrackedFn = noUntrackedFiles
 
-	// Simulate Claude failure — should fall back to branch from prompt and auto-create
+	// Simulate Claude failure — should fall back to branch from prompt
 	updated, cmd := m.Update(summarizeResultMsg{title: "", err: fmt.Errorf("claude not available")})
 	cd := updated.(createDialog)
-	if cd.step != 2 {
-		t.Errorf("after summarize error, step = %d, want 2 (creating)", cd.step)
-	}
 	if cd.title != "" {
 		t.Errorf("title should be empty on fallback, got %q", cd.title)
 	}
@@ -108,9 +317,9 @@ func TestCreateDialog_SummarizeFallback(t *testing.T) {
 	if cd.branch != "add-user-authentication" {
 		t.Errorf("branch = %q, want 'add-user-authentication'", cd.branch)
 	}
-	// Should still produce create command
+	// Should produce untracked check command (not directly create)
 	if cmd == nil {
-		t.Error("summarize fallback should produce async create command")
+		t.Error("summarize fallback should produce async untracked check command")
 	}
 }
 
@@ -400,6 +609,7 @@ func TestGenerateTitle_StripQuotes(t *testing.T) {
 	m := newCreateDialog("/tmp/state", "claude")
 	m.step = 1
 	m.prompt = "test"
+	m.checkUntrackedFn = noUntrackedFiles
 
 	// Title with quotes should still work
 	updated, _ := m.Update(summarizeResultMsg{title: "Add OAuth Login", err: nil})
