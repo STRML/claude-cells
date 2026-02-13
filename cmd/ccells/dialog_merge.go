@@ -31,7 +31,7 @@ func (m mergeDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
-		case "ctrl+c", "esc":
+		case "ctrl+c", "esc", "q":
 			m.done = true
 			return m, tea.Quit
 		case "up", "k":
@@ -71,6 +71,7 @@ func (m mergeDialog) View() tea.View {
 
 	if len(m.items) == 0 {
 		b.WriteString("  No workstreams available.\n")
+		b.WriteString("\n  (Esc to close)")
 		return tea.NewView(b.String())
 	}
 

@@ -65,6 +65,8 @@ func (m createDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				_, size := utf8.DecodeLastRuneInString(m.input)
 				m.input = m.input[:len(m.input)-size]
 			}
+		case "space":
+			m.input += " "
 		default:
 			if len(msg.String()) == 1 {
 				m.input += msg.String()
