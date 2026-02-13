@@ -629,9 +629,6 @@ func runCreateInteractive(stateDir, runtime string) error {
 	exec.Command("tmux", "set-option", "-p", "@ccells-border-text",
 		tmux.FormatPaneBorder(final.branch, "running", 0, "")).Run()
 
-	// Rebalance layout after pane identity changes
-	exec.Command("tmux", "select-layout", "tiled").Run()
-
 	// Exec into the container — replaces this process with docker exec.
 	// The dialog pane seamlessly becomes the workstream.
 	rt := runtime
@@ -647,25 +644,28 @@ func runCreateInteractive(stateDir, runtime string) error {
 	// Claude Code shows an interactive confirmation when --dangerously-skip-permissions is used.
 	// The old PTY-based TUI auto-accepted this; in tmux we use send-keys instead.
 	// This process survives syscall.Exec since it's a separate child process.
-	exec.Command("sh", "-c", `
+	// Use $TMUX_PANE to target the correct pane in multi-pane sessions.
+	paneID := os.Getenv("TMUX_PANE")
+	exec.Command("sh", "-c", fmt.Sprintf(`
+		PANE="%s"
 		sleep 2
 		for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-			content=$(tmux capture-pane -p 2>/dev/null)
+			content=$(tmux capture-pane -t "$PANE" -p 2>/dev/null)
 			if echo "$content" | grep -q "Bypass Permissions mode"; then
 				sleep 0.2
-				tmux send-keys Down
+				tmux send-keys -t "$PANE" Down
 				sleep 0.1
-				tmux send-keys Enter
+				tmux send-keys -t "$PANE" Enter
 				exit 0
 			fi
 			if echo "$content" | grep -q "Enter to confirm"; then
 				sleep 0.2
-				tmux send-keys Enter
+				tmux send-keys -t "$PANE" Enter
 				exit 0
 			fi
 			sleep 1
 		done
-	`).Start()
+	`, paneID)).Start()
 
 	return syscall.Exec(dockerPath, []string{
 		"docker", "exec", "-it", final.containerName,
