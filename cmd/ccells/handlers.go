@@ -29,12 +29,14 @@ func (h *actionHandlers) handleCreate(ctx context.Context, branch, prompt, runti
 		return fmt.Errorf("create workstream: %w", err)
 	}
 
-	// Build docker exec command for the pane
+	// Build docker exec command for the pane.
+	// --dangerously-skip-permissions is safe here: containers are isolated environments.
+	// This also bypasses the workspace trust dialog ("Is this a project you trust?").
 	rt := runtime
 	if rt == "" {
 		rt = "claude"
 	}
-	cmd := fmt.Sprintf("docker exec -it %s %s", result.ContainerName, rt)
+	cmd := fmt.Sprintf("docker exec -it %s %s --dangerously-skip-permissions", result.ContainerName, rt)
 
 	// Check if we should respawn the initial empty pane or split
 	panes, err := h.tmux.ListPanes(ctx, h.session)
@@ -126,7 +128,7 @@ func (h *actionHandlers) handleUnpause(ctx context.Context, name string) error {
 
 	// Respawn the pane to restart Claude in the container
 	rt := "claude" // TODO: store runtime in pane metadata
-	cmd := fmt.Sprintf("docker exec -it %s %s --resume", containerName, rt)
+	cmd := fmt.Sprintf("docker exec -it %s %s --dangerously-skip-permissions --resume", containerName, rt)
 	h.tmux.RespawnPane(ctx, paneID, cmd)
 
 	return nil

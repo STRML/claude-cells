@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net"
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -417,6 +419,11 @@ func writeResponse(conn net.Conn, resp Response) {
 		return
 	}
 	if err := json.NewEncoder(conn).Encode(resp); err != nil {
+		// Broken pipe is expected when the client disconnects before reading
+		// the response (e.g., during shutdown or timeout). Don't log it.
+		if errors.Is(err, syscall.EPIPE) {
+			return
+		}
 		log.Printf("[daemon] write response: %v", err)
 	}
 }
