@@ -215,11 +215,12 @@ func (c *Client) ConfigureChrome(ctx context.Context, session, ccellsBin string)
 		return fmt.Errorf("set status-interval: %w", err)
 	}
 
-	// Multi-line status if tmux >= 3.4: line 1 = workstreams, line 2 = keyhints
-	if tmuxVersionAtLeast(c, ctx, 3, 4) {
-		if _, err := c.run(ctx, "set-option", "-t", session, "-g", "status", "2"); err != nil {
-			return fmt.Errorf("set status lines: %w", err)
-		}
+	// Hide the default tmux window list (we don't use windows, only panes)
+	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "window-status-format", ""); err != nil {
+		return fmt.Errorf("set window-status-format: %w", err)
+	}
+	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "window-status-current-format", ""); err != nil {
+		return fmt.Errorf("set window-status-current-format: %w", err)
 	}
 
 	// Keybindings

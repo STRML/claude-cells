@@ -33,11 +33,6 @@ func runUp(ctx context.Context, repoID, repoPath, stateDir, runtime string) erro
 		return attachErr
 	}
 
-	// Create new session
-	if err := client.NewSession(ctx, sessionName); err != nil {
-		return fmt.Errorf("failed to create tmux session: %w", err)
-	}
-
 	// Resolve path to ccells binary for keybindings
 	ccellsBin, err := os.Executable()
 	if err != nil {
@@ -46,25 +41,38 @@ func runUp(ctx context.Context, repoID, repoPath, stateDir, runtime string) erro
 		ccellsBin, _ = filepath.Abs(ccellsBin)
 	}
 
+	// Determine initial pane command based on state.
+	// First time (no state file): full welcome screen with intro + keybindings.
+	// Returning with 0 workstreams: jump straight to create dialog.
+	// Has workstreams: normal shell (workstream panes restore separately).
+	var paneCmd string
+	firstTime := !workstream.StateExists(stateDir)
+	if firstTime {
+		paneCmd = fmt.Sprintf("'%s' welcome; exec \"$SHELL\"", ccellsBin)
+	} else {
+		hasWorkstreams := false
+		if state, err := workstream.LoadState(stateDir); err == nil && len(state.Workstreams) > 0 {
+			hasWorkstreams = true
+		}
+		if !hasWorkstreams {
+			paneCmd = fmt.Sprintf("'%s' create --interactive; exec \"$SHELL\"", ccellsBin)
+		}
+	}
+
+	// Create tmux session — with startup command if needed, plain shell otherwise.
+	if paneCmd != "" {
+		if err := client.NewSessionWithCommand(ctx, sessionName, paneCmd); err != nil {
+			return fmt.Errorf("failed to create tmux session: %w", err)
+		}
+	} else {
+		if err := client.NewSession(ctx, sessionName); err != nil {
+			return fmt.Errorf("failed to create tmux session: %w", err)
+		}
+	}
+
 	// Configure tmux chrome (status line, pane borders, keybindings)
 	if err := client.ConfigureChrome(ctx, sessionName, ccellsBin); err != nil {
 		fmt.Fprintf(os.Stderr, "Warning: failed to configure tmux chrome: %v\n", err)
-	}
-
-	// Launch welcome or create dialog in the initial pane.
-	// First time ever (no state file): show full welcome screen with intro.
-	// Returning with 0 workstreams: go straight to create dialog.
-	firstTime := !workstream.StateExists(stateDir)
-	if firstTime {
-		welcomeCmd := fmt.Sprintf("'%s' welcome", ccellsBin)
-		if err := client.SendKeys(ctx, sessionName+":0.0", welcomeCmd, "Enter"); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to launch welcome: %v\n", err)
-		}
-	} else {
-		createCmd := fmt.Sprintf("'%s' create --interactive", ccellsBin)
-		if err := client.SendKeys(ctx, sessionName+":0.0", createCmd, "Enter"); err != nil {
-			fmt.Fprintf(os.Stderr, "Warning: failed to launch create dialog: %v\n", err)
-		}
 	}
 
 	// Create Docker client and orchestrator for workstream operations

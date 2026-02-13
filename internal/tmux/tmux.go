@@ -78,6 +78,13 @@ func (c *Client) NewSession(ctx context.Context, name string) error {
 	return err
 }
 
+// NewSessionWithCommand creates a new detached tmux session whose initial pane
+// runs the given shell command instead of the default shell.
+func (c *Client) NewSessionWithCommand(ctx context.Context, name, command string) error {
+	_, err := c.run(ctx, "new-session", "-d", "-s", name, "-x", "200", "-y", "50", command)
+	return err
+}
+
 // HasSession checks if a named session exists.
 func (c *Client) HasSession(ctx context.Context, name string) (bool, error) {
 	_, err := c.run(ctx, "has-session", "-t", name)
