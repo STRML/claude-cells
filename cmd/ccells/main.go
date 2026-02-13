@@ -111,6 +111,8 @@ func (l *lockFile) Release() {
 }
 
 // getRepoInfo returns the repoID, project path, and state directory.
+// When not in a git repo or state dir can't be resolved, stateDir is empty
+// and an error is returned.
 func getRepoInfo() (repoID, repoPath, stateDir string, err error) {
 	repoPath, err = os.Getwd()
 	if err != nil {
@@ -122,13 +124,16 @@ func getRepoInfo() (repoID, repoPath, stateDir string, err error) {
 
 	gitOps := git.New(repoPath)
 	repoID, err = gitOps.RepoID(ctx)
-	if err != nil || repoID == "" {
-		return "", repoPath, repoPath, nil
+	if err != nil {
+		return "", repoPath, "", fmt.Errorf("not in a git repository: %w", err)
+	}
+	if repoID == "" {
+		return "", repoPath, "", fmt.Errorf("could not determine repository ID")
 	}
 
 	stateDir, err = workstream.GetStateDir(repoID)
 	if err != nil {
-		return repoID, repoPath, repoPath, nil
+		return repoID, repoPath, "", fmt.Errorf("could not determine state directory: %w", err)
 	}
 
 	return repoID, repoPath, stateDir, nil
@@ -140,9 +145,6 @@ func getStateDir() (string, error) {
 	_, _, stateDir, err := getRepoInfo()
 	if err != nil {
 		return "", err
-	}
-	if stateDir == "" {
-		return "", fmt.Errorf("could not determine state directory (not in a git repository?)")
 	}
 	return stateDir, nil
 }
