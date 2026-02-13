@@ -20,7 +20,8 @@ type summarizeResultMsg struct {
 
 // createResultMsg is the result of an async create operation.
 type createResultMsg struct {
-	err error
+	err           error
+	containerName string
 }
 
 // tickMsg drives the spinner animation.
@@ -55,16 +56,17 @@ const (
 // Title is generated via Claude CLI, branch name is derived from the title.
 // No confirmation step — creation starts automatically after title generation.
 type createDialog struct {
-	step     int // 0=prompt, 1=generating, 2=creating
-	prompt   string
-	title    string // AI-generated short title
-	branch   string
-	input    string
-	err      error
-	done     bool
-	stateDir string
-	runtime  string
-	frame    int // spinner frame index
+	step          int // 0=prompt, 1=generating, 2=creating
+	prompt        string
+	title         string // AI-generated short title
+	branch        string
+	input         string
+	err           error
+	done          bool
+	stateDir      string
+	runtime       string
+	frame         int    // spinner frame index
+	containerName string // set after successful creation (for exec)
 }
 
 func newCreateDialog(stateDir, runtime string) createDialog {
@@ -111,7 +113,12 @@ func (m createDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		prompt := m.prompt
 		runtime := m.runtime
 		return m, tea.Batch(spinnerTick(), func() tea.Msg {
-			return createResultMsg{err: runCreate(stateDir, branch, prompt, runtime)}
+			// skipPane=true: the dialog pane will exec into the container
+			result, err := runCreate(stateDir, branch, prompt, runtime, true)
+			if err != nil {
+				return createResultMsg{err: err}
+			}
+			return createResultMsg{containerName: result.ContainerName}
 		})
 	case createResultMsg:
 		if msg.err != nil {
@@ -120,6 +127,7 @@ func (m createDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.input = m.prompt
 			return m, nil
 		}
+		m.containerName = msg.containerName
 		m.done = true
 		return m, tea.Quit
 	case tea.KeyMsg:

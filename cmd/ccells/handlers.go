@@ -16,8 +16,10 @@ type actionHandlers struct {
 	session string
 }
 
-// handleCreate creates a workstream (container + worktree) and a tmux pane.
-func (h *actionHandlers) handleCreate(ctx context.Context, branch, prompt, runtime string) error {
+// handleCreate creates a workstream (container + worktree) and optionally a tmux pane.
+// When skipPane is true, the caller handles pane management (interactive mode — the dialog
+// pane will exec into the container). Returns the container name.
+func (h *actionHandlers) handleCreate(ctx context.Context, branch, prompt, runtime string, skipPane bool) (string, error) {
 	// Create workstream object
 	ws := workstream.New(prompt)
 	ws.BranchName = branch // override auto-generated name with user-specified
@@ -26,7 +28,13 @@ func (h *actionHandlers) handleCreate(ctx context.Context, branch, prompt, runti
 	// Create via orchestrator (worktree + container)
 	result, err := h.orch.CreateWorkstream(ctx, ws, orchestrator.CreateOptions{})
 	if err != nil {
-		return fmt.Errorf("create workstream: %w", err)
+		return "", fmt.Errorf("create workstream: %w", err)
+	}
+
+	// In interactive mode, the calling pane will exec into the container itself.
+	// We just return the container name — no pane management needed.
+	if skipPane {
+		return result.ContainerName, nil
 	}
 
 	// Build docker exec command for the pane.
@@ -41,7 +49,7 @@ func (h *actionHandlers) handleCreate(ctx context.Context, branch, prompt, runti
 	// Check if we should respawn the initial empty pane or split
 	panes, err := h.tmux.ListPanes(ctx, h.session)
 	if err != nil {
-		return fmt.Errorf("list panes: %w", err)
+		return result.ContainerName, fmt.Errorf("list panes: %w", err)
 	}
 
 	var paneID string
@@ -51,7 +59,7 @@ func (h *actionHandlers) handleCreate(ctx context.Context, branch, prompt, runti
 		if wsName == "" {
 			// Initial empty pane — respawn it with the workstream command
 			if err := h.tmux.RespawnPane(ctx, panes[0].ID, cmd); err != nil {
-				return fmt.Errorf("respawn pane: %w", err)
+				return result.ContainerName, fmt.Errorf("respawn pane: %w", err)
 			}
 			paneID = panes[0].ID
 		}
@@ -61,7 +69,7 @@ func (h *actionHandlers) handleCreate(ctx context.Context, branch, prompt, runti
 		// Split window for additional panes
 		id, err := h.tmux.SplitWindow(ctx, h.session, cmd)
 		if err != nil {
-			return fmt.Errorf("split window: %w", err)
+			return result.ContainerName, fmt.Errorf("split window: %w", err)
 		}
 		paneID = id
 		// Rebalance layout
@@ -74,7 +82,7 @@ func (h *actionHandlers) handleCreate(ctx context.Context, branch, prompt, runti
 	h.tmux.SetPaneOption(ctx, paneID, "@ccells-border-text",
 		tmux.FormatPaneBorder(branch, "running", 0, ""))
 
-	return nil
+	return result.ContainerName, nil
 }
 
 // handleRemove destroys a workstream and its tmux pane.

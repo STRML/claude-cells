@@ -133,12 +133,14 @@ func daemonRequest(t *testing.T, sockPath string, action string, params interfac
 
 // noopHandlers returns handler functions that always succeed (for testing).
 func noopHandlers() (
-	func(context.Context, string, string, string) error,
+	func(context.Context, string, string, string, bool) (string, error),
 	func(context.Context, string) error,
 	func(context.Context, string) error,
 	func(context.Context, string) error,
 ) {
-	return func(ctx context.Context, branch, prompt, runtime string) error { return nil },
+	return func(ctx context.Context, branch, prompt, runtime string, skipPane bool) (string, error) {
+			return "test-container", nil
+		},
 		func(ctx context.Context, name string) error { return nil },
 		func(ctx context.Context, name string) error { return nil },
 		func(ctx context.Context, name string) error { return nil }
@@ -519,6 +521,9 @@ func TestDaemonWriteResponse(t *testing.T) {
 	if data["status"] != "created" {
 		t.Errorf("expected status 'created' in response, got %q", data["status"])
 	}
+	if data["container"] != "test-container" {
+		t.Errorf("expected container 'test-container' in response, got %q", data["container"])
+	}
 }
 
 func TestDaemonHandlerNotConfigured(t *testing.T) {
@@ -560,8 +565,8 @@ func TestDaemonCreateHandlerError(t *testing.T) {
 
 	d := New(Config{
 		SocketPath: sockPath,
-		OnCreate: func(ctx context.Context, branch, prompt, runtime string) error {
-			return fmt.Errorf("container creation failed")
+		OnCreate: func(ctx context.Context, branch, prompt, runtime string, skipPane bool) (string, error) {
+			return "", fmt.Errorf("container creation failed")
 		},
 	})
 

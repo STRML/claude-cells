@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -150,25 +151,70 @@ func getStateDir() (string, error) {
 }
 
 func printKeybindings() {
-	fmt.Print(`
-  Claude Cells - Keybindings
-  ══════════════════════════
+	// Detect prefix from tmux (works inside tmux session)
+	prefix := "^b" // default
+	if out, err := exec.Command("tmux", "show-option", "-gv", "prefix").Output(); err == nil {
+		raw := strings.TrimSpace(string(out))
+		if strings.HasPrefix(raw, "C-") {
+			prefix = "^" + strings.TrimPrefix(raw, "C-")
+		} else if raw != "" {
+			prefix = raw
+		}
+	}
 
-  prefix + n     Create new workstream
-  prefix + x     Destroy workstream
-  prefix + p     Pause current workstream
-  prefix + r     Resume current workstream
-  prefix + m     Create/view pull request
-  prefix + s     Refresh status line
-  prefix + ?     Show this help
+	const (
+		bold    = "\033[1m"
+		dim     = "\033[2m"
+		reset   = "\033[0m"
+		cyan    = "\033[36m"
+		cyanB   = "\033[1;36m"
+		magenta = "\033[1;35m"
+		green   = "\033[1;32m"
+		gray    = "\033[90m"
+		white   = "\033[97m"
+		under   = "\033[4m"
+	)
 
-  Standard tmux keybindings also work:
-  prefix + arrow  Navigate between panes
-  prefix + z      Zoom current pane (toggle)
-  prefix + d      Detach from session
+	var b strings.Builder
+	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf("  %s⚡ K E Y B I N D I N G S%s\n", cyanB, reset))
+	b.WriteString(fmt.Sprintf("  %s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n", dim, reset))
 
-  Press Enter to close.
-`)
+	// Workstream keys
+	b.WriteString(fmt.Sprintf("\n  %sWorkstreams%s\n\n", white, reset))
+	keys := []struct{ key, label string }{
+		{"n", "Create new workstream"},
+		{"x", "Destroy workstream"},
+		{"p", "Pause current workstream"},
+		{"r", "Resume current workstream"},
+		{"m", "Create/view pull request"},
+		{"s", "Refresh status line"},
+		{"?", "Show this help"},
+	}
+	for _, k := range keys {
+		b.WriteString(fmt.Sprintf("    %s%s+%s%s  %s%s%s\n",
+			magenta, prefix, k.key, reset, gray, k.label, reset))
+	}
+
+	// Tmux navigation
+	b.WriteString(fmt.Sprintf("\n  %sNavigation%s\n\n", white, reset))
+	nav := []struct{ key, label string }{
+		{"←→↑↓", "Navigate between panes"},
+		{"z", "Zoom current pane"},
+		{"d", "Detach from session"},
+	}
+	for _, k := range nav {
+		b.WriteString(fmt.Sprintf("    %s%s+%s%s  %s%s%s\n",
+			green, prefix, k.key, reset, gray, k.label, reset))
+	}
+
+	// Tmux reference
+	b.WriteString(fmt.Sprintf("\n  %s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n", dim, reset))
+	b.WriteString(fmt.Sprintf("  %sTmux Reference%s  %s%shttps://tmuxcheatsheet.com/%s\n",
+		dim, reset, under, cyan, reset))
+
+	b.WriteString(fmt.Sprintf("\n  %sPress Enter to close.%s\n", dim, reset))
+	fmt.Print(b.String())
 	fmt.Scanln()
 }
 
@@ -393,7 +439,7 @@ func main() {
 					os.Exit(1)
 				}
 			}
-			if err := runCreate(stateDir, branch, prompt, runtime); err != nil {
+			if _, err := runCreate(stateDir, branch, prompt, runtime, false); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				os.Exit(1)
 			}
@@ -534,11 +580,44 @@ func main() {
 }
 
 // runCreateInteractive launches the interactive create dialog as a Bubble Tea program.
+// On success, the process execs into the container — the dialog pane transforms
+// into the workstream pane seamlessly.
 func runCreateInteractive(stateDir, runtime string) error {
 	m := newCreateDialog(stateDir, runtime)
 	p := tea.NewProgram(m)
-	_, err := p.Run()
-	return err
+	result, err := p.Run()
+	if err != nil {
+		return err
+	}
+
+	final, ok := result.(createDialog)
+	if !ok || final.containerName == "" {
+		return nil // user cancelled or no container created
+	}
+
+	// Set tmux pane metadata so reconciliation can identify this pane
+	exec.Command("tmux", "set-option", "-p", "@ccells-workstream", final.branch).Run()
+	exec.Command("tmux", "set-option", "-p", "@ccells-container", final.containerName).Run()
+	exec.Command("tmux", "set-option", "-p", "@ccells-border-text",
+		tmux.FormatPaneBorder(final.branch, "running", 0, "")).Run()
+
+	// Rebalance layout after pane identity changes
+	exec.Command("tmux", "select-layout", "tiled").Run()
+
+	// Exec into the container — replaces this process with docker exec.
+	// The dialog pane seamlessly becomes the workstream.
+	rt := runtime
+	if rt == "" {
+		rt = "claude"
+	}
+	dockerPath, err := exec.LookPath("docker")
+	if err != nil {
+		return fmt.Errorf("docker not found: %w", err)
+	}
+	return syscall.Exec(dockerPath, []string{
+		"docker", "exec", "-it", final.containerName,
+		rt, "--dangerously-skip-permissions",
+	}, os.Environ())
 }
 
 // runRmInteractive launches the interactive rm dialog as a Bubble Tea program.

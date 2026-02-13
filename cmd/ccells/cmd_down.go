@@ -64,14 +64,20 @@ func sendDaemonRequest(sockPath, action string) error {
 
 // sendDaemonRequestWithResponse sends a request with optional params and returns the response.
 // The connection is always closed before returning.
-func sendDaemonRequestWithResponse(sockPath, action string, params json.RawMessage) (*daemonResponse, error) {
+// An optional timeout can be provided; defaults to 5 seconds.
+func sendDaemonRequestWithResponse(sockPath, action string, params json.RawMessage, timeout ...time.Duration) (*daemonResponse, error) {
+	t := 5 * time.Second
+	if len(timeout) > 0 {
+		t = timeout[0]
+	}
+
 	conn, err := net.DialTimeout("unix", sockPath, 2*time.Second)
 	if err != nil {
 		return nil, fmt.Errorf("daemon not reachable: %w", err)
 	}
 	defer conn.Close()
 
-	conn.SetDeadline(time.Now().Add(5 * time.Second))
+	conn.SetDeadline(time.Now().Add(t))
 
 	req := struct {
 		Action string          `json:"action"`

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 )
 
 // validateBranchName checks a branch name for unsafe characters.
@@ -36,28 +37,52 @@ func validateBranchName(branch string) error {
 	return nil
 }
 
+// createResult holds the response from a successful create operation.
+type createResult struct {
+	Branch        string
+	ContainerName string
+}
+
 // runCreate sends a create request to the daemon.
-func runCreate(stateDir, branch, prompt, runtime string) error {
+// When skipPane is true, the daemon skips tmux pane management (caller handles it).
+// Returns the container name on success.
+func runCreate(stateDir, branch, prompt, runtime string, skipPane bool) (*createResult, error) {
 	if err := validateBranchName(branch); err != nil {
-		return err
+		return nil, err
 	}
 
 	daemonSock := filepath.Join(stateDir, "daemon.sock")
 
-	params, _ := json.Marshal(map[string]string{
-		"branch":  branch,
-		"prompt":  prompt,
-		"runtime": runtime,
+	type createParams struct {
+		Branch   string `json:"branch"`
+		Prompt   string `json:"prompt"`
+		Runtime  string `json:"runtime"`
+		SkipPane bool   `json:"skip_pane,omitempty"`
+	}
+	params, _ := json.Marshal(createParams{
+		Branch:   branch,
+		Prompt:   prompt,
+		Runtime:  runtime,
+		SkipPane: skipPane,
 	})
 
-	resp, err := sendDaemonRequestWithResponse(daemonSock, "create", params)
+	// Create operations can take minutes (image build + container start).
+	resp, err := sendDaemonRequestWithResponse(daemonSock, "create", params, 3*time.Minute)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !resp.OK {
-		return fmt.Errorf("create failed: %s", resp.Error)
+		return nil, fmt.Errorf("create failed: %s", resp.Error)
 	}
 
-	fmt.Printf("Workstream created on branch: %s\n", branch)
-	return nil
+	// Parse response data for container name
+	var data map[string]string
+	if resp.Data != nil {
+		json.Unmarshal(resp.Data, &data)
+	}
+
+	return &createResult{
+		Branch:        branch,
+		ContainerName: data["container"],
+	}, nil
 }

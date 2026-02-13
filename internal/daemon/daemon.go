@@ -51,7 +51,8 @@ type Config struct {
 
 	// Action handlers — called when CLI sends requests via socket.
 	// If nil, the corresponding action returns "not configured".
-	OnCreate  func(ctx context.Context, branch, prompt, runtime string) error
+	// OnCreate returns the container name on success (used by interactive mode to exec into it).
+	OnCreate  func(ctx context.Context, branch, prompt, runtime string, skipPane bool) (containerName string, err error)
 	OnRemove  func(ctx context.Context, name string) error
 	OnPause   func(ctx context.Context, name string) error
 	OnUnpause func(ctx context.Context, name string) error
@@ -222,9 +223,10 @@ func (d *Daemon) dispatch(ctx context.Context, req Request) Response {
 
 // CreateParams holds parameters for the create action.
 type CreateParams struct {
-	Branch  string `json:"branch"`
-	Prompt  string `json:"prompt"`
-	Runtime string `json:"runtime"`
+	Branch   string `json:"branch"`
+	Prompt   string `json:"prompt"`
+	Runtime  string `json:"runtime"`
+	SkipPane bool   `json:"skip_pane,omitempty"`
 }
 
 // WorkstreamParams holds parameters for rm/pause/unpause actions.
@@ -271,11 +273,16 @@ func (d *Daemon) handleCreate(ctx context.Context, params json.RawMessage) Respo
 	if d.config.OnCreate == nil {
 		return Response{Error: "create handler not configured"}
 	}
-	if err := d.config.OnCreate(ctx, p.Branch, p.Prompt, p.Runtime); err != nil {
+	containerName, err := d.config.OnCreate(ctx, p.Branch, p.Prompt, p.Runtime, p.SkipPane)
+	if err != nil {
 		return Response{Error: fmt.Sprintf("create failed: %v", err)}
 	}
 
-	data, err := json.Marshal(map[string]string{"status": "created", "branch": p.Branch})
+	data, err := json.Marshal(map[string]string{
+		"status":    "created",
+		"branch":    p.Branch,
+		"container": containerName,
+	})
 	if err != nil {
 		return Response{Error: fmt.Sprintf("marshal response: %v", err)}
 	}
