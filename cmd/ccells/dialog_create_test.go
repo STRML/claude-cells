@@ -795,3 +795,60 @@ func TestRenderInputBox_ScrollsWhenFull(t *testing.T) {
 		t.Errorf("last line should be visible, got: %s", box)
 	}
 }
+
+func TestRenderInputBox_WrapsLongLine(t *testing.T) {
+	// Create a string longer than contentWidth (56 chars)
+	long := strings.Repeat("a", 70)
+	box := renderInputBox(long)
+	// The full text should be visible (wrapped across lines)
+	// First 56 chars on line 1, remaining on line 2
+	if !strings.Contains(box, strings.Repeat("a", 56)) {
+		t.Errorf("should contain full-width segment, got: %s", box)
+	}
+	// Count content lines: should have wrapped into 2 lines + cursor on 2nd
+	// Box has 4 rows minimum, so all content fits
+	lines := strings.Split(strings.TrimRight(box, "\n"), "\n")
+	// 1 top border + 4 content + 1 bottom = 6
+	if len(lines) != 6 {
+		t.Errorf("expected 6 lines, got %d", len(lines))
+	}
+}
+
+func TestRenderInputBox_WrapScrollsCombined(t *testing.T) {
+	// A long line that wraps beyond inputBoxRows should scroll
+	// contentWidth = 56, inputBoxRows = 4
+	// 280 chars = 5 wrapped lines, only last 4 visible
+	long := strings.Repeat("x", 280)
+	box := renderInputBox(long)
+	if !strings.Contains(box, "█") {
+		t.Error("cursor should be visible")
+	}
+	// Should have exactly 6 lines (border + 4 rows + border)
+	lines := strings.Split(strings.TrimRight(box, "\n"), "\n")
+	if len(lines) != 6 {
+		t.Errorf("expected 6 lines, got %d", len(lines))
+	}
+}
+
+func TestWrapLine(t *testing.T) {
+	tests := []struct {
+		name  string
+		line  string
+		width int
+		want  int // expected number of wrapped lines
+	}{
+		{"short", "hello", 10, 1},
+		{"exact", "1234567890", 10, 1},
+		{"wraps once", "12345678901", 10, 2},
+		{"wraps twice", "123456789012345678901", 10, 3},
+		{"empty", "", 10, 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := wrapLine(tt.line, tt.width)
+			if len(got) != tt.want {
+				t.Errorf("wrapLine(%q, %d) = %d lines, want %d", tt.line, tt.width, len(got), tt.want)
+			}
+		})
+	}
+}

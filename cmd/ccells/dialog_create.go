@@ -360,12 +360,33 @@ func (m createDialog) viewUntracked(b *strings.Builder) {
 	b.WriteString(fmt.Sprintf("\n  %s[↑/↓] navigate  [Enter] select  [Esc] Cancel%s", cDim, cReset))
 }
 
-// renderInputBox draws a bordered text input box with cursor.
+// wrapLine wraps a single line into multiple lines at the given width.
+func wrapLine(line string, width int) []string {
+	runes := []rune(line)
+	if len(runes) <= width {
+		return []string{line}
+	}
+	var wrapped []string
+	for len(runes) > width {
+		wrapped = append(wrapped, string(runes[:width]))
+		runes = runes[width:]
+	}
+	wrapped = append(wrapped, string(runes))
+	return wrapped
+}
+
+// renderInputBox draws a bordered text input box with cursor and word wrapping.
 func renderInputBox(text string) string {
 	contentWidth := inputBoxInnerWidth - 2 // minus leading+trailing space
 
-	// Split into lines, add cursor to last line
-	lines := strings.Split(text+"█", "\n")
+	// Split into lines (Shift+Enter creates explicit newlines), add cursor to last line
+	rawLines := strings.Split(text+"█", "\n")
+
+	// Wrap each line at contentWidth
+	var lines []string
+	for _, raw := range rawLines {
+		lines = append(lines, wrapLine(raw, contentWidth)...)
+	}
 
 	// Ensure minimum visible rows
 	for len(lines) < inputBoxRows {
@@ -381,11 +402,7 @@ func renderInputBox(text string) string {
 	b.WriteString(fmt.Sprintf("  ╭%s╮\n", strings.Repeat("─", inputBoxInnerWidth)))
 
 	for _, line := range lines {
-		// Truncate if line exceeds content width
 		runes := []rune(line)
-		if len(runes) > contentWidth {
-			runes = runes[len(runes)-contentWidth:]
-		}
 		pad := contentWidth - len(runes)
 		if pad < 0 {
 			pad = 0
