@@ -15,12 +15,18 @@ import (
 type mergeStep int
 
 const (
-	mergeStepSelect  mergeStep = iota // Select workstream
-	mergeStepAction                   // Choose action (create PR / merge / view status)
-	mergeStepMethod                   // Choose merge method (squash/merge/rebase)
-	mergeStepWorking                  // Async operation in progress
+	mergeStepSelect  mergeStep = iota // Select workstream (skipped if only 1)
+	mergeStepLoading                  // Loading branch info (spinner)
+	mergeStepAction                   // Show branch info + action list
+	mergeStepWorking                  // Async operation in progress (spinner)
 	mergeStepResult                   // Show result
 )
+
+// mergeAction defines an action in the merge dialog's action list.
+type mergeAction struct {
+	label string // Display label
+	id    string // Internal identifier
+}
 
 // mergeWorkstream holds the display data for a workstream in the merge dialog.
 type mergeWorkstream struct {
@@ -29,6 +35,18 @@ type mergeWorkstream struct {
 	PRNumber   int
 	PRURL      string
 	HasPR      bool
+}
+
+// branchDetail holds branch info loaded async for display.
+type branchDetail struct {
+	Info     string // Formatted commit list + diff stats from GetBranchInfo
+	BaseName string // "main" or "master"
+}
+
+// branchDetailMsg is the result of async branch info loading.
+type branchDetailMsg struct {
+	detail *branchDetail
+	err    error
 }
 
 // mergeResultMsg is the result of an async PR operation.
@@ -40,45 +58,64 @@ type mergeResultMsg struct {
 // mergeTickMsg drives the spinner animation for the merge dialog.
 type mergeTickMsg time.Time
 
+var mergeActions = []mergeAction{
+	{"Merge into main (squash)", "squash"},
+	{"Merge into main (merge commit)", "merge"},
+	{"Create Pull Request", "create-pr"},
+	{"Push branch only", "push"},
+	{"Rebase on main (fetch first)", "rebase"},
+	{"Cancel", "cancel"},
+}
+
 // mergeDialog is a Bubble Tea model for the interactive merge/PR dialog.
 // Invoked via: ccells merge --interactive
 //
-// Flow:
-//   - Select workstream → Choose action → Execute
-//   - No PR: Push + Create PR (with Claude-generated content)
-//   - Has PR: Merge (squash/merge/rebase) or view status
+// Matches the old TUI layout:
+//
+//	Merge / PR Options
+//	Branch: <name>
+//	Commits (N): <recent commits with hashes>
+//	<diff stat>
+//	→ Merge into main (squash)
+//	  Merge into main (merge commit)
+//	  Create Pull Request
+//	  Push branch only
+//	  Rebase on main (fetch first)
+//	  Cancel
 type mergeDialog struct {
 	step     mergeStep
 	items    []mergeWorkstream
-	selected int
+	selected int // workstream selection index
 	err      error
 	done     bool
 	result   string // success message
 	frame    int    // spinner frame
 
-	// Action selection (step 1)
-	actionIdx int
-	actions   []string
+	// Branch detail (loaded async after workstream selection)
+	detail *branchDetail
 
-	// Merge method (step 2)
-	methodIdx int
-	methods   []string
+	// Action selection
+	actionIdx int
 
 	// Working state
-	workingMsg string // what we're doing
+	workingMsg string
 
 	// Injectable dependencies for testing
-	repoPath   string
-	createPRFn func(ctx context.Context, branch, prompt string) (string, error)
-	mergePRFn  func(ctx context.Context, method string) error
-	pushFn     func(ctx context.Context, branch string) error
+	repoPath      string
+	loadDetailFn  func(ctx context.Context, branch string) (*branchDetail, error)
+	createPRFn    func(ctx context.Context, branch, prompt string) (string, error)
+	mergePRFn     func(ctx context.Context, method string) error
+	pushFn        func(ctx context.Context, branch string) error
+	fetchRebaseFn func(ctx context.Context) error
 }
 
 func newMergeDialog(workstreams []mergeWorkstream, repoPath string) mergeDialog {
-	return mergeDialog{
+	m := mergeDialog{
 		items:    workstreams,
 		repoPath: repoPath,
-		methods:  []string{"Squash merge", "Merge commit", "Rebase"},
+		loadDetailFn: func(ctx context.Context, branch string) (*branchDetail, error) {
+			return defaultLoadBranchDetail(ctx, repoPath, branch)
+		},
 		createPRFn: func(ctx context.Context, branch, prompt string) (string, error) {
 			return defaultCreatePR(ctx, repoPath, branch, prompt)
 		},
@@ -88,7 +125,11 @@ func newMergeDialog(workstreams []mergeWorkstream, repoPath string) mergeDialog 
 		pushFn: func(ctx context.Context, branch string) error {
 			return defaultPush(ctx, repoPath, branch)
 		},
+		fetchRebaseFn: func(ctx context.Context) error {
+			return defaultFetchRebase(ctx, repoPath)
+		},
 	}
+	return m
 }
 
 func mergeTickCmd() tea.Cmd {
@@ -98,22 +139,48 @@ func mergeTickCmd() tea.Cmd {
 }
 
 func (m mergeDialog) Init() tea.Cmd {
+	// Auto-select if only one workstream
+	if len(m.items) == 1 {
+		m.selected = 0
+		return m.loadDetail()
+	}
 	return nil
+}
+
+func (m mergeDialog) loadDetail() tea.Cmd {
+	branch := m.items[m.selected].BranchName
+	loadFn := m.loadDetailFn
+	return func() tea.Msg {
+		ctx := context.Background()
+		detail, err := loadFn(ctx, branch)
+		return branchDetailMsg{detail: detail, err: err}
+	}
 }
 
 func (m mergeDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case mergeTickMsg:
-		if m.step == mergeStepWorking {
+		if m.step == mergeStepLoading || m.step == mergeStepWorking {
 			m.frame++
 			return m, mergeTickCmd()
 		}
 		return m, nil
 
+	case branchDetailMsg:
+		if msg.err != nil {
+			// Show action list anyway, just without detail
+			m.detail = &branchDetail{Info: "(failed to load branch info)"}
+		} else {
+			m.detail = msg.detail
+		}
+		m.step = mergeStepAction
+		m.actionIdx = 0
+		return m, nil
+
 	case mergeResultMsg:
 		if msg.err != nil {
 			m.err = msg.err
-			m.step = mergeStepSelect
+			m.step = mergeStepAction
 			return m, nil
 		}
 		m.result = msg.message
@@ -121,8 +188,8 @@ func (m mergeDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
-		// Global quit keys (except during working)
-		if m.step != mergeStepWorking {
+		// Global quit keys (except during working/loading)
+		if m.step != mergeStepWorking && m.step != mergeStepLoading {
 			switch msg.String() {
 			case "ctrl+c":
 				m.done = true
@@ -143,8 +210,6 @@ func (m mergeDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.updateSelect(msg)
 		case mergeStepAction:
 			return m.updateAction(msg)
-		case mergeStepMethod:
-			return m.updateMethod(msg)
 		case mergeStepResult:
 			// Any key dismisses
 			m.done = true
@@ -157,10 +222,14 @@ func (m mergeDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m mergeDialog) handleBack() (tea.Model, tea.Cmd) {
 	switch m.step {
 	case mergeStepAction:
+		// If we auto-selected (only 1 item), back = quit
+		if len(m.items) <= 1 {
+			m.done = true
+			return m, tea.Quit
+		}
 		m.step = mergeStepSelect
+		m.detail = nil
 		m.err = nil
-	case mergeStepMethod:
-		m.step = mergeStepAction
 	default:
 		m.done = true
 		return m, tea.Quit
@@ -182,16 +251,10 @@ func (m mergeDialog) updateSelect(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(m.items) == 0 {
 			return m, nil
 		}
-		ws := m.items[m.selected]
-		if ws.HasPR {
-			m.actions = []string{"Merge PR", "View in browser"}
-			m.actionIdx = 0
-		} else {
-			m.actions = []string{"Create PR"}
-			m.actionIdx = 0
-		}
-		m.step = mergeStepAction
+		m.step = mergeStepLoading
+		m.frame = 0
 		m.err = nil
+		return m, tea.Batch(mergeTickCmd(), m.loadDetail())
 	}
 	return m, nil
 }
@@ -203,76 +266,113 @@ func (m mergeDialog) updateAction(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.actionIdx--
 		}
 	case "down", "j":
-		if m.actionIdx < len(m.actions)-1 {
+		if m.actionIdx < len(mergeActions)-1 {
 			m.actionIdx++
 		}
 	case "enter":
+		action := mergeActions[m.actionIdx]
 		ws := m.items[m.selected]
-		action := m.actions[m.actionIdx]
 
-		switch action {
-		case "Create PR":
-			m.step = mergeStepWorking
-			m.workingMsg = "Pushing & creating PR"
-			m.frame = 0
-			branch := ws.BranchName
-			prompt := ws.Prompt
-			cmd := func() tea.Msg {
-				ctx := context.Background()
-				// Push first
-				if err := m.pushFn(ctx, branch); err != nil {
-					return mergeResultMsg{err: fmt.Errorf("push failed: %w", err)}
-				}
-				url, err := m.createPRFn(ctx, branch, prompt)
-				if err != nil {
-					return mergeResultMsg{err: err}
-				}
-				return mergeResultMsg{message: fmt.Sprintf("PR created: %s", url)}
-			}
-			return m, tea.Batch(mergeTickCmd(), cmd)
-
-		case "Merge PR":
-			m.step = mergeStepMethod
-			m.methodIdx = 0
-
-		case "View in browser":
+		switch action.id {
+		case "squash":
+			return m.startMerge(ws, "squash")
+		case "merge":
+			return m.startMerge(ws, "merge")
+		case "create-pr":
+			return m.startCreatePR(ws)
+		case "push":
+			return m.startPush(ws)
+		case "rebase":
+			return m.startRebase()
+		case "cancel":
 			m.done = true
-			m.result = ws.PRURL
-			return m, tea.Sequence(
-				tea.Printf("\033[36m%s\033[0m", ws.PRURL),
-				tea.Quit,
-			)
+			return m, tea.Quit
 		}
 	}
 	return m, nil
 }
 
-func (m mergeDialog) updateMethod(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "up", "k":
-		if m.methodIdx > 0 {
-			m.methodIdx--
-		}
-	case "down", "j":
-		if m.methodIdx < len(m.methods)-1 {
-			m.methodIdx++
-		}
-	case "enter":
-		methodMap := map[int]string{0: "squash", 1: "merge", 2: "rebase"}
-		method := methodMap[m.methodIdx]
-		m.step = mergeStepWorking
-		m.workingMsg = fmt.Sprintf("Merging via %s", method)
-		m.frame = 0
-		cmd := func() tea.Msg {
-			ctx := context.Background()
-			if err := m.mergePRFn(ctx, method); err != nil {
-				return mergeResultMsg{err: err}
+func (m mergeDialog) startMerge(ws mergeWorkstream, method string) (tea.Model, tea.Cmd) {
+	m.step = mergeStepWorking
+	m.workingMsg = fmt.Sprintf("Merging via %s", method)
+	m.frame = 0
+	branch := ws.BranchName
+	prompt := ws.Prompt
+	pushFn := m.pushFn
+	createPRFn := m.createPRFn
+	mergePRFn := m.mergePRFn
+	hasPR := ws.HasPR
+	cmd := func() tea.Msg {
+		ctx := context.Background()
+		// If no PR exists, push + create PR first
+		if !hasPR {
+			if err := pushFn(ctx, branch); err != nil {
+				return mergeResultMsg{err: fmt.Errorf("push failed: %w", err)}
 			}
-			return mergeResultMsg{message: fmt.Sprintf("PR merged via %s", method)}
+			_, err := createPRFn(ctx, branch, prompt)
+			if err != nil {
+				return mergeResultMsg{err: fmt.Errorf("create PR failed: %w", err)}
+			}
 		}
-		return m, tea.Batch(mergeTickCmd(), cmd)
+		if err := mergePRFn(ctx, method); err != nil {
+			return mergeResultMsg{err: err}
+		}
+		return mergeResultMsg{message: fmt.Sprintf("PR merged via %s", method)}
 	}
-	return m, nil
+	return m, tea.Batch(mergeTickCmd(), cmd)
+}
+
+func (m mergeDialog) startCreatePR(ws mergeWorkstream) (tea.Model, tea.Cmd) {
+	m.step = mergeStepWorking
+	m.workingMsg = "Pushing & creating PR"
+	m.frame = 0
+	branch := ws.BranchName
+	prompt := ws.Prompt
+	pushFn := m.pushFn
+	createPRFn := m.createPRFn
+	cmd := func() tea.Msg {
+		ctx := context.Background()
+		if err := pushFn(ctx, branch); err != nil {
+			return mergeResultMsg{err: fmt.Errorf("push failed: %w", err)}
+		}
+		url, err := createPRFn(ctx, branch, prompt)
+		if err != nil {
+			return mergeResultMsg{err: err}
+		}
+		return mergeResultMsg{message: fmt.Sprintf("PR created: %s", url)}
+	}
+	return m, tea.Batch(mergeTickCmd(), cmd)
+}
+
+func (m mergeDialog) startPush(ws mergeWorkstream) (tea.Model, tea.Cmd) {
+	m.step = mergeStepWorking
+	m.workingMsg = "Pushing branch"
+	m.frame = 0
+	branch := ws.BranchName
+	pushFn := m.pushFn
+	cmd := func() tea.Msg {
+		ctx := context.Background()
+		if err := pushFn(ctx, branch); err != nil {
+			return mergeResultMsg{err: fmt.Errorf("push failed: %w", err)}
+		}
+		return mergeResultMsg{message: "Branch pushed to origin"}
+	}
+	return m, tea.Batch(mergeTickCmd(), cmd)
+}
+
+func (m mergeDialog) startRebase() (tea.Model, tea.Cmd) {
+	m.step = mergeStepWorking
+	m.workingMsg = "Fetching & rebasing"
+	m.frame = 0
+	fetchRebaseFn := m.fetchRebaseFn
+	cmd := func() tea.Msg {
+		ctx := context.Background()
+		if err := fetchRebaseFn(ctx); err != nil {
+			return mergeResultMsg{err: err}
+		}
+		return mergeResultMsg{message: "Rebased on latest main"}
+	}
+	return m, tea.Batch(mergeTickCmd(), cmd)
 }
 
 func (m mergeDialog) View() tea.View {
@@ -281,10 +381,10 @@ func (m mergeDialog) View() tea.View {
 	}
 
 	var b strings.Builder
-	b.WriteString(fmt.Sprintf("  %sPull Request%s\n", cCyanBold, cReset))
-	b.WriteString(fmt.Sprintf("  %s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n\n", cDim, cReset))
 
 	if len(m.items) == 0 {
+		b.WriteString(fmt.Sprintf("\n  %sMerge / PR Options%s\n", cCyanBold, cReset))
+		b.WriteString(fmt.Sprintf("  %s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n\n", cDim, cReset))
 		b.WriteString("  No workstreams available.\n")
 		b.WriteString(fmt.Sprintf("\n  %s(Esc to close)%s", cDim, cReset))
 		return tea.NewView(b.String())
@@ -293,10 +393,10 @@ func (m mergeDialog) View() tea.View {
 	switch m.step {
 	case mergeStepSelect:
 		m.viewSelect(&b)
+	case mergeStepLoading:
+		m.viewLoading(&b)
 	case mergeStepAction:
 		m.viewAction(&b)
-	case mergeStepMethod:
-		m.viewMethod(&b)
 	case mergeStepWorking:
 		m.viewWorking(&b)
 	case mergeStepResult:
@@ -311,68 +411,97 @@ func (m mergeDialog) View() tea.View {
 }
 
 func (m mergeDialog) viewSelect(b *strings.Builder) {
+	b.WriteString(fmt.Sprintf("\n  %sMerge / PR Options%s\n", cCyanBold, cReset))
+	b.WriteString(fmt.Sprintf("  %s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n\n", cDim, cReset))
 	b.WriteString(fmt.Sprintf("  %sSelect workstream:%s\n\n", cDim, cReset))
 	for i, ws := range m.items {
 		cursor := "  "
 		if i == m.selected {
-			cursor = fmt.Sprintf("%s> %s", cCyan, cReset)
+			cursor = fmt.Sprintf("%s→%s ", cCyan, cReset)
 		}
 
 		// Status indicator
 		var status string
 		if ws.HasPR {
 			status = fmt.Sprintf(" %sPR#%d%s", cGreen, ws.PRNumber, cReset)
-		} else {
-			status = fmt.Sprintf(" %sno PR%s", cGray, cReset)
 		}
 
-		b.WriteString(fmt.Sprintf("  %s%s%s%s\n", cursor, cWhite, ws.BranchName, cReset))
-		if i == m.selected {
-			b.WriteString(fmt.Sprintf("    %s", status))
-			b.WriteString("\n")
-		}
+		b.WriteString(fmt.Sprintf("  %s%s%s\n", cursor, ws.BranchName, status))
 	}
-	b.WriteString(fmt.Sprintf("\n  %s↑↓ navigate  Enter select  Esc cancel%s", cDim, cReset))
+	b.WriteString(fmt.Sprintf("\n  %s[↑/↓] navigate  [Enter] select  [Esc] Cancel%s", cDim, cReset))
+}
+
+func (m mergeDialog) viewLoading(b *strings.Builder) {
+	b.WriteString(fmt.Sprintf("\n  %sMerge / PR Options%s\n", cCyanBold, cReset))
+	b.WriteString(fmt.Sprintf("  %s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n\n", cDim, cReset))
+	frame := spinnerFrames[m.frame%len(spinnerFrames)]
+	b.WriteString(fmt.Sprintf("  %s%s%s Loading branch info...\n", cCyan, frame, cReset))
 }
 
 func (m mergeDialog) viewAction(b *strings.Builder) {
 	ws := m.items[m.selected]
-	b.WriteString(fmt.Sprintf("  %s%s%s%s\n\n", cMagenta, ws.BranchName, cReset, ""))
-	if ws.HasPR {
-		b.WriteString(fmt.Sprintf("  %sPR #%d%s\n\n", cGreen, ws.PRNumber, cReset))
+	baseName := "main"
+	if m.detail != nil && m.detail.BaseName != "" {
+		baseName = m.detail.BaseName
 	}
-	for i, action := range m.actions {
+
+	b.WriteString(fmt.Sprintf("\n  %sMerge / PR Options%s\n", cCyanBold, cReset))
+	b.WriteString(fmt.Sprintf("  %s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n\n", cDim, cReset))
+
+	// Branch name
+	b.WriteString(fmt.Sprintf("  %sBranch:%s %s%s%s\n\n", cDim, cReset, cMagenta, ws.BranchName, cReset))
+
+	// Branch info (commits + diff stat)
+	if m.detail != nil && m.detail.Info != "" {
+		for _, line := range strings.Split(m.detail.Info, "\n") {
+			b.WriteString(fmt.Sprintf("  %s%s%s\n", cDim, line, cReset))
+		}
+		b.WriteString("\n")
+	}
+
+	b.WriteString("\n")
+	// Action list with dynamic base branch name
+	for i, action := range mergeActions {
 		cursor := "  "
 		if i == m.actionIdx {
-			cursor = fmt.Sprintf("%s> %s", cCyan, cReset)
+			cursor = fmt.Sprintf("%s→%s ", cCyan, cReset)
 		}
-		b.WriteString(fmt.Sprintf("  %s%s\n", cursor, action))
+		label := strings.ReplaceAll(action.label, "main", baseName)
+		b.WriteString(fmt.Sprintf("  %s%s\n", cursor, label))
 	}
-	b.WriteString(fmt.Sprintf("\n  %s↑↓ navigate  Enter select  Esc back%s", cDim, cReset))
-}
 
-func (m mergeDialog) viewMethod(b *strings.Builder) {
-	ws := m.items[m.selected]
-	b.WriteString(fmt.Sprintf("  Merge %sPR #%d%s for %s%s%s\n\n", cGreen, ws.PRNumber, cReset, cMagenta, ws.BranchName, cReset))
-
-	for i, method := range m.methods {
-		cursor := "  "
-		if i == m.methodIdx {
-			cursor = fmt.Sprintf("%s> %s", cCyan, cReset)
-		}
-		b.WriteString(fmt.Sprintf("  %s%s\n", cursor, method))
-	}
-	b.WriteString(fmt.Sprintf("\n  %s↑↓ navigate  Enter merge  Esc back%s", cDim, cReset))
+	b.WriteString(fmt.Sprintf("\n  %s[↑/↓] navigate  [Enter] select  [Esc] Cancel%s", cDim, cReset))
 }
 
 func (m mergeDialog) viewWorking(b *strings.Builder) {
+	b.WriteString(fmt.Sprintf("\n  %sMerge / PR Options%s\n", cCyanBold, cReset))
+	b.WriteString(fmt.Sprintf("  %s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n\n", cDim, cReset))
 	frame := spinnerFrames[m.frame%len(spinnerFrames)]
 	b.WriteString(fmt.Sprintf("  %s%s%s %s...\n", cCyan, frame, cReset, m.workingMsg))
 }
 
 func (m mergeDialog) viewResult(b *strings.Builder) {
+	b.WriteString(fmt.Sprintf("\n  %sMerge / PR Options%s\n", cCyanBold, cReset))
+	b.WriteString(fmt.Sprintf("  %s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n\n", cDim, cReset))
 	b.WriteString(fmt.Sprintf("  %s✓%s %s\n", cGreenBold, cReset, m.result))
 	b.WriteString(fmt.Sprintf("\n  %sPress any key to close%s", cDim, cReset))
+}
+
+// defaultLoadBranchDetail loads commit info and diff stats for a branch.
+func defaultLoadBranchDetail(ctx context.Context, repoPath, branch string) (*branchDetail, error) {
+	gitClient := git.New(repoPath)
+	info, err := gitClient.GetBranchInfo(ctx, branch)
+	if err != nil {
+		return nil, err
+	}
+	baseName, _ := gitClient.GetBaseBranch(ctx)
+	if baseName == "" {
+		baseName = "main"
+	}
+	return &branchDetail{
+		Info:     info,
+		BaseName: baseName,
+	}, nil
 }
 
 // defaultCreatePR pushes the branch and creates a PR using Claude-generated content.
@@ -415,6 +544,12 @@ func defaultMergePR(ctx context.Context, repoPath, method string) error {
 func defaultPush(ctx context.Context, repoPath, branch string) error {
 	gitClient := git.New(repoPath)
 	return gitClient.Push(ctx, branch)
+}
+
+// defaultFetchRebase fetches main and rebases current branch.
+func defaultFetchRebase(ctx context.Context, repoPath string) error {
+	gitClient := git.New(repoPath)
+	return gitClient.FetchAndRebase(ctx)
 }
 
 // loadMergeWorkstreams loads workstream data from both tmux (live panes) and state file.
