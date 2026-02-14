@@ -572,23 +572,31 @@ func TestDeterminePaneCommand_ReturningNoWorkstreams(t *testing.T) {
 	}
 }
 
-func TestDeterminePaneCommand_ReturningWithWorkstreams(t *testing.T) {
-	// State file has workstreams → plain shell (panes restore separately)
+func TestDeterminePaneCommand_ReturningWithStaleWorkstreams(t *testing.T) {
+	// State file has stale workstream entries (containers gone, tmux session is fresh).
+	// This is the common case after "ccells down" or a crash.
+	// We should STILL show the create dialog, not a blank shell.
 	tmpDir := testShortDir(t)
 	stateDir := filepath.Join(tmpDir, "state")
 	os.MkdirAll(stateDir, 0755)
 
-	// Create state with a workstream
+	// Create state with a stale workstream
 	ws := workstream.New("test prompt")
 	ws.BranchName = "test-branch"
+	ws.ContainerID = "dead-container-id"
 	if err := workstream.SaveState(stateDir, []*workstream.Workstream{ws}, 0, 0); err != nil {
 		t.Fatalf("failed to create state with workstream: %v", err)
 	}
 
 	cmd := determinePaneCommand("/usr/local/bin/ccells", stateDir)
 
-	if cmd != "" {
-		t.Errorf("with existing workstreams, pane command should be empty, got: %s", cmd)
+	// When determinePaneCommand runs, the tmux session is always fresh (HasSession was false).
+	// Stale workstream entries should NOT prevent the create dialog from showing.
+	if cmd == "" {
+		t.Fatal("stale workstreams should NOT prevent create dialog — user gets a blank shell with no way to create workstreams")
+	}
+	if !strings.Contains(cmd, "create --interactive") {
+		t.Errorf("should show create dialog, got: %s", cmd)
 	}
 }
 

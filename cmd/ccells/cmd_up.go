@@ -127,21 +127,16 @@ func runUp(ctx context.Context, repoID, repoPath, stateDir, runtime string) erro
 
 // determinePaneCommand returns the shell command for the initial tmux pane.
 // First time (no state file): full welcome screen with intro + keybindings.
-// Returning with 0 workstreams: jump straight to create dialog.
-// Has workstreams: empty string (normal shell — workstream panes restore separately).
+// Returning: jump straight to create dialog.
+//
+// When this function runs, the tmux session is always fresh (HasSession returned
+// false). Any workstream entries in the state file are stale — their panes don't
+// exist. We always show a dialog so the user can create a workstream.
 func determinePaneCommand(ccellsBin, stateDir string) string {
-	firstTime := !workstream.StateExists(stateDir)
-	if firstTime {
+	if !workstream.StateExists(stateDir) {
 		return fmt.Sprintf("'%s' welcome; exec \"$SHELL\"", ccellsBin)
 	}
-	hasWorkstreams := false
-	if state, err := workstream.LoadState(stateDir); err == nil && len(state.Workstreams) > 0 {
-		hasWorkstreams = true
-	}
-	if !hasWorkstreams {
-		return fmt.Sprintf("'%s' create --interactive; exec \"$SHELL\"", ccellsBin)
-	}
-	return ""
+	return fmt.Sprintf("'%s' create --interactive; exec \"$SHELL\"", ccellsBin)
 }
 
 // waitForDaemon polls for the daemon socket to appear, up to the given timeout.
