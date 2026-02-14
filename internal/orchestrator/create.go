@@ -211,7 +211,7 @@ func (o *Orchestrator) resolveImage(ctx context.Context, opts CreateOptions) (st
 
 	if !imageExists {
 		if needsBuild {
-			// Need to build the image
+			// Need to build the image from devcontainer.json
 			devCfg, err := docker.LoadDevcontainerConfig(o.repoPath)
 			if err != nil {
 				return "", fmt.Errorf("load devcontainer config: %w", err)
@@ -234,8 +234,14 @@ func (o *Orchestrator) resolveImage(ctx context.Context, opts CreateOptions) (st
 					return "", fmt.Errorf("build project image: %w", err)
 				}
 			}
+		} else if imageName == docker.GetBaseImageName() {
+			// Base image hash changed (Dockerfile or config update) — rebuild
+			log.Printf("Base image %s not found, building...", imageName)
+			if err := docker.BuildImage(ctx, io.Discard); err != nil {
+				return "", fmt.Errorf("build base image: %w", err)
+			}
 		} else {
-			// Image doesn't exist and doesn't need building - user needs to pull
+			// Third-party image from devcontainer.json — user needs to pull
 			return "", fmt.Errorf("image '%s' not found. Run: docker pull %s", imageName, imageName)
 		}
 	}
