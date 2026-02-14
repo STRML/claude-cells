@@ -112,14 +112,14 @@ func TestCreateDialog_NoUntrackedAutoCreates(t *testing.T) {
 	}
 }
 
-func TestCreateDialog_UntrackedFilesShowPrompt(t *testing.T) {
+func TestCreateDialog_UntrackedFilesShowSelection(t *testing.T) {
 	m := newCreateDialog("/tmp/state", "claude")
 	m.step = 1
 	m.prompt = "Add auth"
 	m.title = "OAuth Auth"
 	m.branch = "oauth-auth"
 
-	// Untracked files found → should show Y/n prompt
+	// Untracked files found → should show selection
 	updated, cmd := m.Update(untrackedFilesMsg{files: []string{"foo.txt", "bar.go"}, err: nil})
 	cd := updated.(createDialog)
 	if !cd.showUntracked {
@@ -131,57 +131,84 @@ func TestCreateDialog_UntrackedFilesShowPrompt(t *testing.T) {
 	if len(cd.untrackedFiles) != 2 {
 		t.Errorf("expected 2 untracked files, got %d", len(cd.untrackedFiles))
 	}
-	if !cd.copyUntracked {
-		t.Error("copyUntracked should default to true")
+	if cd.untrackedIdx != 0 {
+		t.Errorf("untrackedIdx should default to 0 (Yes), got %d", cd.untrackedIdx)
 	}
 	if cmd != nil {
-		t.Error("showing untracked prompt should not produce a command (waits for user input)")
+		t.Error("showing untracked selection should not produce a command (waits for user input)")
 	}
 }
 
-func TestCreateDialog_UntrackedYesCopies(t *testing.T) {
+func TestCreateDialog_UntrackedNavigation(t *testing.T) {
 	m := newCreateDialog("/tmp/state", "claude")
-	m.step = 1
-	m.prompt = "Add auth"
-	m.branch = "add-auth"
 	m.showUntracked = true
 	m.untrackedFiles = []string{"foo.txt"}
-	m.copyUntracked = true
+	m.untrackedIdx = 0
 
-	// Press 'y' to confirm
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	// Navigate down to "No"
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyDown})
 	cd := updated.(createDialog)
-	if cd.showUntracked {
-		t.Error("showUntracked should be false after confirming")
+	if cd.untrackedIdx != 1 {
+		t.Errorf("after down, untrackedIdx = %d, want 1", cd.untrackedIdx)
 	}
-	if !cd.copyUntracked {
-		t.Error("copyUntracked should be true after pressing y")
+
+	// At bottom, stays
+	updated, _ = cd.Update(tea.KeyPressMsg{Code: tea.KeyDown})
+	cd = updated.(createDialog)
+	if cd.untrackedIdx != 1 {
+		t.Errorf("at bottom, untrackedIdx = %d, want 1", cd.untrackedIdx)
 	}
-	if cd.step != 2 {
-		t.Errorf("step = %d, want 2 (creating)", cd.step)
+
+	// Navigate back up to "Yes"
+	updated, _ = cd.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	cd = updated.(createDialog)
+	if cd.untrackedIdx != 0 {
+		t.Errorf("after up, untrackedIdx = %d, want 0", cd.untrackedIdx)
 	}
-	if cmd == nil {
-		t.Error("confirming untracked should produce create command")
+
+	// At top, stays
+	updated, _ = cd.Update(tea.KeyPressMsg{Code: tea.KeyUp})
+	cd = updated.(createDialog)
+	if cd.untrackedIdx != 0 {
+		t.Errorf("at top, untrackedIdx = %d, want 0", cd.untrackedIdx)
 	}
 }
 
-func TestCreateDialog_UntrackedEnterCopies(t *testing.T) {
+func TestCreateDialog_UntrackedVimNavigation(t *testing.T) {
+	m := newCreateDialog("/tmp/state", "claude")
+	m.showUntracked = true
+	m.untrackedFiles = []string{"foo.txt"}
+	m.untrackedIdx = 0
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: 'j', Text: "j"})
+	cd := updated.(createDialog)
+	if cd.untrackedIdx != 1 {
+		t.Errorf("after j, untrackedIdx = %d, want 1", cd.untrackedIdx)
+	}
+
+	updated, _ = cd.Update(tea.KeyPressMsg{Code: 'k', Text: "k"})
+	cd = updated.(createDialog)
+	if cd.untrackedIdx != 0 {
+		t.Errorf("after k, untrackedIdx = %d, want 0", cd.untrackedIdx)
+	}
+}
+
+func TestCreateDialog_UntrackedEnterSelectsYes(t *testing.T) {
 	m := newCreateDialog("/tmp/state", "claude")
 	m.step = 1
 	m.prompt = "Add auth"
 	m.branch = "add-auth"
 	m.showUntracked = true
 	m.untrackedFiles = []string{"foo.txt"}
-	m.copyUntracked = true
+	m.untrackedIdx = 0 // Yes selected
 
-	// Press Enter to confirm (default Yes)
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	cd := updated.(createDialog)
 	if cd.showUntracked {
 		t.Error("showUntracked should be false after Enter")
 	}
 	if !cd.copyUntracked {
-		t.Error("copyUntracked should be true after pressing Enter")
+		t.Error("copyUntracked should be true when Yes selected")
 	}
 	if cd.step != 2 {
 		t.Errorf("step = %d, want 2 (creating)", cd.step)
@@ -191,29 +218,72 @@ func TestCreateDialog_UntrackedEnterCopies(t *testing.T) {
 	}
 }
 
-func TestCreateDialog_UntrackedNoSkips(t *testing.T) {
+func TestCreateDialog_UntrackedEnterSelectsNo(t *testing.T) {
 	m := newCreateDialog("/tmp/state", "claude")
 	m.step = 1
 	m.prompt = "Add auth"
 	m.branch = "add-auth"
 	m.showUntracked = true
 	m.untrackedFiles = []string{"foo.txt"}
-	m.copyUntracked = true
+	m.untrackedIdx = 1 // No selected
 
-	// Press 'n' to decline
-	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter})
 	cd := updated.(createDialog)
 	if cd.showUntracked {
-		t.Error("showUntracked should be false after declining")
+		t.Error("showUntracked should be false after Enter")
 	}
 	if cd.copyUntracked {
-		t.Error("copyUntracked should be false after pressing n")
+		t.Error("copyUntracked should be false when No selected")
 	}
 	if cd.step != 2 {
 		t.Errorf("step = %d, want 2 (creating)", cd.step)
 	}
 	if cmd == nil {
-		t.Error("declining untracked should still produce create command")
+		t.Error("Enter should produce create command")
+	}
+}
+
+func TestCreateDialog_UntrackedYShortcut(t *testing.T) {
+	m := newCreateDialog("/tmp/state", "claude")
+	m.step = 1
+	m.prompt = "Add auth"
+	m.branch = "add-auth"
+	m.showUntracked = true
+	m.untrackedFiles = []string{"foo.txt"}
+	m.untrackedIdx = 1 // Even if No is selected, y shortcut picks Yes
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'y', Text: "y"})
+	cd := updated.(createDialog)
+	if !cd.copyUntracked {
+		t.Error("y shortcut should set copyUntracked=true")
+	}
+	if cd.step != 2 {
+		t.Errorf("step = %d, want 2", cd.step)
+	}
+	if cmd == nil {
+		t.Error("y should produce create command")
+	}
+}
+
+func TestCreateDialog_UntrackedNShortcut(t *testing.T) {
+	m := newCreateDialog("/tmp/state", "claude")
+	m.step = 1
+	m.prompt = "Add auth"
+	m.branch = "add-auth"
+	m.showUntracked = true
+	m.untrackedFiles = []string{"foo.txt"}
+	m.untrackedIdx = 0 // Even if Yes is selected, n shortcut picks No
+
+	updated, cmd := m.Update(tea.KeyPressMsg{Code: 'n', Text: "n"})
+	cd := updated.(createDialog)
+	if cd.copyUntracked {
+		t.Error("n shortcut should set copyUntracked=false")
+	}
+	if cd.step != 2 {
+		t.Errorf("step = %d, want 2", cd.step)
+	}
+	if cmd == nil {
+		t.Error("n should produce create command")
 	}
 }
 
@@ -226,10 +296,10 @@ func TestCreateDialog_UntrackedEscQuits(t *testing.T) {
 	updated, cmd := m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	cd := updated.(createDialog)
 	if !cd.done {
-		t.Error("esc during untracked prompt should set done")
+		t.Error("esc during untracked selection should set done")
 	}
 	if cmd == nil {
-		t.Error("esc during untracked prompt should produce quit command")
+		t.Error("esc during untracked selection should produce quit command")
 	}
 }
 
@@ -254,7 +324,7 @@ func TestCreateDialog_UntrackedErrorSkipsPrompt(t *testing.T) {
 	}
 }
 
-func TestCreateDialog_ViewUntrackedPrompt(t *testing.T) {
+func TestCreateDialog_ViewUntrackedSelection(t *testing.T) {
 	m := newCreateDialog("/tmp/state", "claude")
 	m.step = 1
 	m.prompt = "Add auth"
@@ -264,18 +334,32 @@ func TestCreateDialog_ViewUntrackedPrompt(t *testing.T) {
 	m.untrackedFiles = []string{"file1.txt", "file2.go", "dir/file3.rs"}
 
 	content := viewContent(m.View())
-	if !strings.Contains(content, "3 untracked file(s) found") {
-		t.Errorf("view should show file count, got: %s", content)
+	if !strings.Contains(content, "Copy Untracked Files?") {
+		t.Errorf("should show title, got: %s", content)
 	}
-	if !strings.Contains(content, "file1.txt") {
-		t.Errorf("view should show file names, got: %s", content)
+	if !strings.Contains(content, "Found 3 untracked file(s) in the repository") {
+		t.Errorf("should show file count, got: %s", content)
 	}
-	if !strings.Contains(content, "Copy untracked files? [Y/n]") {
-		t.Errorf("view should show Y/n prompt, got: %s", content)
+	if !strings.Contains(content, "• file1.txt") {
+		t.Errorf("should show files with bullet points, got: %s", content)
 	}
-	// Should show branch info
-	if !strings.Contains(content, "oauth-auth") {
-		t.Errorf("view should show branch, got: %s", content)
+	if !strings.Contains(content, "• file2.go") {
+		t.Error("should show all files")
+	}
+	if !strings.Contains(content, "Copy these files to the new worktree?") {
+		t.Errorf("should show question, got: %s", content)
+	}
+	if !strings.Contains(content, "Yes, copy untracked files") {
+		t.Errorf("should show Yes option, got: %s", content)
+	}
+	if !strings.Contains(content, "No, start with clean worktree") {
+		t.Errorf("should show No option, got: %s", content)
+	}
+	if !strings.Contains(content, "→") {
+		t.Error("should show arrow cursor on selected item")
+	}
+	if !strings.Contains(content, "navigate") {
+		t.Error("should show navigation hints")
 	}
 }
 
@@ -437,6 +521,21 @@ func TestCreateDialog_SpaceKey(t *testing.T) {
 	}
 }
 
+func TestCreateDialog_ShiftEnterNewline(t *testing.T) {
+	m := newCreateDialog("/tmp/state", "claude")
+	m.input = "line one"
+
+	updated, _ := m.Update(tea.KeyPressMsg{Code: tea.KeyEnter, Mod: tea.ModShift})
+	cd := updated.(createDialog)
+	if cd.input != "line one\n" {
+		t.Errorf("after shift+enter, input = %q, want 'line one\\n'", cd.input)
+	}
+	// Should still be at step 0 (not submitted)
+	if cd.step != 0 {
+		t.Errorf("shift+enter should not submit, step = %d", cd.step)
+	}
+}
+
 func TestCreateDialog_IgnoresKeysWhileGenerating(t *testing.T) {
 	m := newCreateDialog("/tmp/state", "claude")
 	m.step = 1 // generating
@@ -514,8 +613,9 @@ func TestCreateDialog_ViewSteps(t *testing.T) {
 		branch  string
 		wantStr string
 	}{
-		{"step 0 prompt", 0, "", "", "", "Describe your task"},
-		{"step 0 cursor", 0, "", "", "", "›"},
+		{"step 0 prompt", 0, "", "", "", "Enter a prompt for Claude"},
+		{"step 0 input box", 0, "", "", "", "╭"},
+		{"step 0 cursor", 0, "", "", "", "█"},
 		{"step 1 generating", 1, "Add auth", "", "", "Generating title"},
 		{"step 1 shows task", 1, "Add auth", "", "", "Add auth"},
 		{"step 2 creating", 2, "Add auth", "OAuth Auth", "oauth-auth", "Creating workstream"},
@@ -542,11 +642,25 @@ func TestCreateDialog_ViewSteps(t *testing.T) {
 func TestCreateDialog_ViewHeader(t *testing.T) {
 	m := newCreateDialog("/tmp/state", "claude")
 	content := viewContent(m.View())
-	if !strings.Contains(content, "N E W   W O R K S T R E A M") {
-		t.Errorf("view should contain spaced header, got: %s", content)
+	if !strings.Contains(content, "New Workstream") {
+		t.Errorf("view should contain 'New Workstream', got: %s", content)
 	}
 	if !strings.Contains(content, "━") {
 		t.Errorf("view should contain heavy divider, got: %s", content)
+	}
+}
+
+func TestCreateDialog_ViewStep0Hints(t *testing.T) {
+	m := newCreateDialog("/tmp/state", "claude")
+	content := viewContent(m.View())
+	if !strings.Contains(content, "Shift+Enter") {
+		t.Error("step 0 should show Shift+Enter hint")
+	}
+	if !strings.Contains(content, "[Enter] create") {
+		t.Error("step 0 should show Enter create hint")
+	}
+	if !strings.Contains(content, "Cancel") {
+		t.Error("step 0 should show Cancel hint")
 	}
 }
 
@@ -628,5 +742,56 @@ func TestCreateDialog_SpinnerFrameWraps(t *testing.T) {
 	cd := updated.(createDialog)
 	if cd.frame != 0 {
 		t.Errorf("spinner should wrap to frame 0, got %d", cd.frame)
+	}
+}
+
+func TestRenderInputBox_Empty(t *testing.T) {
+	box := renderInputBox("")
+	if !strings.Contains(box, "╭") {
+		t.Error("should contain top border")
+	}
+	if !strings.Contains(box, "╰") {
+		t.Error("should contain bottom border")
+	}
+	if !strings.Contains(box, "█") {
+		t.Error("should contain cursor")
+	}
+	// Should have exactly 4 content lines (inputBoxRows)
+	lines := strings.Split(strings.TrimRight(box, "\n"), "\n")
+	// 1 top border + 4 content + 1 bottom border = 6
+	if len(lines) != 6 {
+		t.Errorf("expected 6 lines (borders + %d rows), got %d", inputBoxRows, len(lines))
+	}
+}
+
+func TestRenderInputBox_WithText(t *testing.T) {
+	box := renderInputBox("hello world")
+	if !strings.Contains(box, "hello world") {
+		t.Errorf("should contain text, got: %s", box)
+	}
+	if !strings.Contains(box, "█") {
+		t.Error("should contain cursor after text")
+	}
+}
+
+func TestRenderInputBox_MultiLine(t *testing.T) {
+	box := renderInputBox("line one\nline two")
+	if !strings.Contains(box, "line one") {
+		t.Errorf("should contain first line, got: %s", box)
+	}
+	if !strings.Contains(box, "line two") {
+		t.Errorf("should contain second line, got: %s", box)
+	}
+}
+
+func TestRenderInputBox_ScrollsWhenFull(t *testing.T) {
+	// 5 lines of input with only 4 visible rows
+	box := renderInputBox("line1\nline2\nline3\nline4\nline5")
+	// Should show lines 2-5 (scrolled, line1 off screen)
+	if strings.Contains(box, "line1") {
+		t.Errorf("first line should be scrolled off, got: %s", box)
+	}
+	if !strings.Contains(box, "line5") {
+		t.Errorf("last line should be visible, got: %s", box)
 	}
 }

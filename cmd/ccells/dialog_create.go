@@ -56,6 +56,9 @@ const (
 	cWhite     = "\033[97m"
 )
 
+const inputBoxInnerWidth = 58 // width between │ chars
+const inputBoxRows = 4        // visible rows in the input box
+
 // createDialog is a Bubble Tea model for the interactive create dialog.
 // Invoked via: ccells create --interactive
 // Runs inside tmux display-popup or the initial pane.
@@ -78,8 +81,9 @@ type createDialog struct {
 
 	// Untracked files flow
 	untrackedFiles []string // populated after title gen
-	copyUntracked  bool     // user's choice (default true)
-	showUntracked  bool     // true when showing the untracked files Y/n prompt
+	copyUntracked  bool     // user's choice
+	showUntracked  bool     // true when showing the untracked files selection
+	untrackedIdx   int      // 0=Yes, 1=No for untracked selection
 
 	// For testability: override the function that checks for untracked files
 	checkUntrackedFn func() ([]string, error)
@@ -134,9 +138,10 @@ func (m createDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// Ignore errors — just skip the prompt
 		if msg.err == nil && len(msg.files) > 0 {
 			m.untrackedFiles = msg.files
-			m.copyUntracked = true // default to Yes
+			m.copyUntracked = true // default selection is Yes
 			m.showUntracked = true
-			return m, nil // show Y/n prompt, no spinner
+			m.untrackedIdx = 0 // default to "Yes"
+			return m, nil      // show selection, no spinner
 		}
 		// No untracked files — proceed directly to create
 		return m.startCreate()
@@ -151,7 +156,7 @@ func (m createDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.done = true
 		return m, tea.Quit
 	case tea.KeyMsg:
-		// Handle untracked files prompt
+		// Handle untracked files selection
 		if m.showUntracked {
 			return m.handleUntrackedKey(msg)
 		}
@@ -167,6 +172,10 @@ func (m createDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "ctrl+c", "esc":
 			m.done = true
 			return m, tea.Quit
+		case "shift+enter":
+			if m.step == 0 {
+				m.input += "\n"
+			}
 		case "enter":
 			return m.handleEnter()
 		case "backspace":
@@ -187,19 +196,29 @@ func (m createDialog) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// handleUntrackedKey processes key input during the untracked files Y/n prompt.
+// handleUntrackedKey processes key input during the untracked files selection.
 func (m createDialog) handleUntrackedKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "esc":
 		m.done = true
 		return m, tea.Quit
-	case "enter", "y", "Y":
-		// Yes — copy untracked files
+	case "up", "k":
+		if m.untrackedIdx > 0 {
+			m.untrackedIdx--
+		}
+	case "down", "j":
+		if m.untrackedIdx < 1 {
+			m.untrackedIdx++
+		}
+	case "enter":
+		m.copyUntracked = m.untrackedIdx == 0
+		m.showUntracked = false
+		return m.startCreate()
+	case "y", "Y":
 		m.copyUntracked = true
 		m.showUntracked = false
 		return m.startCreate()
 	case "n", "N":
-		// No — skip untracked files
 		m.copyUntracked = false
 		m.showUntracked = false
 		return m.startCreate()
@@ -260,10 +279,17 @@ func (m createDialog) View() tea.View {
 	}
 
 	var b strings.Builder
+
+	// Untracked files gets its own full view
+	if m.showUntracked {
+		m.viewUntracked(&b)
+		return tea.NewView(b.String())
+	}
+
 	b.WriteString("\n")
 
 	// Header
-	b.WriteString(fmt.Sprintf("  %s⚡ N E W   W O R K S T R E A M%s\n", cCyanBold, cReset))
+	b.WriteString(fmt.Sprintf("  %sNew Workstream%s\n", cCyanBold, cReset))
 	b.WriteString(fmt.Sprintf("  %s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n", cDim, cReset))
 
 	spinner := spinnerFrames[m.frame%len(spinnerFrames)]
@@ -271,34 +297,17 @@ func (m createDialog) View() tea.View {
 	switch m.step {
 	case 0:
 		b.WriteString("\n")
-		b.WriteString(fmt.Sprintf("  %sDescribe your task:%s\n\n", cWhite, cReset))
-		b.WriteString(fmt.Sprintf("  %s›%s %s%s█%s\n", cCyan, cReset, cWhite, m.input, cReset))
+		b.WriteString(fmt.Sprintf("  %sEnter a prompt for Claude:%s\n\n", cWhite, cReset))
+		b.WriteString(renderInputBox(m.input))
+		if m.err != nil {
+			b.WriteString(fmt.Sprintf("\n  %s✗ %v%s\n", cRed, m.err, cReset))
+		}
+		b.WriteString(fmt.Sprintf("\n  %s[Shift+Enter] newline  [Enter] create  [Esc] Cancel%s", cDim, cReset))
 	case 1:
 		b.WriteString("\n")
 		b.WriteString(fmt.Sprintf("  %sTask%s  %s\n\n", cGray, cReset, m.prompt))
-		if m.showUntracked {
-			// Show title/branch info + untracked files prompt
-			if m.title != "" {
-				b.WriteString(fmt.Sprintf("  %sTitle%s   %s%s%s\n", cGray, cReset, cWhite, m.title, cReset))
-			}
-			b.WriteString(fmt.Sprintf("  %sBranch%s  %s%s%s\n\n", cGray, cReset, cGreen, m.branch, cReset))
-			count := len(m.untrackedFiles)
-			b.WriteString(fmt.Sprintf("  %s%d untracked file(s) found.%s\n", cYellow, count, cReset))
-			// Show up to 5 files
-			shown := m.untrackedFiles
-			if len(shown) > 5 {
-				shown = shown[:5]
-			}
-			for _, f := range shown {
-				b.WriteString(fmt.Sprintf("    %s%s%s\n", cDim, f, cReset))
-			}
-			if count > 5 {
-				b.WriteString(fmt.Sprintf("    %s... and %d more%s\n", cDim, count-5, cReset))
-			}
-			b.WriteString(fmt.Sprintf("\n  %sCopy untracked files? [Y/n]%s\n", cWhite, cReset))
-		} else {
-			b.WriteString(fmt.Sprintf("  %s%s%s %sGenerating title...%s\n", cCyan, spinner, cReset, cDim, cReset))
-		}
+		b.WriteString(fmt.Sprintf("  %s%s%s %sGenerating title...%s\n", cCyan, spinner, cReset, cDim, cReset))
+		b.WriteString(fmt.Sprintf("\n  %s(Esc to cancel)%s", cDim, cReset))
 	case 2:
 		b.WriteString("\n")
 		if m.title != "" {
@@ -307,14 +316,85 @@ func (m createDialog) View() tea.View {
 		b.WriteString(fmt.Sprintf("  %sTask%s    %s\n", cGray, cReset, m.prompt))
 		b.WriteString(fmt.Sprintf("  %sBranch%s  %s%s%s\n\n", cGray, cReset, cGreen, m.branch, cReset))
 		b.WriteString(fmt.Sprintf("  %s%s%s %sCreating workstream...%s\n", cCyan, spinner, cReset, cDim, cReset))
+		if m.err != nil {
+			b.WriteString(fmt.Sprintf("\n  %s✗ %v%s\n", cRed, m.err, cReset))
+		}
+		b.WriteString(fmt.Sprintf("\n  %s(Esc to cancel)%s", cDim, cReset))
 	}
 
-	if m.err != nil {
-		b.WriteString(fmt.Sprintf("\n  %s✗ %v%s\n", cRed, m.err, cReset))
-	}
-
-	b.WriteString(fmt.Sprintf("\n  %s(Esc to cancel)%s", cDim, cReset))
 	return tea.NewView(b.String())
+}
+
+func (m createDialog) viewUntracked(b *strings.Builder) {
+	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf("  %sCopy Untracked Files?%s\n", cCyanBold, cReset))
+	b.WriteString(fmt.Sprintf("  %s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n\n", cDim, cReset))
+
+	count := len(m.untrackedFiles)
+	b.WriteString(fmt.Sprintf("  Found %d untracked file(s) in the repository:\n\n", count))
+
+	// Show up to 5 files with bullet points
+	shown := m.untrackedFiles
+	if len(shown) > 5 {
+		shown = shown[:5]
+	}
+	for _, f := range shown {
+		b.WriteString(fmt.Sprintf("    • %s\n", f))
+	}
+	if count > 5 {
+		b.WriteString(fmt.Sprintf("    %s... and %d more%s\n", cDim, count-5, cReset))
+	}
+
+	b.WriteString("\n  Copy these files to the new worktree?\n\n")
+
+	// Selection items with arrow cursor
+	options := []string{"Yes, copy untracked files", "No, start with clean worktree"}
+	for i, opt := range options {
+		cursor := "  "
+		if i == m.untrackedIdx {
+			cursor = fmt.Sprintf("%s→%s ", cCyan, cReset)
+		}
+		b.WriteString(fmt.Sprintf("  %s%s\n", cursor, opt))
+	}
+
+	b.WriteString(fmt.Sprintf("\n  %s[↑/↓] navigate  [Enter] select  [Esc] Cancel%s", cDim, cReset))
+}
+
+// renderInputBox draws a bordered text input box with cursor.
+func renderInputBox(text string) string {
+	contentWidth := inputBoxInnerWidth - 2 // minus leading+trailing space
+
+	// Split into lines, add cursor to last line
+	lines := strings.Split(text+"█", "\n")
+
+	// Ensure minimum visible rows
+	for len(lines) < inputBoxRows {
+		lines = append(lines, "")
+	}
+
+	// If more lines than visible, show last N (scroll)
+	if len(lines) > inputBoxRows {
+		lines = lines[len(lines)-inputBoxRows:]
+	}
+
+	var b strings.Builder
+	b.WriteString(fmt.Sprintf("  ╭%s╮\n", strings.Repeat("─", inputBoxInnerWidth)))
+
+	for _, line := range lines {
+		// Truncate if line exceeds content width
+		runes := []rune(line)
+		if len(runes) > contentWidth {
+			runes = runes[len(runes)-contentWidth:]
+		}
+		pad := contentWidth - len(runes)
+		if pad < 0 {
+			pad = 0
+		}
+		b.WriteString(fmt.Sprintf("  │ %s%s │\n", string(runes), strings.Repeat(" ", pad)))
+	}
+
+	b.WriteString(fmt.Sprintf("  ╰%s╯\n", strings.Repeat("─", inputBoxInnerWidth)))
+	return b.String()
 }
 
 // defaultCheckUntracked checks for untracked files in the current working directory.
