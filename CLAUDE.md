@@ -30,8 +30,10 @@ cmd/ccells/                # CLI entry point + subcommands
   cmd_ps.go                # ps: list workstreams
   cmd_pair.go              # pair/unpair: pairing mode
   dialog_create.go         # Interactive create popup (Bubble Tea)
-  dialog_merge.go          # Interactive merge popup
+  dialog_merge.go          # Interactive merge/PR popup (create PR, merge, view)
   dialog_rm.go             # Interactive destroy popup
+  dialog_welcome.go        # First-run welcome screen with shimmer animation
+  handlers.go              # Action handlers wiring orchestrator + tmux
   detach.go                # Detach summary display
   runtime.go               # Runtime selection (claude/claudesp)
 internal/
@@ -268,7 +270,7 @@ json.NewEncoder(conn).Encode(daemon.Request{Action: "ping"})
 - **Interactive Dialogs**: Bubble Tea programs run in `tmux display-popup` for create/merge/destroy flows.
 - **State Reconciliation**: Cross-references tmux panes with Docker containers to detect orphans and stale state.
 - **Git Worktree Isolation**: Each container gets its own git worktree, avoiding host repo conflicts.
-- **Shell Escaping**: `escapeShellArg()` handles newlines (`\n`, `\r`), null bytes, and other special characters.
+- **Shell Escaping**: `EscapeShellArg()` handles newlines (`\n`, `\r`), null bytes, and other special characters.
 - **Resource Limits**: Manager limits workstreams to 12 (MaxWorkstreams constant).
 - **Auto-Persisting State**: `PersistentManager` auto-saves on any mutation. 200ms debounced saves prevent disk thrashing.
 - **Atomic State Writes**: `SaveState` writes to temp file then renames for crash safety.
@@ -279,11 +281,14 @@ json.NewEncoder(conn).Encode(daemon.Request{Action: "ping"})
 - **Container Security Hardening**: Tiered security defaults (hardened/moderate/compat) with auto-relaxation on startup failure.
 - **PR Generation via Claude CLI**: Uses Claude (haiku model) to generate PR titles and descriptions from branch diffs.
 - **Native Claude Code Installer**: Uses `claude.ai/install.sh` instead of npm. Configurable injection via `~/.claude-cells/config.yaml`.
+- **Full PR Workflow**: Merge dialog supports push + create PR (Claude-generated), merge with method selection (squash/merge/rebase), and view PR URL.
+- **State Reconciliation Wired**: Daemon cross-references tmux panes with Docker containers every 30s, killing orphaned panes and logging orphaned containers.
+- **Pane Death Handling**: `pane-died` hook respawns last pane with create dialog; kills extra dead panes.
+- **Welcome Screen**: Centered display with animated pearlescent shimmer title, keybinding reference, chains to create dialog.
 
 ### Remaining Technical Debt
 
-1. **Wire TODO(task-14) placeholders**: Daemon handlers for create/rm/pause/unpause have TODO stubs that need wiring to the orchestrator package.
-2. **Full Context Propagation**: Root context from main should flow through daemon to all operations for clean shutdown.
+1. **Full Context Propagation**: Root context from main should flow through daemon to all operations for clean shutdown.
 
 ### Git Proxy (Container Git Operations)
 
@@ -341,11 +346,11 @@ go func() {
 
 ### Security Checklist
 
-- [x] Never interpolate user input into shell commands without escaping (see `escapeShellArg()`)
+- [x] Never interpolate user input into shell commands without escaping (see `EscapeShellArg()`)
 - [x] Credentials should be read-only in containers where possible (mounted as ReadOnly)
 - [x] Container security hardening with capability drops and no-new-privileges
 - [x] Auto-relaxation with config persistence for compatibility
-- [ ] Validate all branch names before using in paths/commands
+- [x] Validate all branch names before using in paths/commands (see `validateBranchName()`)
 
 ### Committing (ccells containers)
 
