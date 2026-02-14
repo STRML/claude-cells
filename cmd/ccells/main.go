@@ -185,9 +185,7 @@ func printKeybindings() {
 	keys := []struct{ key, label string }{
 		{"n / \" / %", "Create new workstream"},
 		{"x", "Destroy workstream"},
-		{"p", "Pause current workstream"},
-		{"r", "Resume current workstream"},
-		{"m", "Create/view pull request"},
+		{"m", "Create/merge pull request"},
 		{"?", "Show this help"},
 	}
 	for _, k := range keys {
@@ -633,7 +631,7 @@ func main() {
 			}
 		}
 		if interactive {
-			if err := runMergeInteractive(appCtx, repoID, stateDir); err != nil {
+			if err := runMergeInteractive(appCtx, repoID, repoPath, stateDir); err != nil {
 				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 				os.Exit(1)
 			}
@@ -737,12 +735,12 @@ func runRmInteractive(ctx context.Context, repoID, stateDir string) error {
 }
 
 // runMergeInteractive launches the interactive merge dialog as a Bubble Tea program.
-func runMergeInteractive(ctx context.Context, repoID, stateDir string) error {
-	names, err := listWorkstreamNames(ctx, repoID)
+func runMergeInteractive(ctx context.Context, repoID, repoPath, stateDir string) error {
+	workstreams, err := loadMergeWorkstreams(ctx, repoID, stateDir)
 	if err != nil {
 		return err
 	}
-	m := newMergeDialog(names)
+	m := newMergeDialog(workstreams, repoPath)
 	p := tea.NewProgram(m)
 	_, err = p.Run()
 	return err

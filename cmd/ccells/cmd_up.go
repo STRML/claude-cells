@@ -87,14 +87,18 @@ func runUp(ctx context.Context, repoID, repoPath, stateDir, runtime string) erro
 		session: sessionName,
 	}
 
+	// Reconciliation: cross-reference tmux panes with Docker containers every 30s
+	reconcileFunc := buildReconcileFunc(client, dockerClient, sessionName)
+
 	// Start daemon for credential refresh + state reconciliation
 	daemonSockPath := filepath.Join(stateDir, "daemon.sock")
 	d := daemon.New(daemon.Config{
-		SocketPath: daemonSockPath,
-		OnCreate:   handlers.handleCreate,
-		OnRemove:   handlers.handleRemove,
-		OnPause:    handlers.handlePause,
-		OnUnpause:  handlers.handleUnpause,
+		SocketPath:    daemonSockPath,
+		ReconcileFunc: reconcileFunc,
+		OnCreate:      handlers.handleCreate,
+		OnRemove:      handlers.handleRemove,
+		OnPause:       handlers.handlePause,
+		OnUnpause:     handlers.handleUnpause,
 	})
 	daemonCtx, daemonCancel := context.WithCancel(ctx)
 	var daemonWg sync.WaitGroup
@@ -152,6 +156,67 @@ func waitForDaemon(sockPath string, timeout time.Duration) {
 		time.Sleep(50 * time.Millisecond)
 	}
 	log.Printf("warning: daemon socket not ready after %v: %s", timeout, sockPath)
+}
+
+// buildReconcileFunc creates a reconciliation closure that cross-references
+// tmux panes with Docker containers and cleans up orphans.
+func buildReconcileFunc(tmuxClient *tmux.Client, dockerClient docker.DockerClient, session string) daemon.ReconcileFunc {
+	reconciler := &daemon.Reconciler{}
+
+	return func(ctx context.Context) error {
+		// Gather tmux pane state
+		panes, err := tmuxClient.ListPanes(ctx, session)
+		if err != nil {
+			return fmt.Errorf("list panes: %w", err)
+		}
+
+		var paneStates []daemon.PaneState
+		for _, p := range panes {
+			ws, _ := tmuxClient.GetPaneOption(ctx, p.ID, "@ccells-workstream")
+			cn, _ := tmuxClient.GetPaneOption(ctx, p.ID, "@ccells-container")
+			if ws == "" && cn == "" {
+				continue // non-ccells pane
+			}
+			paneStates = append(paneStates, daemon.PaneState{
+				PaneID:     p.ID,
+				Workstream: ws,
+				Container:  cn,
+			})
+		}
+
+		// Gather Docker container state
+		containers, err := dockerClient.ListDockerTUIContainers(ctx)
+		if err != nil {
+			return fmt.Errorf("list containers: %w", err)
+		}
+
+		var containerStates []daemon.ContainerState
+		for _, c := range containers {
+			containerStates = append(containerStates, daemon.ContainerState{
+				ID:      c.ID,
+				Name:    c.Name,
+				Running: c.State == "running",
+			})
+		}
+
+		// Reconcile
+		result := reconciler.Reconcile(paneStates, containerStates)
+
+		// Handle orphaned panes (container gone, pane still exists)
+		for _, p := range result.OrphanedPanes {
+			log.Printf("[reconcile] orphaned pane %s (workstream=%s, container=%s) — killing",
+				p.PaneID, p.Workstream, p.Container)
+			tmuxClient.KillPane(ctx, p.PaneID)
+		}
+
+		// Log orphaned containers (container running, no pane) — don't auto-kill,
+		// they may be from a create operation in progress
+		for _, c := range result.OrphanedContainers {
+			log.Printf("[reconcile] orphaned container %s (%s) — no matching pane", c.Name, c.ID[:12])
+		}
+
+		return nil
+	}
 }
 
 // doAttach execs into the tmux session, replacing the current process's stdio.
