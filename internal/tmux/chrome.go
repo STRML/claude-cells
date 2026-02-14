@@ -225,9 +225,29 @@ func FormatPowerlineLeft(repoPath, branch string) string {
 	return b.String()
 }
 
+// FormatPaneDiedHookCmd returns the tmux command for the pane-died hook.
+// When the last pane dies, it respawns with the create dialog.
+// When other panes remain, it kills the dead pane.
+func FormatPaneDiedHookCmd(ccellsBin string) string {
+	bin := EscapeShellArg(ccellsBin)
+	respawnCmd := fmt.Sprintf("respawn-pane -k %s create --interactive", bin)
+	return fmt.Sprintf(`if-shell -F "#{==:#{window_panes},1}" "%s" "kill-pane"`, respawnCmd)
+}
+
 // ConfigureChrome sets up tmux status line, pane borders, and keybindings.
 func (c *Client) ConfigureChrome(ctx context.Context, session, ccellsBin, repoPath, branch string) error {
 	bin := EscapeShellArg(ccellsBin)
+
+	// Keep dead panes around so we can respawn or clean them up via hooks
+	if _, err := c.run(ctx, "set-option", "-t", session, "remain-on-exit", "on"); err != nil {
+		return fmt.Errorf("set remain-on-exit: %w", err)
+	}
+
+	// When a pane's process exits: respawn last pane with create dialog, kill others
+	hookCmd := FormatPaneDiedHookCmd(ccellsBin)
+	if err := c.SetHook(ctx, session, "pane-died[0]", hookCmd); err != nil {
+		return fmt.Errorf("set pane-died hook: %w", err)
+	}
 
 	// Pane border styling with color support
 	if _, err := c.run(ctx, "set-option", "-t", session, "-g", "pane-border-format",

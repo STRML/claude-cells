@@ -465,6 +465,41 @@ func TestFormatStatusLine_Keyhints(t *testing.T) {
 	}
 }
 
+func TestFormatPaneDiedHookCmd(t *testing.T) {
+	cmd := FormatPaneDiedHookCmd("/usr/local/bin/ccells")
+
+	// Should use if-shell with format flag to check pane count
+	if !strings.Contains(cmd, `if-shell -F`) {
+		t.Error("expected if-shell -F for format-based condition")
+	}
+
+	// Should check if window has exactly 1 pane
+	if !strings.Contains(cmd, `#{==:#{window_panes},1}`) {
+		t.Error("expected check for single pane window")
+	}
+
+	// Last pane: should respawn with create dialog
+	if !strings.Contains(cmd, "respawn-pane -k") {
+		t.Error("expected respawn-pane for last pane")
+	}
+	if !strings.Contains(cmd, "create --interactive") {
+		t.Error("expected create --interactive in respawn command")
+	}
+
+	// Multiple panes: should kill the dead one
+	if !strings.Contains(cmd, "kill-pane") {
+		t.Error("expected kill-pane for non-last dead pane")
+	}
+}
+
+func TestFormatPaneDiedHookCmd_ShellEscaping(t *testing.T) {
+	// Path with spaces should be escaped
+	cmd := FormatPaneDiedHookCmd("/path with spaces/ccells")
+	if !strings.Contains(cmd, "'/path with spaces/ccells'") {
+		t.Errorf("expected shell-escaped path, got: %s", cmd)
+	}
+}
+
 func TestColorConstants(t *testing.T) {
 	// Verify color constants match expected tmux colour names
 	tests := []struct {
