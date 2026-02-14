@@ -22,6 +22,7 @@ func TestParseCommand(t *testing.T) {
 		{"unpair", []string{"unpair"}, "unpair"},
 		{"status", []string{"status"}, "status"},
 		{"merge", []string{"merge"}, "merge"},
+		{"welcome", []string{"welcome"}, "welcome"},
 		{"version long", []string{"--version"}, "version"},
 		{"version short", []string{"-v"}, "version"},
 		{"help long", []string{"--help"}, "help"},

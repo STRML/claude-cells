@@ -8,7 +8,7 @@ func parseCommand(args []string) string {
 	}
 	switch args[0] {
 	case "up", "attach", "down", "create", "rm", "pause", "unpause",
-		"ps", "logs", "pair", "unpair", "help", "status", "merge":
+		"ps", "logs", "pair", "unpair", "help", "status", "merge", "welcome":
 		return args[0]
 	case "--version", "-v":
 		return "version"
