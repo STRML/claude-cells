@@ -60,6 +60,11 @@ func InjectProxyConfig(claudeDir string) error {
 	// bypassPermissions is designed for isolated environments like containers.
 	settings["defaultMode"] = "bypassPermissions"
 
+	// Skip the "Bypass Permissions mode" confirmation prompt that Claude Code
+	// shows when --dangerously-skip-permissions is used. This eliminates the
+	// need for background tmux watchers to auto-accept the prompt.
+	settings["skipDangerousModePermissionPrompt"] = true
+
 	// Write updated settings
 	data, err := json.MarshalIndent(settings, "", "  ")
 	if err != nil {

@@ -17,16 +17,15 @@ type actionHandlers struct {
 	session string
 }
 
-// dockerExecWithAutoAccept returns a shell command that runs docker exec with a background
-// auto-accepter for Claude Code's "Bypass Permissions mode" confirmation prompt.
-// The auto-accepter watches the tmux pane for the prompt and sends Down+Enter via send-keys.
-// Uses $TMUX_PANE to target the correct pane in multi-pane sessions.
-func dockerExecWithAutoAccept(containerName, runtime string, extraFlags ...string) string {
+// dockerExecCmd returns a shell command that runs docker exec with --dangerously-skip-permissions.
+// The skipDangerousModePermissionPrompt setting in the container's settings.json
+// suppresses the "Bypass Permissions mode" confirmation prompt.
+func dockerExecCmd(containerName, runtime string, extraFlags ...string) string {
 	flags := ""
 	for _, f := range extraFlags {
 		flags += " " + f
 	}
-	return fmt.Sprintf(`sh -c 'PANE="$TMUX_PANE"; (sleep 2; for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do if tmux capture-pane -t "$PANE" -p 2>/dev/null | grep -q "Bypass Permissions mode"; then sleep 0.2; tmux send-keys -t "$PANE" Down; sleep 0.1; tmux send-keys -t "$PANE" Enter; exit 0; fi; if tmux capture-pane -t "$PANE" -p 2>/dev/null | grep -q "Enter to confirm"; then sleep 0.2; tmux send-keys -t "$PANE" Enter; exit 0; fi; sleep 1; done) & exec docker exec -it %s %s --dangerously-skip-permissions%s'`,
+	return fmt.Sprintf(`docker exec -it %s %s --dangerously-skip-permissions%s`,
 		containerName, runtime, flags)
 }
 
@@ -62,9 +61,9 @@ func (h *actionHandlers) handleCreate(ctx context.Context, branch, prompt, runti
 	var cmd string
 	if prompt != "" {
 		// Pass prompt as positional arg, NOT -p (which is pipe/print mode)
-		cmd = dockerExecWithAutoAccept(result.ContainerName, rt, tmux.EscapeShellArg(prompt))
+		cmd = dockerExecCmd(result.ContainerName, rt, tmux.EscapeShellArg(prompt))
 	} else {
-		cmd = dockerExecWithAutoAccept(result.ContainerName, rt)
+		cmd = dockerExecCmd(result.ContainerName, rt)
 	}
 
 	// Check if we should respawn the initial empty pane or split
@@ -157,7 +156,7 @@ func (h *actionHandlers) handleUnpause(ctx context.Context, name string) error {
 
 	// Respawn the pane to restart Claude in the container
 	rt := "claude" // TODO: store runtime in pane metadata
-	cmd := dockerExecWithAutoAccept(containerName, rt, "--resume")
+	cmd := dockerExecCmd(containerName, rt, "--resume")
 	h.tmux.RespawnPane(ctx, paneID, cmd)
 
 	return nil

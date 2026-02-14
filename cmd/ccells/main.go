@@ -706,33 +706,9 @@ func runCreateInteractive(stateDir, runtime string) error {
 		return fmt.Errorf("docker not found: %w", err)
 	}
 
-	// Spawn background auto-accepter for the "Bypass Permissions mode" prompt.
-	// Claude Code shows an interactive confirmation when --dangerously-skip-permissions is used.
-	// The old PTY-based TUI auto-accepted this; in tmux we use send-keys instead.
-	// This process survives syscall.Exec since it's a separate child process.
-	// Use $TMUX_PANE to target the correct pane in multi-pane sessions.
-	paneID := os.Getenv("TMUX_PANE")
-	exec.Command("sh", "-c", fmt.Sprintf(`
-		PANE="%s"
-		sleep 2
-		for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
-			content=$(tmux capture-pane -t "$PANE" -p 2>/dev/null)
-			if echo "$content" | grep -q "Bypass Permissions mode"; then
-				sleep 0.2
-				tmux send-keys -t "$PANE" Down
-				sleep 0.1
-				tmux send-keys -t "$PANE" Enter
-				exit 0
-			fi
-			if echo "$content" | grep -q "Enter to confirm"; then
-				sleep 0.2
-				tmux send-keys -t "$PANE" Enter
-				exit 0
-			fi
-			sleep 1
-		done
-	`, paneID)).Start()
-
+	// The "Bypass Permissions mode" confirmation prompt is suppressed by
+	// skipDangerousModePermissionPrompt: true in the container's settings.json
+	// (set by InjectProxyConfig). No background auto-accepter needed.
 	args := []string{"docker", "exec", "-it", final.containerName, rt, "--dangerously-skip-permissions"}
 	if final.prompt != "" {
 		args = append(args, final.prompt) // positional arg, NOT -p (which is pipe/print mode)

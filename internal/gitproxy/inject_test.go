@@ -87,6 +87,11 @@ func TestInjectProxyConfig(t *testing.T) {
 	if mode, ok := settings["defaultMode"].(string); !ok || mode != "bypassPermissions" {
 		t.Errorf("defaultMode = %v, want 'bypassPermissions'", settings["defaultMode"])
 	}
+
+	// Verify skipDangerousModePermissionPrompt is set (skips bypass permissions confirmation)
+	if skip, ok := settings["skipDangerousModePermissionPrompt"].(bool); !ok || !skip {
+		t.Errorf("skipDangerousModePermissionPrompt = %v, want true", settings["skipDangerousModePermissionPrompt"])
+	}
 }
 
 func TestInjectProxyConfig_RemovesInvalidBashKey(t *testing.T) {
