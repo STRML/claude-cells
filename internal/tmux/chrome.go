@@ -94,6 +94,7 @@ func formatColoredKeyhints(hint string) string {
 		{"n", "new"},
 		{"x", "destroy"},
 		{"m", "merge"},
+		{"Q", "quit"},
 		{"?", "help"},
 	}
 	var parts []string
@@ -313,6 +314,7 @@ func (c *Client) ConfigureChrome(ctx context.Context, session, ccellsBin, repoPa
 		"%": createCmdH, // Override tmux split-horizontal with create
 		"x": fmt.Sprintf("display-popup -E -w 60 -h 15 %s rm --interactive", bin),
 		"m": fmt.Sprintf("display-popup -E -w 70 -h 20 %s merge --interactive", bin),
+		"Q": fmt.Sprintf("display-popup -E -w 50 -h 14 %s down --interactive", bin),
 		"?": fmt.Sprintf("display-popup -E -w 55 -h 22 %s help --keybindings", bin),
 	}
 

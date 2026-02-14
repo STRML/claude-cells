@@ -186,6 +186,7 @@ func printKeybindings() {
 		{"n / \" / %", "Create new workstream"},
 		{"x", "Destroy workstream"},
 		{"m", "Create/merge pull request"},
+		{"Q", "Quit ccells"},
 		{"?", "Show this help"},
 	}
 	for _, k := range keys {
@@ -466,9 +467,26 @@ func main() {
 
 	case "down":
 		destroyContainers := false
+		interactive := false
 		for _, arg := range cmdArgs {
 			if arg == "--rm" {
 				destroyContainers = true
+			}
+			if arg == "--interactive" {
+				interactive = true
+			}
+		}
+		if interactive {
+			m := newQuitDialog()
+			p := tea.NewProgram(m)
+			final, err := p.Run()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			qd := final.(quitDialog)
+			if !qd.quit {
+				os.Exit(0) // user cancelled
 			}
 		}
 		if err := runDown(appCtx, repoID, stateDir, destroyContainers); err != nil {
