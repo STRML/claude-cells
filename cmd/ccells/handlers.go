@@ -3,8 +3,11 @@ package main
 import (
 	"context"
 	"fmt"
+	"log"
+	"path/filepath"
 
 	"github.com/STRML/claude-cells/internal/daemon"
+	"github.com/STRML/claude-cells/internal/gitproxy"
 	"github.com/STRML/claude-cells/internal/orchestrator"
 	"github.com/STRML/claude-cells/internal/tmux"
 	"github.com/STRML/claude-cells/internal/workstream"
@@ -12,9 +15,10 @@ import (
 
 // actionHandlers wires daemon actions to the orchestrator + tmux.
 type actionHandlers struct {
-	orch    orchestrator.WorkstreamOrchestrator
-	tmux    *tmux.Client
-	session string
+	orch     orchestrator.WorkstreamOrchestrator
+	tmux     *tmux.Client
+	session  string
+	gitProxy *gitproxy.Server
 }
 
 // dockerExecCmd returns a shell command that runs docker exec with --dangerously-skip-permissions
@@ -48,6 +52,18 @@ func (h *actionHandlers) handleCreate(ctx context.Context, branch, prompt, runti
 	})
 	if err != nil {
 		return "", fmt.Errorf("create workstream: %w", err)
+	}
+
+	// Start git proxy socket for this container
+	if h.gitProxy != nil {
+		wsInfo := gitproxy.WorkstreamInfo{
+			ID:           result.ContainerName,
+			Branch:       branch,
+			WorktreePath: result.WorktreePath,
+		}
+		if _, err := h.gitProxy.StartSocket(ctx, result.ContainerName, wsInfo); err != nil {
+			log.Printf("[handlers] Warning: failed to start git proxy for %s: %v", result.ContainerName, err)
+		}
 	}
 
 	// In interactive mode, the calling pane will exec into the container itself.
@@ -114,6 +130,11 @@ func (h *actionHandlers) handleRemove(ctx context.Context, name string) error {
 	paneID, containerName, err := h.findPane(ctx, name)
 	if err != nil {
 		return err
+	}
+
+	// Stop git proxy socket before destroying the container
+	if h.gitProxy != nil {
+		h.gitProxy.StopSocket(containerName)
 	}
 
 	// Kill the tmux pane first
@@ -184,4 +205,40 @@ func (h *actionHandlers) findPane(ctx context.Context, name string) (paneID, con
 	}
 
 	return "", "", fmt.Errorf("workstream %q not found", name)
+}
+
+// startGitProxiesForExistingPanes starts git proxy sockets for all panes
+// that have container metadata. Called on reattach to restore proxy sockets
+// since they're cleaned up when the daemon shuts down on detach.
+func (h *actionHandlers) startGitProxiesForExistingPanes(ctx context.Context) {
+	if h.gitProxy == nil {
+		return
+	}
+
+	panes, err := h.tmux.ListPanes(ctx, h.session)
+	if err != nil {
+		log.Printf("[handlers] Warning: failed to list panes for git proxy startup: %v", err)
+		return
+	}
+
+	for _, p := range panes {
+		branch, _ := h.tmux.GetPaneOption(ctx, p.ID, "@ccells-workstream")
+		containerName, _ := h.tmux.GetPaneOption(ctx, p.ID, "@ccells-container")
+		if branch == "" || containerName == "" {
+			continue
+		}
+
+		// Derive worktree path from branch name
+		safeName := orchestrator.SanitizeBranchName(branch)
+		worktreePath := filepath.Join(orchestrator.DefaultWorktreeBaseDir, safeName)
+
+		wsInfo := gitproxy.WorkstreamInfo{
+			ID:           containerName,
+			Branch:       branch,
+			WorktreePath: worktreePath,
+		}
+		if _, err := h.gitProxy.StartSocket(ctx, containerName, wsInfo); err != nil {
+			log.Printf("[handlers] Warning: failed to start git proxy for existing container %s: %v", containerName, err)
+		}
+	}
 }

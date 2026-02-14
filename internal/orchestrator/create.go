@@ -21,10 +21,10 @@ const DefaultGitProxyBaseDir = "/tmp/ccells/gitproxy"
 // Can be overridden via Orchestrator.WorktreeBaseDir for testing.
 const DefaultWorktreeBaseDir = "/tmp/ccells/worktrees"
 
-// sanitizeBranchName converts a branch name to a safe filesystem path component.
+// SanitizeBranchName converts a branch name to a safe filesystem path component.
 // It replaces path separators and spaces with dashes to prevent nested directories.
 // Example: "feature/foo" -> "feature-foo", "my branch" -> "my-branch"
-func sanitizeBranchName(branchName string) string {
+func SanitizeBranchName(branchName string) string {
 	safe := branchName
 	safe = strings.ReplaceAll(safe, "/", "-")
 	safe = strings.ReplaceAll(safe, "\\", "-")
@@ -152,7 +152,7 @@ func (o *Orchestrator) createWorktree(ctx context.Context, branchName string, us
 	}
 
 	// Sanitize branch name for filesystem path (e.g., "feature/foo" -> "feature-foo")
-	safeName := sanitizeBranchName(branchName)
+	safeName := SanitizeBranchName(branchName)
 	worktreePath := filepath.Join(baseDir, safeName)
 
 	// Clean up orphaned worktree directory if it exists but git doesn't know about it
@@ -184,7 +184,7 @@ func (o *Orchestrator) createWorktree(ctx context.Context, branchName string, us
 
 // cleanupWorktree removes a worktree on error.
 func (o *Orchestrator) cleanupWorktree(ctx context.Context, branchName string) {
-	safeName := sanitizeBranchName(branchName)
+	safeName := SanitizeBranchName(branchName)
 	worktreePath := filepath.Join(o.getWorktreeBaseDir(), safeName)
 	gitClient := o.gitFactory(o.repoPath)
 	_ = gitClient.RemoveWorktree(ctx, worktreePath)

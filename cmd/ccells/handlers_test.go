@@ -1,8 +1,11 @@
 package main
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/STRML/claude-cells/internal/orchestrator"
 )
 
 func TestDockerExecCmd(t *testing.T) {
@@ -75,4 +78,36 @@ func TestDockerExecCmd_HasAutoAccepter(t *testing.T) {
 	if !strings.Contains(cmd, "$TMUX_PANE") {
 		t.Error("auto-accepter should target $TMUX_PANE")
 	}
+}
+
+func TestWorktreePathDerivation(t *testing.T) {
+	// Verify that the worktree path derivation in startGitProxiesForExistingPanes
+	// matches what the orchestrator does in createWorktree.
+	tests := []struct {
+		branch   string
+		expected string
+	}{
+		{"my-branch", filepath.Join(orchestrator.DefaultWorktreeBaseDir, "my-branch")},
+		{"feature/foo", filepath.Join(orchestrator.DefaultWorktreeBaseDir, "feature-foo")},
+		{"feature/sub/foo", filepath.Join(orchestrator.DefaultWorktreeBaseDir, "feature-sub-foo")},
+	}
+	for _, tt := range tests {
+		safeName := orchestrator.SanitizeBranchName(tt.branch)
+		got := filepath.Join(orchestrator.DefaultWorktreeBaseDir, safeName)
+		if got != tt.expected {
+			t.Errorf("worktree path for %q = %q, want %q", tt.branch, got, tt.expected)
+		}
+	}
+}
+
+func TestActionHandlers_GitProxyNilSafe(t *testing.T) {
+	// Verify that handlers work correctly when gitProxy is nil
+	// (e.g., if git proxy initialization fails).
+	h := &actionHandlers{
+		gitProxy: nil,
+	}
+
+	// startGitProxiesForExistingPanes should be a no-op when gitProxy is nil
+	h.startGitProxiesForExistingPanes(nil)
+	// No panic = success
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/STRML/claude-cells/internal/daemon"
 	"github.com/STRML/claude-cells/internal/docker"
 	"github.com/STRML/claude-cells/internal/git"
+	"github.com/STRML/claude-cells/internal/gitproxy"
 	"github.com/STRML/claude-cells/internal/orchestrator"
 	"github.com/STRML/claude-cells/internal/tmux"
 	"github.com/STRML/claude-cells/internal/workstream"
@@ -80,12 +81,25 @@ func runUp(ctx context.Context, repoID, repoPath, stateDir, runtime string) erro
 	}
 	orch := orchestrator.New(dockerClient, gitFactory, repoPath)
 
-	// Wire action handlers (orchestrator + tmux)
+	// Start git proxy server for container git/gh operations.
+	// The PR callback updates tmux pane metadata when a PR is created.
+	gitProxyServer := gitproxy.NewServer(buildPRCallback(client, sessionName))
+	gitProxyServer.SetPushCompleteCallback(func(workstreamID string) {
+		log.Printf("[gitproxy] Push complete for %s", workstreamID)
+		// TODO: trigger PR status refresh when polling is implemented
+	})
+
+	// Wire action handlers (orchestrator + tmux + git proxy)
 	handlers := &actionHandlers{
-		orch:    orch,
-		tmux:    client,
-		session: sessionName,
+		orch:     orch,
+		tmux:     client,
+		session:  sessionName,
+		gitProxy: gitProxyServer,
 	}
+
+	// Start git proxy sockets for existing containers (on reattach).
+	// Sockets are cleaned up on detach, so we need to recreate them.
+	handlers.startGitProxiesForExistingPanes(ctx)
 
 	// Reconciliation: cross-reference tmux panes with Docker containers every 30s
 	reconcileFunc := buildReconcileFunc(client, dockerClient, sessionName)
@@ -121,12 +135,49 @@ func runUp(ctx context.Context, repoID, repoPath, stateDir, runtime string) erro
 	// Print detach summary after tmux exits
 	printDetachSummary(repoID, stateDir)
 
-	// Shut down daemon before closing Docker client to avoid races
+	// Shut down git proxy server, daemon, and Docker client in order
+	gitProxyServer.Shutdown()
 	daemonCancel()
 	daemonWg.Wait()
 	dockerClient.Close()
 
 	return attachErr
+}
+
+// buildPRCallback creates a callback that updates tmux pane metadata when
+// a PR is created via the git proxy. The callback finds the pane associated
+// with the container and updates its border to show the PR badge.
+func buildPRCallback(tmuxClient *tmux.Client, session string) gitproxy.PRUpdateCallback {
+	return func(workstreamID string, prNumber int, prURL string) {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+
+		panes, err := tmuxClient.ListPanes(ctx, session)
+		if err != nil {
+			log.Printf("[gitproxy] PR callback: failed to list panes: %v", err)
+			return
+		}
+
+		for _, p := range panes {
+			cn, _ := tmuxClient.GetPaneOption(ctx, p.ID, "@ccells-container")
+			if cn != workstreamID {
+				continue
+			}
+
+			// Update PR metadata on the pane
+			tmuxClient.SetPaneOption(ctx, p.ID, "@ccells-pr", prURL)
+
+			// Update border text to include PR badge
+			branch, _ := tmuxClient.GetPaneOption(ctx, p.ID, "@ccells-workstream")
+			tmuxClient.SetPaneOption(ctx, p.ID, "@ccells-border-text",
+				tmux.FormatPaneBorder(branch, "running", prNumber, ""))
+
+			log.Printf("[gitproxy] Updated pane %s with PR #%d", p.ID, prNumber)
+			return
+		}
+
+		log.Printf("[gitproxy] PR callback: no pane found for container %s", workstreamID)
+	}
 }
 
 // determinePaneCommand returns the shell command for the initial tmux pane.
