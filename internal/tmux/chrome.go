@@ -239,6 +239,14 @@ func FormatPaneDiedHookCmd(ccellsBin string) string {
 func (c *Client) ConfigureChrome(ctx context.Context, session, ccellsBin, repoPath, branch string) error {
 	bin := EscapeShellArg(ccellsBin)
 
+	// Enable extended keys (Kitty keyboard protocol) so terminals inside tmux
+	// can distinguish Shift+Enter from Enter, etc. Requires tmux 3.2+.
+	if tmuxVersionAtLeast(c, ctx, 3, 2) {
+		if _, err := c.run(ctx, "set-option", "-t", session, "extended-keys", "on"); err != nil {
+			return fmt.Errorf("set extended-keys: %w", err)
+		}
+	}
+
 	// Keep dead panes around so we can respawn or clean them up via hooks
 	if _, err := c.run(ctx, "set-option", "-t", session, "remain-on-exit", "on"); err != nil {
 		return fmt.Errorf("set remain-on-exit: %w", err)

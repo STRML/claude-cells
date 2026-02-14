@@ -17,15 +17,18 @@ type actionHandlers struct {
 	session string
 }
 
-// dockerExecCmd returns a shell command that runs docker exec with --dangerously-skip-permissions.
-// The skipDangerousModePermissionPrompt setting in the container's settings.json
-// suppresses the "Bypass Permissions mode" confirmation prompt.
+// dockerExecCmd returns a shell command that runs docker exec with --dangerously-skip-permissions
+// and a background auto-accepter for the "Bypass Permissions mode" confirmation prompt.
+//
+// The container's settings.json has skipDangerousModePermissionPrompt: true which
+// may suppress the prompt in some Claude Code versions. The auto-accepter is a
+// fallback that watches the tmux pane and sends keystrokes if the prompt appears.
 func dockerExecCmd(containerName, runtime string, extraFlags ...string) string {
 	flags := ""
 	for _, f := range extraFlags {
 		flags += " " + f
 	}
-	return fmt.Sprintf(`docker exec -it %s %s --dangerously-skip-permissions%s`,
+	return fmt.Sprintf(`sh -c 'PANE="$TMUX_PANE"; (for i in $(seq 1 15); do if tmux capture-pane -t "$PANE" -p 2>/dev/null | grep -q "Bypass Permissions mode"; then sleep 0.2; tmux send-keys -t "$PANE" Down Enter; exit 0; fi; sleep 1; done) & exec docker exec -it %s %s --dangerously-skip-permissions%s'`,
 		containerName, runtime, flags)
 }
 

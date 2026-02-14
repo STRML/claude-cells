@@ -57,18 +57,22 @@ func TestDockerExecCmd(t *testing.T) {
 	}
 }
 
-func TestDockerExecCmd_NoAutoAccepter(t *testing.T) {
+func TestDockerExecCmd_HasAutoAccepter(t *testing.T) {
 	cmd := dockerExecCmd("test-container", "claude")
 
-	// The skipDangerousModePermissionPrompt setting in settings.json handles
-	// the bypass prompt, so no background auto-accepter should be present.
-	if strings.Contains(cmd, "tmux send-keys") {
-		t.Error("should not contain tmux send-keys auto-accepter")
+	// The auto-accepter is a fallback for the "Bypass Permissions mode" prompt.
+	// settings.json has skipDangerousModePermissionPrompt: true but it's unreliable,
+	// so the auto-accepter watches the pane and sends keystrokes if needed.
+	if !strings.Contains(cmd, "tmux send-keys") {
+		t.Error("should contain tmux send-keys auto-accepter")
 	}
-	if strings.Contains(cmd, "Bypass Permissions mode") {
-		t.Error("should not contain auto-accepter grep for Bypass Permissions mode")
+	if !strings.Contains(cmd, "Bypass Permissions mode") {
+		t.Error("should contain auto-accepter grep for Bypass Permissions mode")
 	}
-	if strings.Contains(cmd, "sh -c") {
-		t.Error("should not wrap in sh -c (no auto-accepter needed)")
+	if !strings.Contains(cmd, "sh -c") {
+		t.Error("should wrap in sh -c for auto-accepter")
+	}
+	if !strings.Contains(cmd, "$TMUX_PANE") {
+		t.Error("auto-accepter should target $TMUX_PANE")
 	}
 }
