@@ -715,7 +715,7 @@ func runCreateInteractive(stateDir, runtime string) error {
 	if pane != "" {
 		// Background watcher: try every 1s for 15s
 		autoAcceptCmd := exec.Command("sh", "-c",
-			fmt.Sprintf(`for i in $(seq 1 15); do if tmux capture-pane -t %q -p 2>/dev/null | grep -q "Bypass Permissions mode"; then sleep 0.2; tmux send-keys -t %q Down Enter; exit 0; fi; sleep 1; done`,
+			fmt.Sprintf(`for i in $(seq 1 15); do if tmux capture-pane -t %q -p 2>/dev/null | grep -q "Bypass Permissions mode"; then sleep 0.2; tmux send-keys -t %q Enter; exit 0; fi; sleep 1; done`,
 				pane, pane))
 		autoAcceptCmd.Start() // fire and forget
 	}

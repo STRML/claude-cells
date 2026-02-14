@@ -28,7 +28,7 @@ func dockerExecCmd(containerName, runtime string, extraFlags ...string) string {
 	for _, f := range extraFlags {
 		flags += " " + f
 	}
-	return fmt.Sprintf(`sh -c 'PANE="$TMUX_PANE"; (for i in $(seq 1 15); do if tmux capture-pane -t "$PANE" -p 2>/dev/null | grep -q "Bypass Permissions mode"; then sleep 0.2; tmux send-keys -t "$PANE" Down Enter; exit 0; fi; sleep 1; done) & exec docker exec -it %s %s --dangerously-skip-permissions%s'`,
+	return fmt.Sprintf(`sh -c 'PANE="$TMUX_PANE"; (for i in $(seq 1 15); do if tmux capture-pane -t "$PANE" -p 2>/dev/null | grep -q "Bypass Permissions mode"; then sleep 0.2; tmux send-keys -t "$PANE" Enter; exit 0; fi; sleep 1; done) & exec docker exec -it %s %s --dangerously-skip-permissions%s'`,
 		containerName, runtime, flags)
 }
 
