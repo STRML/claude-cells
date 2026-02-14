@@ -1,23 +1,6 @@
 package main
 
-import (
-	"context"
-	"fmt"
-
-	"github.com/STRML/claude-cells/internal/tmux"
-)
-
-// runAttach attaches to an existing session or errors if none is running.
-func runAttach(ctx context.Context, repoID, stateDir string) error {
-	socketName := fmt.Sprintf("ccells-%s", repoID)
-	client := tmux.NewClient(socketName)
-
-	running, _ := client.HasSession(ctx, "ccells")
-	if !running {
-		return fmt.Errorf("no ccells session running for this repo. Run 'ccells up' first")
-	}
-
-	attachErr := doAttach(client, "ccells")
-	printDetachSummary(repoID, stateDir)
-	return attachErr
-}
+// The "attach" command is handled by runUp() in cmd_up.go.
+// If the tmux session already exists, runUp starts the daemon and attaches.
+// If not, it creates everything from scratch.
+// This file is kept for documentation — the command dispatch is in main.go.

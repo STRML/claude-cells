@@ -28,48 +28,48 @@ func runUp(ctx context.Context, repoID, repoPath, stateDir, runtime string) erro
 		return err
 	}
 
-	if running {
-		// Already running — just attach
-		attachErr := doAttach(client, sessionName)
-		printDetachSummary(repoID, stateDir)
-		return attachErr
-	}
+	if !running {
+		// Fresh start — create tmux session with chrome
 
-	// Resolve path to ccells binary for keybindings
-	ccellsBin, err := os.Executable()
-	if err != nil {
-		ccellsBin = "ccells" // fallback to PATH
-	} else {
-		ccellsBin, _ = filepath.Abs(ccellsBin)
-	}
-
-	// Determine initial pane command based on state.
-	paneCmd := determinePaneCommand(ccellsBin, stateDir)
-
-	// Create tmux session — with startup command if needed, plain shell otherwise.
-	if paneCmd != "" {
-		if err := client.NewSessionWithCommand(ctx, sessionName, paneCmd); err != nil {
-			return fmt.Errorf("failed to create tmux session: %w", err)
+		// Resolve path to ccells binary for keybindings
+		ccellsBin, err := os.Executable()
+		if err != nil {
+			ccellsBin = "ccells" // fallback to PATH
+		} else {
+			ccellsBin, _ = filepath.Abs(ccellsBin)
 		}
-	} else {
-		if err := client.NewSession(ctx, sessionName); err != nil {
-			return fmt.Errorf("failed to create tmux session: %w", err)
+
+		// Determine initial pane command based on state.
+		paneCmd := determinePaneCommand(ccellsBin, stateDir)
+
+		// Create tmux session — with startup command if needed, plain shell otherwise.
+		if paneCmd != "" {
+			if err := client.NewSessionWithCommand(ctx, sessionName, paneCmd); err != nil {
+				return fmt.Errorf("failed to create tmux session: %w", err)
+			}
+		} else {
+			if err := client.NewSession(ctx, sessionName); err != nil {
+				return fmt.Errorf("failed to create tmux session: %w", err)
+			}
+		}
+
+		// Get git branch for status bar
+		gitOps := git.New(repoPath)
+		branch, _ := gitOps.CurrentBranch(ctx)
+		if branch == "" {
+			branch = "main"
+		}
+
+		// Configure tmux chrome (status line, pane borders, keybindings)
+		if err := client.ConfigureChrome(ctx, sessionName, ccellsBin, repoPath, branch); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to configure tmux chrome: %v\n", err)
 		}
 	}
 
-	// Get git branch for status bar
-	gitOps := git.New(repoPath)
-	branch, _ := gitOps.CurrentBranch(ctx)
-	if branch == "" {
-		branch = "main"
-	}
-
-	// Configure tmux chrome (status line, pane borders, keybindings)
-	if err := client.ConfigureChrome(ctx, sessionName, ccellsBin, repoPath, branch); err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to configure tmux chrome: %v\n", err)
-	}
-
-	// Create Docker client and orchestrator for workstream operations
+	// Start daemon (needed on both fresh start and reattach).
+	// The daemon lives only while ccells is attached — it shuts down on detach
+	// and restarts on the next attach. This ensures handlers have valid references
+	// to the orchestrator and tmux client.
 	dockerClient, err := docker.NewClient()
 	if err != nil {
 		return fmt.Errorf("docker client: %w", err)

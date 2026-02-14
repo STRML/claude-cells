@@ -460,7 +460,9 @@ func main() {
 		}
 
 	case "attach":
-		if err := runAttach(appCtx, repoID, stateDir); err != nil {
+		// Attach is equivalent to up — if the session exists, up just
+		// starts the daemon and attaches. If not, it creates everything.
+		if err := runUp(appCtx, repoID, repoPath, stateDir, runtime); err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}

@@ -667,6 +667,106 @@ func TestStartupFlowEndToEnd_FirstTime(t *testing.T) {
 	// and TestDaemonStartupFlow_SocketReady / TestSendDaemonRequest_CreateWithHandler (cmd_up_test.go).
 }
 
+// TestDaemonRestart_AfterDetach verifies that the daemon can be stopped and
+// restarted on the same socket path. This simulates the detach → reattach flow:
+// 1. First attach: daemon starts, client sends requests
+// 2. Detach: daemon is cancelled, socket is cleaned up
+// 3. Reattach: new daemon starts on same path, client can send requests again
+//
+// This was a real bug: the daemon was only started on fresh session creation,
+// not on reattach. After detaching and reattaching, the daemon socket was gone
+// and all create/rm/pause operations failed with "daemon not reachable".
+func TestDaemonRestart_AfterDetach(t *testing.T) {
+	tmpDir := testShortDir(t)
+	sockPath := filepath.Join(tmpDir, "daemon.sock")
+
+	// --- First attach: start daemon, send request ---
+	ctx1, cancel1 := context.WithCancel(context.Background())
+	var wg1 sync.WaitGroup
+	wg1.Add(1)
+	d1 := daemon.New(daemon.Config{
+		SocketPath: sockPath,
+		OnCreate: func(ctx context.Context, branch, prompt, runtime string, skipPane bool, opts daemon.CreateExtraOpts) (string, error) {
+			return "container-1", nil
+		},
+	})
+	go func() {
+		defer wg1.Done()
+		d1.Run(ctx1)
+	}()
+
+	waitForDaemon(sockPath, 5*time.Second)
+
+	resp, err := sendDaemonRequestWithResponse(sockPath, "ping", nil)
+	if err != nil {
+		t.Fatalf("first attach ping failed: %v", err)
+	}
+	if !resp.OK {
+		t.Error("first attach ping should be OK")
+	}
+
+	// --- Detach: cancel daemon ---
+	cancel1()
+	wg1.Wait()
+
+	// Socket should be cleaned up by daemon
+	time.Sleep(100 * time.Millisecond)
+	if _, err := os.Stat(sockPath); !os.IsNotExist(err) {
+		t.Error("socket should be removed after daemon shutdown")
+	}
+
+	// Verify daemon is unreachable (the bug state)
+	_, err = sendDaemonRequestWithResponse(sockPath, "ping", nil, 500*time.Millisecond)
+	if err == nil {
+		t.Fatal("daemon should be unreachable after shutdown")
+	}
+
+	// --- Reattach: start NEW daemon on same socket path ---
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	var wg2 sync.WaitGroup
+	wg2.Add(1)
+	d2 := daemon.New(daemon.Config{
+		SocketPath: sockPath,
+		OnCreate: func(ctx context.Context, branch, prompt, runtime string, skipPane bool, opts daemon.CreateExtraOpts) (string, error) {
+			return "container-2", nil
+		},
+	})
+	go func() {
+		defer wg2.Done()
+		d2.Run(ctx2)
+	}()
+
+	waitForDaemon(sockPath, 5*time.Second)
+
+	// Verify new daemon works
+	resp, err = sendDaemonRequestWithResponse(sockPath, "ping", nil)
+	if err != nil {
+		t.Fatalf("reattach ping failed: %v (this is the bug — daemon not restarted on reattach)", err)
+	}
+	if !resp.OK {
+		t.Error("reattach ping should be OK")
+	}
+
+	// Verify create works with new daemon
+	params, _ := json.Marshal(map[string]interface{}{
+		"branch":    "new-feature",
+		"prompt":    "add tests",
+		"runtime":   "claude",
+		"skip_pane": true,
+	})
+	resp, err = sendDaemonRequestWithResponse(sockPath, "create", params, 30*time.Second)
+	if err != nil {
+		t.Fatalf("reattach create failed: %v", err)
+	}
+	if !resp.OK {
+		t.Errorf("reattach create should succeed, got error: %s", resp.Error)
+	}
+
+	cancel2()
+	wg2.Wait()
+}
+
 // TestStartupFlowEndToEnd_Returning verifies the returning user startup flow:
 // State exists with 0 workstreams → create dialog.
 func TestStartupFlowEndToEnd_Returning(t *testing.T) {
