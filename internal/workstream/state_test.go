@@ -586,6 +586,241 @@ func TestSaveStatePreservesWasInterrupted(t *testing.T) {
 	}
 }
 
+func TestMigrateStateFile_NoOldFile(t *testing.T) {
+	oldDir, err := os.MkdirTemp("", "migrate-old-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(oldDir)
+
+	newDir, err := os.MkdirTemp("", "migrate-new-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(newDir)
+
+	migrated, err := MigrateStateFile(oldDir, newDir)
+	if err != nil {
+		t.Fatalf("MigrateStateFile() error = %v", err)
+	}
+	if migrated {
+		t.Error("MigrateStateFile() should return false when no old file exists")
+	}
+}
+
+func TestMigrateStateFile_NewFileExists(t *testing.T) {
+	oldDir, err := os.MkdirTemp("", "migrate-old-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(oldDir)
+
+	newDir, err := os.MkdirTemp("", "migrate-new-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(newDir)
+
+	// Create both old and new files
+	oldData := []byte(`{"version":1,"workstreams":[]}`)
+	newData := []byte(`{"version":1,"workstreams":[{"id":"new"}]}`)
+	os.WriteFile(filepath.Join(oldDir, stateFileName), oldData, 0644)
+	os.WriteFile(filepath.Join(newDir, stateFileName), newData, 0644)
+
+	migrated, err := MigrateStateFile(oldDir, newDir)
+	if err != nil {
+		t.Fatalf("MigrateStateFile() error = %v", err)
+	}
+	if migrated {
+		t.Error("should not migrate when new file already exists")
+	}
+
+	// Old file should be deleted
+	if _, err := os.Stat(filepath.Join(oldDir, stateFileName)); !os.IsNotExist(err) {
+		t.Error("old file should be deleted when new file exists")
+	}
+
+	// New file should be preserved (not overwritten)
+	data, _ := os.ReadFile(filepath.Join(newDir, stateFileName))
+	if string(data) != string(newData) {
+		t.Error("new file should not be overwritten")
+	}
+}
+
+func TestMigrateStateFile_Success(t *testing.T) {
+	oldDir, err := os.MkdirTemp("", "migrate-old-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(oldDir)
+
+	newDir, err := os.MkdirTemp("", "migrate-new-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(newDir)
+
+	// Create old file only
+	oldData := []byte(`{"version":1,"workstreams":[{"id":"migrated"}]}`)
+	os.WriteFile(filepath.Join(oldDir, stateFileName), oldData, 0644)
+
+	migrated, err := MigrateStateFile(oldDir, newDir)
+	if err != nil {
+		t.Fatalf("MigrateStateFile() error = %v", err)
+	}
+	if !migrated {
+		t.Error("should return true when migration occurred")
+	}
+
+	// New file should have the old data
+	data, err := os.ReadFile(filepath.Join(newDir, stateFileName))
+	if err != nil {
+		t.Fatalf("failed to read new file: %v", err)
+	}
+	if string(data) != string(oldData) {
+		t.Error("new file should contain migrated data")
+	}
+
+	// Old file should be deleted
+	if _, err := os.Stat(filepath.Join(oldDir, stateFileName)); !os.IsNotExist(err) {
+		t.Error("old file should be deleted after migration")
+	}
+}
+
+func TestGetStateDir(t *testing.T) {
+	dir, err := GetStateDir("test-repo-id-123")
+	if err != nil {
+		t.Fatalf("GetStateDir() error = %v", err)
+	}
+	if dir == "" {
+		t.Error("GetStateDir() returned empty string")
+	}
+	// Should contain the repo ID
+	if !filepath.IsAbs(dir) {
+		t.Errorf("GetStateDir() should return absolute path, got %q", dir)
+	}
+	// Directory should exist
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		t.Error("GetStateDir() should create the directory")
+	}
+	// Clean up
+	os.RemoveAll(dir)
+}
+
+func TestSaveStateWithRepoInfo(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	ws := New("test prompt")
+	ws.ContainerID = "container-123"
+
+	repoInfo := &RepoInfo{
+		Name:      "my-repo",
+		Path:      "/home/user/my-repo",
+		Remote:    "https://github.com/user/my-repo",
+		RepoID:    "abc123",
+		CreatedAt: time.Now(),
+	}
+
+	err = SaveStateWithRepoInfo(tmpDir, []*Workstream{ws}, 0, 0, repoInfo)
+	if err != nil {
+		t.Fatalf("SaveStateWithRepoInfo() error = %v", err)
+	}
+
+	state, err := LoadState(tmpDir)
+	if err != nil {
+		t.Fatalf("LoadState() error = %v", err)
+	}
+
+	if state.Repo == nil {
+		t.Fatal("Repo should not be nil")
+	}
+	if state.Repo.Name != "my-repo" {
+		t.Errorf("Repo.Name = %q, want %q", state.Repo.Name, "my-repo")
+	}
+	if state.Repo.RepoID != "abc123" {
+		t.Errorf("Repo.RepoID = %q, want %q", state.Repo.RepoID, "abc123")
+	}
+}
+
+func TestSaveStateWithRepoInfo_PreservesExisting(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	ws := New("test")
+	ws.ContainerID = "c1"
+
+	// First save with repo info
+	repoInfo := &RepoInfo{Name: "original-repo", RepoID: "orig123"}
+	err = SaveStateWithRepoInfo(tmpDir, []*Workstream{ws}, 0, 0, repoInfo)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Second save with nil repo info — should preserve original
+	err = SaveStateWithRepoInfo(tmpDir, []*Workstream{ws}, 0, 0, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := LoadState(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if state.Repo == nil {
+		t.Fatal("Repo should be preserved from first save")
+	}
+	if state.Repo.Name != "original-repo" {
+		t.Errorf("Repo.Name = %q, want %q", state.Repo.Name, "original-repo")
+	}
+}
+
+func TestSaveStatePreservesPRInfo(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	ws := New("test")
+	ws.ContainerID = "c1"
+	ws.PRNumber = 42
+	ws.PRURL = "https://github.com/org/repo/pull/42"
+	ws.HasBeenPushed = true
+	ws.Synopsis = "Added auth flow"
+
+	err = SaveState(tmpDir, []*Workstream{ws}, 0, 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	state, err := LoadState(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	saved := state.Workstreams[0]
+	if saved.PRNumber != 42 {
+		t.Errorf("PRNumber = %d, want 42", saved.PRNumber)
+	}
+	if saved.PRURL != "https://github.com/org/repo/pull/42" {
+		t.Errorf("PRURL = %q, want correct URL", saved.PRURL)
+	}
+	if !saved.HasBeenPushed {
+		t.Error("HasBeenPushed should be true")
+	}
+	if saved.Synopsis != "Added auth flow" {
+		t.Errorf("Synopsis = %q, want %q", saved.Synopsis, "Added auth flow")
+	}
+}
+
 func TestSaveStateWasInterruptedFalse(t *testing.T) {
 	tmpDir, err := os.MkdirTemp("", "ccells-test-*")
 	if err != nil {

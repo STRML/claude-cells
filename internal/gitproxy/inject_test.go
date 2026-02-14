@@ -82,6 +82,11 @@ func TestInjectProxyConfig(t *testing.T) {
 	if !foundBashMatcher {
 		t.Error("No PreToolUse hook with matcher 'Bash' found")
 	}
+
+	// Verify bypassPermissions mode is set (skips workspace trust dialog in containers)
+	if mode, ok := settings["defaultMode"].(string); !ok || mode != "bypassPermissions" {
+		t.Errorf("defaultMode = %v, want 'bypassPermissions'", settings["defaultMode"])
+	}
 }
 
 func TestInjectProxyConfig_RemovesInvalidBashKey(t *testing.T) {

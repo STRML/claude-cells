@@ -1,112 +1,203 @@
 # Backend Structure
 
-Last updated: 2026-01-23 (Updated: cursor position fix)
+Last updated: 2026-02-13 (Updated: powerline chrome, welcome dialog, create dialog AI flow)
 
-## Quick Reference: Large Files
+## Quick Reference: Key Files
 
 | File | Lines | Notes |
 |------|-------|-------|
-| `tui/app.go` | 2722 | Main event loop - acceptable for Bubble Tea |
-| `tui/pane.go` | 1433 | Core pane logic (split into focused files) |
-| `tui/container.go` | 1356 | **Reduced from 1653** - core logic extracted to orchestrator |
-| `tui/dialog.go` | 1332 | Multiple dialog types - could split |
-| `orchestrator/create.go` | 309 | NEW - Creation flow extracted from container.go |
-| `git/branch.go` | 700+ | Acceptable |
-| `docker/container.go` | 600+ | Acceptable |
+| `cmd/ccells/main.go` | ~850 | Entry point, arg parsing, command dispatch |
+| `cmd/ccells/commands.go` | ~100 | Command registry + flag parsing |
+| `cmd/ccells/dialog_create.go` | ~210 | Interactive create popup (4-step with AI title gen) |
+| `cmd/ccells/dialog_welcome.go` | ~85 | First-run welcome screen (Bubble Tea) |
+| `internal/tmux/tmux.go` | ~115 | tmux server lifecycle |
+| `internal/tmux/chrome.go` | ~320 | Powerline status, pane borders, keybindings, path utils |
+| `internal/daemon/daemon.go` | ~320 | Socket server, background loops |
+| `orchestrator/create.go` | ~310 | Creation flow (worktree + container) |
+| `git/branch.go` | ~700 | Acceptable |
+| `docker/container.go` | ~600 | Acceptable |
 
 ## Package Overview
 
 ```
-internal/
-  tui/          # Terminal UI (Bubble Tea) - main application logic
-  orchestrator/ # Workstream lifecycle orchestration (NEW)
-  workstream/   # Workstream state and lifecycle management
-  docker/       # Docker SDK wrapper and container management
-  git/          # Git CLI wrapper and worktree operations
-  sync/         # Mutagen-based file sync for pairing mode
-  claude/       # Claude CLI wrapper for ephemeral queries
-  config/       # Global application configuration
+cmd/ccells/           # CLI entry point + compose-style subcommands
+  main.go             # Startup, arg parsing, command dispatch
+  commands.go         # Command registry + flag parsing
+  cmd_up.go           # up: create tmux session + daemon + attach
+  cmd_attach.go       # attach: reattach to existing session
+  cmd_down.go         # down: stop daemon + tmux + daemon client helpers
+  cmd_create.go       # create: new workstream via daemon
+  cmd_rm.go           # rm: destroy workstream
+  cmd_pause.go        # pause/unpause workstreams
+  cmd_ps.go           # ps: list workstreams from tmux panes
+  cmd_pair.go         # pair/unpair/status: pairing mode
+  dialog_create.go    # Interactive create popup (4-step with AI title gen)
+  dialog_welcome.go   # First-run welcome screen (intro + keybindings)
+  dialog_merge.go     # Interactive merge popup
+  dialog_rm.go        # Interactive destroy popup
+  detach.go           # Detach summary formatting
+  runtime.go          # Runtime selection (claude/claudesp)
 
-configs/        # Embedded static files (Dockerfile)
+internal/
+  tmux/               # tmux server + pane management
+  daemon/             # Background daemon (sidecar process)
+  orchestrator/       # Workstream lifecycle orchestration
+  workstream/         # Workstream state and lifecycle management
+  docker/             # Docker SDK wrapper and container management
+  git/                # Git CLI wrapper and worktree operations
+  gitproxy/           # Git proxy for container operations
+  sync/               # Mutagen-based file sync for pairing mode
+  claude/             # Claude CLI wrapper for ephemeral queries
+  config/             # Global application configuration
+
+configs/              # Embedded static files (Dockerfile)
 ```
 
 ---
 
-## `internal/tui/`
+## `internal/tmux/`
 
-The main application package implementing the Bubble Tea TUI.
+tmux server and pane management. Each ccells session uses a dedicated tmux server socket (`ccells-<repo-id>`).
 
 ### Key Types
 
 | Type | File | Description |
 |------|------|-------------|
-| `AppModel` | app.go | Root Bubble Tea model, orchestrates all state |
-| `PaneModel` | pane.go | Individual workstream pane with vt10x terminal |
-| `PTYSession` | pty.go | Docker exec PTY session management |
-| `DialogModel` | dialog.go | Modal dialog system |
-| `StatusBarModel` | statusbar.go | Bottom status bar |
-| `LogPanelModel` | logpanel.go | Debug log panel |
-| `LayoutType` | layout.go | Layout enum (Vertical, Horizontal, Grid) |
-
-### Message Types (Bubble Tea)
-
-| Message | File | Purpose |
-|---------|------|---------|
-| `PTYOutputMsg` | pty.go | PTY output data |
-| `PTYClosedMsg` | pty.go | PTY session closed |
-| `SessionIDCapturedMsg` | pty.go | Claude session ID captured |
-| `StateLoadedMsg` | app.go | State restored from disk |
-| `StateSavedMsg` | app.go | State persisted |
-| `spinnerTickMsg` | app.go | Animation tick |
-| `fadeTickMsg` | app.go | Fade animation tick |
-| `escapeTimeoutMsg` | app.go | Double-escape detection |
-| `ContainerCreatedMsg` | container.go | Container creation complete |
-| `ContainerPausedMsg` | container.go | Container pause complete |
-| `ContainerResumedMsg` | container.go | Container resume complete |
-| `ContainerDestroyedMsg` | container.go | Container destruction complete |
-| `WorkstreamStartedMsg` | container.go | Workstream fully initialized |
+| `Client` | tmux.go | tmux CLI wrapper targeting a specific socket |
+| `PaneInfo` | pane.go | Pane metadata (ID, workstream, container) |
+| `StatusWorkstream` | chrome.go | Data for status line rendering |
 
 ### Key Functions
 
-**app.go:**
-- `NewAppModel(ctx)` - Create app with context for cancellation
-- `Update(msg)` - Main message handler (implements `tea.Model`)
-- `View()` - Render UI (implements `tea.Model`)
-
-**container.go:**
-- `startContainerCmd()` - Async container creation
-- `pauseContainerCmd()` - Async container pause
-- `resumeContainerCmd()` - Async container resume
-- `destroyContainerCmd()` - Async container destruction
-
-**pty.go:**
-- `NewPTYSession()` - Create PTY session with Docker exec
-- `StartReadLoop()` - Background output reader
-- `escapeShellArg()` - Safe shell argument escaping
+**tmux.go:**
+- `NewClient(socket)` - Create client for a socket
+- `ServerRunning()` - Check if tmux server is running
+- `Version()` - Get tmux version string
+- `Prefix()` - Get user's tmux prefix key
+- `NewSession()` - Create detached session
+- `NewSessionWithCommand()` - Create session with initial pane command
+- `HasSession()` - Check if session exists
+- `KillServer()` - Kill tmux server
+- `KillSession()` - Kill specific session
+- `AttachCommand()` - Returns exec.Cmd for attach
 
 **pane.go:**
-- `WritePTYOutput()` - Write to vterm with scrollback tracking
-- `renderVTerm()` - Render vterm content with ANSI colors
-- `muteANSI()` - Desaturate colors for unfocused panes
-- `GetCursorPosition()` - Calculate cursor position (recalculates viewport offset to match View())
+- `CreatePane()` - Split window to add a pane
+- `KillPane()` - Kill a specific pane
+- `SetPaneOption()` - Set per-pane metadata (@ccells-workstream, etc.)
+- `ListPanes()` - Query panes with custom format string
 
-### Package-Level State
-
-| Variable | Purpose |
-|----------|---------|
-| `program *tea.Program` | Global program ref for PTY message sending |
-| `containerTracker` | Crash recovery tracking |
-| `credentialRefresher` | OAuth token sync service |
-| `versionInfo, commitHash` | Version display in help dialog |
+**chrome.go:**
+- `ConfigureChrome(ctx, session, ccellsBin, repoPath, branch)` - Set up powerline status, pane borders, keybindings
+- `FormatPowerlineLeft(repoPath, branch)` - Build powerline-style status-left with abbreviated path + branch icon
+- `AbbreviatePath(path)` - Shorten path (e.g., `~/g/o/claude-cells`)
+- `FormatStatusLine()` - Render status-right content (workstream indicators + keyhints)
+- `FormatPaneBorder()` - Render pane border text
+- `FormatPrefixHint()` - Convert "C-b" to "^b" for display
+- `SetSessionOption()` - Set session-level tmux options
+- `SetHook()` - Set tmux hooks on a session
 
 ---
 
-## `internal/orchestrator/` [EXPANDED - PR #8]
+## `internal/daemon/`
 
-Workstream lifecycle orchestration extracted from `tui/container.go`. Enables:
-- Testable business logic without Bubble Tea dependencies
-- Reusable logic for CLI tools or API servers
-- ~300 lines of core logic extracted from TUI
+Background process managing credentials, state reconciliation, and pairing health. Communicates with CLI commands via Unix domain socket.
+
+### Key Types
+
+| Type | File | Description |
+|------|------|-------------|
+| `Daemon` | daemon.go | Background process with socket server |
+| `Config` | daemon.go | Daemon configuration (socket path, intervals, providers) |
+| `ReconcileFunc` | daemon.go | Callback for periodic reconciliation |
+| `PairingProvider` | daemon.go | Interface for pairing operations |
+| `PairingState` | daemon.go | Snapshot of pairing state |
+| `Request` | api.go | JSON request from CLI |
+| `Response` | api.go | JSON response from daemon |
+| `Reconciler` | reconcile.go | Cross-references tmux + Docker state |
+| `ReconcileResult` | reconcile.go | Categorized state (healthy/orphaned) |
+
+### Daemon Actions
+
+| Action | Handler | Description |
+|--------|---------|-------------|
+| `ping` | inline | Health check |
+| `create` | `handleCreate` | Create workstream (calls orchestrator) |
+| `rm` | `handleRemove` | Remove workstream (calls orchestrator) |
+| `pause` | `handlePause` | Pause workstream (calls orchestrator) |
+| `unpause` | `handleUnpause` | Resume workstream (calls orchestrator) |
+| `pair` | `handlePair` | Enable pairing mode (calls sync.Pairing) |
+| `unpair` | `handleUnpair` | Disable pairing mode |
+| `pair-status` | `handlePairStatus` | Query pairing state |
+| `shutdown` | inline | Graceful shutdown |
+
+### Key Functions
+
+**daemon.go:**
+- `New(config)` - Create daemon instance
+- `Run(ctx)` - Start socket server + background loops (blocks until ctx cancelled)
+- `dispatch(ctx, req)` - Route request to handler
+- `handlePair()` / `handleUnpair()` / `handlePairStatus()` - Pairing operations
+
+**reconcile.go:**
+- `Reconciler.Reconcile(panes, containers)` - Cross-reference and categorize state
+
+---
+
+## `cmd/ccells/`
+
+CLI entry point with compose-style subcommands.
+
+### Key Functions
+
+**main.go:**
+- `main()` - Parse args, resolve repo, dispatch command (includes `welcome` dispatch)
+- `getRepoInfo()` - Returns `(repoID, repoPath, stateDir, error)` with proper error propagation
+- `getStateDir()` - Returns `(stateDir, error)` convenience wrapper
+- `runStatusTmux()` - Prints colored workstream status to stdout (for tmux `#()` command substitution)
+- `validatePrerequisites()` - Check Docker, build image if needed
+- `cleanupOrphanedContainers()` - Remove containers from crashed sessions
+- `cleanupOrphanedWorktrees()` - Remove stale worktrees
+- `runHeartbeat()` - Background heartbeat for crash recovery
+- `runStateRepair()` - Validate and repair state file
+
+**cmd_up.go:**
+- `runUp()` - Smart session startup: determines initial pane command based on state, creates tmux session, gets git branch for powerline, configures chrome, starts daemon, attaches
+- `doAttach()` - Attach to tmux session (blocks until detach)
+- `printDetachSummary()` - Print summary after detach
+
+**cmd_down.go:**
+- `runDown()` - Send shutdown to daemon, kill tmux server
+- `sendDaemonRequest()` - Send action to daemon (fire-and-forget)
+- `sendDaemonRequestWithResponse()` - Send action and read response
+
+**commands.go:**
+- `parseCommand()` - Extract command name from args
+- `parseFlags()` - Extract global flags (--runtime, --help, etc.)
+
+**dialog_create.go:**
+- `createDialog` - Bubble Tea model for interactive create popup
+- 4-step flow: `0=prompt` -> `1=summarizing` (Claude CLI) -> `2=confirm` -> `3=creating`
+- `generateTitle()` - Calls Claude CLI to generate short 3-5 word title from task prompt
+- Uses `workstream.GenerateBranchName()` for branch derivation from AI-generated title
+- `summarizeResultMsg` - Async message type for title generation result
+
+**dialog_welcome.go:**
+- `welcomeDialog` - Bubble Tea model for first-run welcome screen
+- Shows intro text, keybindings overview, then chains to create dialog on Enter/n
+- `runWelcome()` - Entry point; runs welcome dialog, optionally chains to create
+
+**detach.go:**
+- `formatDetachSummary()` - Format detach summary text
+
+**runtime.go:**
+- `ResolveRuntime()` - Resolve runtime from CLI flag + config files
+
+---
+
+## `internal/orchestrator/`
+
+Workstream lifecycle orchestration. Pure business logic, no tmux/daemon dependencies.
 
 ### Key Types
 
@@ -114,50 +205,10 @@ Workstream lifecycle orchestration extracted from `tui/container.go`. Enables:
 |------|------|-------------|
 | `WorkstreamOrchestrator` | orchestrator.go | Interface for lifecycle operations |
 | `Orchestrator` | orchestrator.go | Implementation coordinating Docker + Git |
-| `CreateOptions` | orchestrator.go | Creation config: repo path, image, resume flags, untracked files |
-| `CreateResult` | orchestrator.go | Result: container ID, name, config dir, worktree path |
-| `DestroyOptions` | orchestrator.go | Destruction config: delete branch, keep worktree, force |
-| `BranchConflict` | orchestrator.go | Branch conflict info: name, worktree path, commit info |
-
-### WorkstreamOrchestrator Interface
-
-```go
-type WorkstreamOrchestrator interface {
-    // CreateWorkstream creates a new workstream with container and worktree.
-    // Returns CreateResult with container info on success.
-    CreateWorkstream(ctx, ws, opts) (*CreateResult, error)
-
-    // CheckBranchConflict checks if a branch already exists.
-    // Returns nil if no conflict, or BranchConflict with details.
-    CheckBranchConflict(ctx, branchName) (*BranchConflict, error)
-
-    // PauseWorkstream pauses a running workstream's container.
-    PauseWorkstream(ctx, ws) error
-
-    // ResumeWorkstream resumes a paused workstream's container.
-    ResumeWorkstream(ctx, ws) error
-
-    // DestroyWorkstream removes container, worktree, and cleans up state.
-    DestroyWorkstream(ctx, ws, opts) error
-
-    // RebuildWorkstream destroys and recreates the container.
-    RebuildWorkstream(ctx, ws, opts) (*CreateResult, error)
-}
-```
-
-### CreateOptions Fields
-
-```go
-type CreateOptions struct {
-    RepoPath          string   // Repository path
-    CopyUntracked     bool     // Copy untracked files to worktree
-    UntrackedFiles    []string // List of untracked files to copy
-    ImageName         string   // Empty = auto-detect from devcontainer or default
-    IsResume          bool     // Resuming existing session (use --continue)
-    UseExistingBranch bool     // Use existing branch without creating new one
-    UpdateMain        bool     // Auto-pull main before creating branch
-}
-```
+| `CreateOptions` | orchestrator.go | Creation config |
+| `CreateResult` | orchestrator.go | Result with container ID, name, paths |
+| `DestroyOptions` | orchestrator.go | Destruction config |
+| `BranchConflict` | orchestrator.go | Branch conflict info |
 
 ### Key Functions
 
@@ -165,69 +216,16 @@ type CreateOptions struct {
 - `New(dockerClient, gitFactory, repoPath)` - Create orchestrator instance
 
 **create.go:**
-- `CreateWorkstream()` - Complete creation flow (see below)
-- `CheckBranchConflict()` - Check for existing branch/worktree conflicts
-- `createWorktree()` - Create isolated git worktree (sanitizes branch names)
-- `resolveImage()` - Auto-detect image, build with devcontainer CLI if needed
-- `buildFullContainerConfig()` - Build config with credentials, git identity, env
-- `createAndStartContainer()` - Create and start container (cleanup on failure)
-- `copyUntrackedFiles()` - Copy untracked files preserving permissions
-- `cleanupWorktree()` - Remove worktree on error
-- `sanitizeBranchName()` - Convert branch to safe filesystem path (e.g., `feature/foo` → `feature-foo`)
+- `CreateWorkstream()` - Complete creation flow
+- `CheckBranchConflict()` - Check for existing branch/worktree
+- `resolveImage()` - Auto-detect image from devcontainer
+- `buildFullContainerConfig()` - Build config with credentials, git identity
 
 **lifecycle.go:**
 - `PauseWorkstream()` - Pause container
-- `ResumeWorkstream()` - Resume container (unpause)
+- `ResumeWorkstream()` - Resume container
 - `DestroyWorkstream()` - Stop container, remove worktree, optionally delete branch
-- `RebuildWorkstream()` - Destroy + recreate container (keeps worktree and branch)
-
-### CreateWorkstream Flow
-
-```
-1. Update main branch (optional, non-fatal)
-2. Create git worktree (new or from existing branch)
-   - Sanitize branch name for filesystem
-   - Clean up orphaned worktree directories
-3. Copy untracked files (if requested and not using existing branch)
-4. Resolve image:
-   - If ImageName provided, use it
-   - Else auto-detect from devcontainer.json
-   - Build with devcontainer CLI if available
-   - Fall back to simple docker build
-5. Build container config:
-   - Load devcontainer env vars
-   - Create per-container isolated config directory
-   - Set up credentials, git identity, timezone
-6. Create and start container
-   - Cleanup worktree and config on failure
-```
-
-### Usage in TUI
-
-```go
-// AppModel stores orchestrator
-type AppModel struct {
-    orchestrator *orchestrator.Orchestrator
-}
-
-// Access via getter (returns nil if Docker unavailable)
-func (m *AppModel) Orchestrator() *orchestrator.Orchestrator {
-    return m.orchestrator
-}
-
-// container.go creates orchestrator per-command
-orch := orchestrator.New(dockerClient, gitFactory, repoPath)
-result, err := orch.CreateWorkstream(ctx, ws, orchestrator.CreateOptions{
-    RepoPath:      repoPath,
-    CopyUntracked: true,
-    UntrackedFiles: untrackedFiles,
-})
-
-// Use result
-ws.ContainerID = result.ContainerID
-ws.WorktreePath = result.WorktreePath
-registerContainerCredentials(result.ContainerID, result.ContainerName, result.ConfigDir)
-```
+- `RebuildWorkstream()` - Destroy + recreate container
 
 ---
 
@@ -245,28 +243,8 @@ Workstream state management and persistence.
 | `PersistentManager` | persistent_manager.go | Auto-persisting Manager wrapper |
 | `AppState` | state.go | Serializable application state |
 | `SavedWorkstream` | state.go | Serializable workstream data |
-| `RepoInfo` | state.go | Repository metadata |
-
-### Workstream States
-
-```go
-const (
-    StateStarting State = "starting"  // Container being created
-    StateRunning  State = "running"   // Claude active
-    StateIdle     State = "idle"      // Claude finished, container alive
-    StatePairing  State = "pairing"   // Mutagen sync active
-    StateStopped  State = "stopped"   // Container paused
-    StateError    State = "error"     // Container failed
-)
-```
 
 ### Key Functions
-
-**workstream.go:**
-- `New(prompt)` - Create workstream with auto-generated branch
-- `NewWithUniqueBranch()` - Create with collision-free branch name
-- `NewWithID()` - Restore from saved state
-- `SetState()`, `SetError()`, `SetContainerID()` - Thread-safe setters
 
 **manager.go:**
 - `Add()` - Register workstream (enforces `MaxWorkstreams = 12`)
@@ -276,20 +254,11 @@ const (
 **persistent_manager.go:**
 - `markDirty()` - Flag state for save
 - `saveLoop()` - Background 200ms debounced save
-- `LoadAndRestore()` - Load state from disk
 
 **state.go:**
 - `SaveState()` - Atomic write to state file
 - `LoadState()` - Read state file
 - `GetStateDir()` - Compute state directory path
-- `MigrateStateFile()` - Move state from old to new location
-
-**branch.go:**
-- `GenerateBranchName()` - Derive branch from prompt
-- `GenerateUniqueBranchName()` - Add suffix for collision avoidance
-
-**state_repair.go:**
-- `ValidateAndRepairState()` - Extract session IDs from containers
 
 ---
 
@@ -305,88 +274,9 @@ Docker SDK wrapper and container configuration.
 | `Client` | client.go | Real Docker SDK implementation |
 | `MockClient` | mock_client.go | Test mock with in-memory state |
 | `ContainerConfig` | container.go | Container creation config |
-| `ContainerInfo` | container.go | Container list entry |
 | `SecurityConfig` | security.go | Security hardening settings |
-| `SecurityTier` | security.go | Security level enum |
-| `CellsConfig` | security.go | Top-level config file structure |
 | `CredentialRefresher` | credentials.go | OAuth token sync service |
 | `ContainerTracker` | tracking.go | Crash recovery tracking |
-| `DevcontainerConfig` | devcontainer.go | devcontainer.json parser |
-| `ValidationResult` | validate.go | Prerequisite check result |
-
-### DockerClient Interface
-
-```go
-type DockerClient interface {
-    // Lifecycle
-    Ping(ctx) error
-    Close() error
-
-    // Container operations
-    CreateContainer(ctx, cfg) (string, error)
-    StartContainer(ctx, containerID) error
-    StopContainer(ctx, containerID) error
-    RemoveContainer(ctx, containerID) error
-    PauseContainer(ctx, containerID) error
-    UnpauseContainer(ctx, containerID) error
-    GetContainerState(ctx, containerID) (string, error)
-    IsContainerRunning(ctx, containerID) (bool, error)
-    ExecInContainer(ctx, containerID, cmd) (string, error)
-    SignalProcess(ctx, containerID, processName, signal) error
-
-    // Container management
-    ListDockerTUIContainers(ctx) ([]ContainerInfo, error)
-    CleanupOrphanedContainers(ctx, projectName, knownIDs, worktrees) (int, error)
-
-    // Image operations
-    ImageExists(ctx, imageName) (bool, error)
-}
-```
-
-### Security Tiers
-
-```go
-const (
-    TierHardened SecurityTier = "hardened"  // Most restrictive
-    TierModerate SecurityTier = "moderate"  // Default, balanced
-    TierCompat   SecurityTier = "compat"    // Most compatible
-)
-```
-
-### Key Functions
-
-**container.go:**
-- `NewContainerConfig()` - Create config from branch name
-- `CreateContainer()` - Create container with mounts and security
-- `CreateAndStartContainerWithFallback()` - Auto-relax security on failure
-- `CleanupOrphanedContainers()` - Remove orphans after crash
-
-**security.go:**
-- `LoadSecurityConfig()` - Merge global + project configs
-- `SaveProjectSecurityConfig()` - Persist auto-relaxation result
-- `ConfigForTier()` - Get defaults for security tier
-
-**credentials.go:**
-- `GetClaudeCredentials()` - Read from macOS keychain
-- `CredentialRefresher.Start()` - Begin background refresh loop
-- `RegisterContainer()` - Add container to refresh list
-
-**config.go:**
-- `SetupContainerConfig()` - Create container config directory
-- `GetContainerConfigDir()` - Get/create config path
-
-**tracking.go:**
-- `TrackContainer()` - Register container for crash recovery
-- `GetOrphanedContainers()` - Find containers from crashed sessions
-
-**validate.go:**
-- `ValidatePrerequisites()` - Check Docker, image availability
-- `BuildImage()` - Build default ccells image
-- `BuildProjectImage()` - Build from devcontainer.json
-
-**devcontainer.go:**
-- `LoadDevcontainerConfig()` - Parse devcontainer.json
-- `HasDevcontainerConfig()` - Check if project has devcontainer
 
 ---
 
@@ -402,56 +292,18 @@ Git CLI wrapper for worktree and branch operations.
 | `Git` | branch.go | Real git CLI implementation |
 | `MockClient` | mock_client.go | Test mock |
 
-### GitClient Interface
+---
 
-```go
-type GitClient interface {
-    // Branch operations
-    CurrentBranch(ctx) (string, error)
-    CreateBranch(ctx, name) error
-    Checkout(ctx, branch) error
-    DeleteBranch(ctx, name) error
-    BranchExists(ctx, name) (bool, error)
-    BranchHasCommits(ctx, branchName) (bool, error)
-    ListCCellsBranches(ctx) ([]string, error)
-    GetBaseBranch(ctx) (string, error)
+## `internal/gitproxy/`
 
-    // Working directory
-    HasUncommittedChanges(ctx) (bool, error)
-    Stash(ctx) error
-    StashPop(ctx) error
+Secure git proxy for container operations. Containers use git/gh commands that are intercepted by hooks and proxied through the host.
 
-    // Remote operations
-    Push(ctx, branch) error
-    ForcePush(ctx, branch) error
-    RemoteURL(ctx, remoteName) (string, error)
+### Key Types
 
-    // Merge/rebase
-    MergeBranch(ctx, branch) error
-    MergeBranchWithOptions(ctx, branch, squash) error
-    RebaseBranch(ctx, branch) error
-
-    // Worktrees
-    CreateWorktree(ctx, path, branch) error
-    RemoveWorktree(ctx, path) error
-    WorktreeList(ctx) ([]string, error)
-
-    // Repository
-    RepoID(ctx) (string, error)
-}
-```
-
-### Key Functions
-
-**branch.go:**
-- `New(repoPath)` - Create Git client for repo
-- `runGit()` - Execute git command with context
-- `CreateWorktree()` - Create isolated worktree
-- `RepoID()` - Get first commit hash as stable ID
-
-**pr.go:**
-- `CreatePR()` - Create GitHub PR via `gh` CLI
-- `GetPRForBranch()` - Check if PR exists
+| Type | File | Description |
+|------|------|-------------|
+| `Server` | server.go | Unix socket server per container |
+| `Manager` | server.go | Manages multiple proxy sockets |
 
 ---
 
@@ -465,21 +317,7 @@ Mutagen-based file sync for pairing mode.
 |------|------|-------------|
 | `Pairing` | pairing.go | Pairing mode orchestrator |
 | `PairingState` | pairing.go | Snapshot of pairing state |
-| `GitOperations` | pairing.go | Git interface subset |
-| `MutagenOperations` | pairing.go | Mutagen interface |
 | `Mutagen` | mutagen.go | Real mutagen CLI wrapper |
-
-### Key Functions
-
-**pairing.go:**
-- `Enable()` - Start pairing (stash, checkout, sync)
-- `Disable()` - Stop pairing (terminate sync, restore branch)
-- `CheckSyncHealth()` - Verify sync session, detect conflicts
-
-**mutagen.go:**
-- `CreateSession()` - Start mutagen sync
-- `TerminateSession()` - Stop mutagen sync
-- `GetConflicts()` - List sync conflicts
 
 ---
 
@@ -487,57 +325,11 @@ Mutagen-based file sync for pairing mode.
 
 Claude CLI wrapper for ephemeral queries.
 
-### Key Types
-
-| Type | File | Description |
-|------|------|-------------|
-| `QueryOptions` | query.go | Query configuration |
-| `CommandExecutor` | query.go | Abstraction for command execution |
-
 ### Key Functions
 
 **query.go:**
 - `Query()` - Execute ephemeral Claude query
 - `QueryWithTimeout()` - Convenience wrapper with timeout
-- Uses `--no-session-persistence` to avoid polluting resume log
-- Thread-safe via mutex
-
----
-
-## `internal/config/`
-
-Global application configuration.
-
-### Key Types
-
-| Type | File | Description |
-|------|------|-------------|
-| `GlobalConfig` | config.go | Global ccells config |
-
-### Key Functions
-
-**config.go:**
-- `Load()` - Load config from disk
-- `Save()` - Persist config
-- `IsFirstRun()` - Check if intro should be shown
-- `MarkIntroductionShown()` - Update first-run flag
-
----
-
-## `configs/`
-
-Embedded static files.
-
-### Key Variables
-
-| Variable | File | Description |
-|----------|------|-------------|
-| `BaseDockerfile` | configs.go | Embedded base.Dockerfile content |
-
-### Key Functions
-
-**configs.go:**
-- `BaseDockerfileHash()` - 12-char content hash for image tagging
 
 ---
 
@@ -546,20 +338,16 @@ Embedded static files.
 ```
 cmd/ccells/main.go
     |
-    +-> internal/tui (main app)
-    |     |
-    |     +-> internal/orchestrator (workstream lifecycle) [NEW]
-    |     +-> internal/workstream (state management)
-    |     +-> internal/docker (container ops)
-    |     +-> internal/git (git ops)
-    |     +-> internal/sync (pairing)
-    |     +-> internal/config (global config)
-    |
-    +-> internal/docker (validation, tracking)
+    +-> internal/tmux (session + pane management)
+    +-> internal/daemon (background process)
+    +-> internal/docker (validation, tracking, cleanup)
     +-> internal/git (repo ID)
     +-> internal/workstream (state loading)
 
-internal/orchestrator [NEW]
+internal/daemon
+    +-> (no internal deps — uses interfaces/callbacks)
+
+internal/orchestrator
     +-> internal/docker (DockerClient interface)
     +-> internal/git (GitClient via factory)
     +-> internal/workstream (Workstream type)
@@ -573,46 +361,20 @@ internal/workstream
 
 internal/sync
     +-> internal/git (GitOperations interface)
+
+internal/gitproxy
+    +-> internal/git (GitClient)
 ```
-
-## Coupling Analysis
-
-### Strong Boundaries ✅
-
-1. **Docker Abstraction** - `DockerClient` interface hides SDK types from TUI
-2. **Git Abstraction** - `GitClient` interface with domain-specific errors
-3. **Workstream Domain** - Clean separation between `Workstream` (runtime) and `SavedWorkstream` (persistence)
-
-### Leaky Boundaries ⚠️ (Improving)
-
-1. **TUI → Docker Coupling** (`container.go`) - **Partially Fixed**
-   - Reduced from 1653 to 1356 lines
-   - Core orchestration extracted to `internal/orchestrator`
-   - Remaining: Bubble Tea commands, PTY management, pairing integration
-   - Returns `tea.Msg` types (acceptable for TUI layer)
-
-2. **Global State in TUI**
-   ```go
-   var program *tea.Program       // pty.go
-   var containerTracker *...      // container.go
-   var credentialRefresher *...   // container.go
-   ```
-   - **Next step:** Move tracker/refresher registration into orchestrator
-
-3. **PaneModel God Object** - Mixes rendering, PTY, scrolling, animations
-
-### No Circular Dependencies ✅
-
-Go's package system prevents import cycles. Well done!
 
 ## Essential Reading Order
 
 1. `cmd/ccells/main.go` - Startup flow
-2. `internal/tui/app.go` - Main event loop
-3. `internal/orchestrator/orchestrator.go` - Workstream lifecycle interface [NEW]
-4. `internal/orchestrator/create.go` - Creation flow (worktree + container) [NEW]
-5. `internal/workstream/workstream.go` - Core domain model
-6. `internal/workstream/persistent_manager.go` - Auto-saving state
-7. `internal/docker/interface.go` - Docker abstraction
-8. `internal/git/interface.go` - Git abstraction
-9. `internal/tui/container.go` - Bubble Tea commands (delegates to orchestrator)
+2. `cmd/ccells/cmd_up.go` - Session creation + daemon start
+3. `internal/tmux/tmux.go` - tmux server management
+4. `internal/tmux/chrome.go` - Status line + keybindings
+5. `internal/daemon/daemon.go` - Background process
+6. `internal/daemon/api.go` - Request/Response protocol
+7. `internal/orchestrator/orchestrator.go` - Workstream lifecycle interface
+8. `internal/orchestrator/create.go` - Creation flow
+9. `internal/workstream/workstream.go` - Core domain model
+10. `internal/docker/interface.go` - Docker abstraction

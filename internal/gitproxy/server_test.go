@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -11,6 +12,19 @@ import (
 	"testing"
 	"time"
 )
+
+// testShortDir returns a short temp directory under /tmp/claude/ to avoid
+// macOS 104-char Unix socket path limit. t.TempDir() creates paths under
+// /var/folders/... which are too long when combined with container subdirs.
+func testShortDir(t *testing.T) string {
+	t.Helper()
+	dir := filepath.Join("/tmp/claude", fmt.Sprintf("gitproxy-test-%d", os.Getpid()))
+	if err := os.MkdirAll(dir, 0755); err != nil {
+		t.Fatalf("failed to create test dir: %v", err)
+	}
+	t.Cleanup(func() { os.RemoveAll(dir) })
+	return dir
+}
 
 // mockExecutor is a test double for CommandExecutor.
 type mockExecutor struct {
@@ -72,7 +86,7 @@ func TestNewServer(t *testing.T) {
 // TestStartSocket_Success tests starting a socket successfully.
 func TestStartSocket_Success(t *testing.T) {
 	server := NewServer(nil)
-	tmpDir := t.TempDir()
+	tmpDir := testShortDir(t)
 	server.SetBaseDir(tmpDir)
 
 	ws := WorkstreamInfo{
@@ -106,7 +120,7 @@ func TestStartSocket_Success(t *testing.T) {
 // TestStartSocket_AlreadyExists tests that starting a socket for an existing container returns existing path.
 func TestStartSocket_AlreadyExists(t *testing.T) {
 	server := NewServer(nil)
-	tmpDir := t.TempDir()
+	tmpDir := testShortDir(t)
 	server.SetBaseDir(tmpDir)
 
 	ws := WorkstreamInfo{
@@ -164,7 +178,7 @@ func TestStartSocket_UnwritableDir(t *testing.T) {
 // TestStopSocket_RemovesSocket tests that stopping a socket removes it.
 func TestStopSocket_RemovesSocket(t *testing.T) {
 	server := NewServer(nil)
-	tmpDir := t.TempDir()
+	tmpDir := testShortDir(t)
 	server.SetBaseDir(tmpDir)
 
 	ws := WorkstreamInfo{
@@ -206,7 +220,7 @@ func TestStopSocket_NonExistent(t *testing.T) {
 // TestGetSocketPath tests retrieving socket path.
 func TestGetSocketPath(t *testing.T) {
 	server := NewServer(nil)
-	tmpDir := t.TempDir()
+	tmpDir := testShortDir(t)
 	server.SetBaseDir(tmpDir)
 
 	// Non-existent container
@@ -230,7 +244,7 @@ func TestGetSocketPath(t *testing.T) {
 // TestShutdown tests that Shutdown stops all sockets.
 func TestShutdown(t *testing.T) {
 	server := NewServer(nil)
-	tmpDir := t.TempDir()
+	tmpDir := testShortDir(t)
 	server.SetBaseDir(tmpDir)
 
 	ws := WorkstreamInfo{ID: "ws-1", Branch: "branch-1"}
@@ -252,7 +266,7 @@ func TestShutdown(t *testing.T) {
 // TestUpdateWorkstream tests updating workstream info.
 func TestUpdateWorkstream(t *testing.T) {
 	server := NewServer(nil)
-	tmpDir := t.TempDir()
+	tmpDir := testShortDir(t)
 	server.SetBaseDir(tmpDir)
 
 	ws := WorkstreamInfo{
@@ -309,7 +323,7 @@ func sendRequest(t *testing.T, socketPath string, req Request) *Response {
 // TestHandleConnection_InvalidOperation tests that invalid operations are rejected.
 func TestHandleConnection_InvalidOperation(t *testing.T) {
 	server := NewServer(nil)
-	tmpDir := t.TempDir()
+	tmpDir := testShortDir(t)
 	server.SetBaseDir(tmpDir)
 
 	ws := WorkstreamInfo{
@@ -342,7 +356,7 @@ func TestHandleConnection_InvalidOperation(t *testing.T) {
 // TestHandleConnection_ValidationFailure tests that validation errors are returned.
 func TestHandleConnection_ValidationFailure(t *testing.T) {
 	server := NewServer(nil)
-	tmpDir := t.TempDir()
+	tmpDir := testShortDir(t)
 	server.SetBaseDir(tmpDir)
 
 	ws := WorkstreamInfo{
@@ -376,7 +390,7 @@ func TestHandleConnection_ValidationFailure(t *testing.T) {
 // TestHandleConnection_ExecutorError tests that executor errors are returned.
 func TestHandleConnection_ExecutorError(t *testing.T) {
 	server := NewServer(nil)
-	tmpDir := t.TempDir()
+	tmpDir := testShortDir(t)
 	server.SetBaseDir(tmpDir)
 
 	mock := &mockExecutor{
@@ -427,7 +441,7 @@ func TestHandleConnection_PRCreatedCallback(t *testing.T) {
 		callbackURL = prURL
 		close(callbackCalled)
 	})
-	tmpDir := t.TempDir()
+	tmpDir := testShortDir(t)
 	server.SetBaseDir(tmpDir)
 
 	mock := &mockExecutor{
@@ -494,7 +508,7 @@ func TestHandleConnection_PushCompleteCallback(t *testing.T) {
 		callbackWS = wsID
 		close(callbackCalled)
 	})
-	tmpDir := t.TempDir()
+	tmpDir := testShortDir(t)
 	server.SetBaseDir(tmpDir)
 
 	mock := &mockExecutor{
@@ -549,7 +563,7 @@ func TestHandleConnection_PushCompleteCallback_NotCalledOnFailure(t *testing.T) 
 	server.SetPushCompleteCallback(func(wsID string) {
 		callbackCalled = true
 	})
-	tmpDir := t.TempDir()
+	tmpDir := testShortDir(t)
 	server.SetBaseDir(tmpDir)
 
 	mock := &mockExecutor{
@@ -590,7 +604,7 @@ func TestHandleConnection_PushCompleteCallback_NotCalledOnFailure(t *testing.T) 
 // TestHandleConnection_InvalidJSON tests that invalid JSON is rejected.
 func TestHandleConnection_InvalidJSON(t *testing.T) {
 	server := NewServer(nil)
-	tmpDir := t.TempDir()
+	tmpDir := testShortDir(t)
 	server.SetBaseDir(tmpDir)
 
 	ws := WorkstreamInfo{
