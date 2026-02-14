@@ -6,11 +6,13 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
 	"github.com/STRML/claude-cells/internal/daemon"
+	"github.com/STRML/claude-cells/internal/workstream"
 )
 
 func TestWaitForDaemon_SocketExists(t *testing.T) {
@@ -518,4 +520,171 @@ func TestSendDaemonRequest_ConcurrentRequests(t *testing.T) {
 
 	cancel()
 	daemonWg.Wait()
+}
+
+// --- Startup pane command tests ---
+// These verify the critical startup logic: what command runs in the initial tmux pane.
+// This is the entry point for creating workstreams on startup.
+
+func TestDeterminePaneCommand_FirstTime(t *testing.T) {
+	// No state file → welcome screen → chains to create dialog
+	tmpDir := testShortDir(t)
+	stateDir := filepath.Join(tmpDir, "state")
+	os.MkdirAll(stateDir, 0755)
+
+	cmd := determinePaneCommand("/usr/local/bin/ccells", stateDir)
+
+	if cmd == "" {
+		t.Fatal("first-time startup should have a pane command, got empty string")
+	}
+	if !strings.Contains(cmd, "welcome") {
+		t.Errorf("first-time pane command should contain 'welcome', got: %s", cmd)
+	}
+	if !strings.Contains(cmd, "/usr/local/bin/ccells") {
+		t.Errorf("pane command should contain ccells path, got: %s", cmd)
+	}
+	if !strings.Contains(cmd, "exec \"$SHELL\"") {
+		t.Errorf("pane command should chain to exec $SHELL, got: %s", cmd)
+	}
+}
+
+func TestDeterminePaneCommand_ReturningNoWorkstreams(t *testing.T) {
+	// State file exists but empty workstreams → create dialog
+	tmpDir := testShortDir(t)
+	stateDir := filepath.Join(tmpDir, "state")
+	os.MkdirAll(stateDir, 0755)
+
+	// Create an empty state file
+	if err := workstream.SaveState(stateDir, nil, 0, 0); err != nil {
+		t.Fatalf("failed to create empty state: %v", err)
+	}
+
+	cmd := determinePaneCommand("/usr/local/bin/ccells", stateDir)
+
+	if cmd == "" {
+		t.Fatal("returning with 0 workstreams should have a pane command, got empty string")
+	}
+	if !strings.Contains(cmd, "create --interactive") {
+		t.Errorf("returning pane command should contain 'create --interactive', got: %s", cmd)
+	}
+	if strings.Contains(cmd, "welcome") {
+		t.Errorf("returning pane command should NOT contain 'welcome', got: %s", cmd)
+	}
+}
+
+func TestDeterminePaneCommand_ReturningWithWorkstreams(t *testing.T) {
+	// State file has workstreams → plain shell (panes restore separately)
+	tmpDir := testShortDir(t)
+	stateDir := filepath.Join(tmpDir, "state")
+	os.MkdirAll(stateDir, 0755)
+
+	// Create state with a workstream
+	ws := workstream.New("test prompt")
+	ws.BranchName = "test-branch"
+	if err := workstream.SaveState(stateDir, []*workstream.Workstream{ws}, 0, 0); err != nil {
+		t.Fatalf("failed to create state with workstream: %v", err)
+	}
+
+	cmd := determinePaneCommand("/usr/local/bin/ccells", stateDir)
+
+	if cmd != "" {
+		t.Errorf("with existing workstreams, pane command should be empty, got: %s", cmd)
+	}
+}
+
+func TestDeterminePaneCommand_PathWithSpaces(t *testing.T) {
+	// Verify the path is single-quoted for shell safety
+	tmpDir := testShortDir(t)
+	stateDir := filepath.Join(tmpDir, "state")
+	os.MkdirAll(stateDir, 0755)
+
+	cmd := determinePaneCommand("/path/with spaces/ccells", stateDir)
+
+	if !strings.Contains(cmd, "'/path/with spaces/ccells'") {
+		t.Errorf("path should be single-quoted, got: %s", cmd)
+	}
+}
+
+// TestParseCommand_Welcome verifies that the "welcome" subcommand dispatches correctly.
+// This was a real bug: "welcome" was missing from the parseCommand case list,
+// causing the subprocess to print help text and exit instead of showing the welcome screen.
+func TestParseCommand_Welcome(t *testing.T) {
+	got := parseCommand([]string{"welcome"})
+	if got != "welcome" {
+		t.Errorf("parseCommand([welcome]) = %q, want %q", got, "welcome")
+	}
+}
+
+// TestParseCommand_CreateInteractive verifies create with --interactive flag.
+func TestParseCommand_CreateInteractive(t *testing.T) {
+	got := parseCommand([]string{"create", "--interactive"})
+	if got != "create" {
+		t.Errorf("parseCommand([create, --interactive]) = %q, want %q", got, "create")
+	}
+}
+
+// TestStartupFlowEndToEnd_FirstTime verifies the full first-time startup flow:
+// 1. determinePaneCommand returns welcome command
+// 2. parseCommand dispatches "welcome" correctly
+// 3. Welcome dialog chains to create on Enter
+// 4. Create dialog sends daemon request
+// 5. Daemon returns container name
+// Steps 3-5 are tested via the dialog and daemon tests respectively.
+// This test ties steps 1-2 together.
+func TestStartupFlowEndToEnd_FirstTime(t *testing.T) {
+	tmpDir := testShortDir(t)
+	stateDir := filepath.Join(tmpDir, "state")
+	os.MkdirAll(stateDir, 0755)
+
+	ccellsBin := "/usr/local/bin/ccells"
+
+	// Step 1: Determine pane command for first-time user
+	paneCmd := determinePaneCommand(ccellsBin, stateDir)
+	if paneCmd == "" {
+		t.Fatal("first-time startup should produce a pane command")
+	}
+	if !strings.Contains(paneCmd, "welcome") {
+		t.Fatalf("first-time pane command should contain 'welcome', got: %s", paneCmd)
+	}
+
+	// Step 2: Verify the subprocess command dispatches correctly.
+	// The pane runs: '<ccellsBin>' welcome; exec "$SHELL"
+	// The subprocess parses args ["welcome"] and should dispatch to "welcome".
+	got := parseCommand([]string{"welcome"})
+	if got != "welcome" {
+		t.Fatalf("parseCommand([welcome]) = %q, want 'welcome' — subprocess would dispatch to wrong handler", got)
+	}
+
+	// Steps 3-5 are verified by TestWelcomeDialog_EnterCreates (dialog_welcome_test.go)
+	// and TestDaemonStartupFlow_SocketReady / TestSendDaemonRequest_CreateWithHandler (cmd_up_test.go).
+}
+
+// TestStartupFlowEndToEnd_Returning verifies the returning user startup flow:
+// State exists with 0 workstreams → create dialog.
+func TestStartupFlowEndToEnd_Returning(t *testing.T) {
+	tmpDir := testShortDir(t)
+	stateDir := filepath.Join(tmpDir, "state")
+	os.MkdirAll(stateDir, 0755)
+
+	// Save empty state
+	if err := workstream.SaveState(stateDir, nil, 0, 0); err != nil {
+		t.Fatalf("failed to create state: %v", err)
+	}
+
+	ccellsBin := "/usr/local/bin/ccells"
+
+	// Step 1: Determine pane command
+	paneCmd := determinePaneCommand(ccellsBin, stateDir)
+	if paneCmd == "" {
+		t.Fatal("returning with 0 workstreams should produce a pane command")
+	}
+	if !strings.Contains(paneCmd, "create --interactive") {
+		t.Fatalf("returning pane command should contain 'create --interactive', got: %s", paneCmd)
+	}
+
+	// Step 2: Verify create --interactive dispatches correctly
+	got := parseCommand([]string{"create", "--interactive"})
+	if got != "create" {
+		t.Fatalf("parseCommand([create, --interactive]) = %q, want 'create'", got)
+	}
 }
