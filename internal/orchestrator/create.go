@@ -290,9 +290,11 @@ func (o *Orchestrator) buildFullContainerConfig(ws *workstream.Workstream, workt
 	cfg.Credentials = configPaths.Credentials
 	cfg.Timezone = docker.GetHostTimezone()
 
-	// Create git proxy socket directory
-	// The socket itself is created later by the TUI's gitproxy server
-	gitProxySocketDir := filepath.Join(DefaultGitProxyBaseDir, cfg.Name)
+	// Create git proxy socket directory with a safe name that won't exceed
+	// macOS's 104-char Unix socket path limit. The same function is used by
+	// the gitproxy server's StartSocket to ensure consistent directory naming.
+	safeDirName := gitproxy.SafeSocketDirName(DefaultGitProxyBaseDir, cfg.Name)
+	gitProxySocketDir := filepath.Join(DefaultGitProxyBaseDir, safeDirName)
 	if err := os.MkdirAll(gitProxySocketDir, 0755); err != nil {
 		return nil, fmt.Errorf("create git proxy socket dir: %w", err)
 	}
