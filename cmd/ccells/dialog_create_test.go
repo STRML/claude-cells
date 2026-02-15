@@ -852,3 +852,64 @@ func TestWrapLine(t *testing.T) {
 		})
 	}
 }
+
+func TestWrapLine_WordBreak(t *testing.T) {
+	tests := []struct {
+		name  string
+		line  string
+		width int
+		want  []string
+	}{
+		{
+			name:  "breaks at space",
+			line:  "hello world foo",
+			width: 12,
+			want:  []string{"hello world", "foo"},
+		},
+		{
+			name:  "space at break point not moved to next line",
+			line:  "hello world bar",
+			width: 11,
+			want:  []string{"hello world", "bar"},
+		},
+		{
+			name:  "no space falls back to hard break",
+			line:  "abcdefghijklmno",
+			width: 10,
+			want:  []string{"abcdefghij", "klmno"},
+		},
+		{
+			name:  "multiple spaces at break consumed from next line",
+			line:  "hello   world",
+			width: 8,
+			want:  []string{"hello  ", "world"},
+		},
+		{
+			name:  "space exactly at width boundary",
+			line:  "1234567890 abc",
+			width: 10,
+			want:  []string{"1234567890", "abc"},
+		},
+		{
+			name:  "no leading space on wrapped line",
+			line:  "hello world",
+			width: 6,
+			want:  []string{"hello", "world"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := wrapLine(tt.line, tt.width)
+			if len(got) != len(tt.want) {
+				t.Fatalf("wrapLine(%q, %d) = %v (%d lines), want %v (%d lines)",
+					tt.line, tt.width, got, len(got), tt.want, len(tt.want))
+			}
+			for i, line := range got {
+				if line != tt.want[i] {
+					t.Errorf("wrapLine(%q, %d)[%d] = %q, want %q",
+						tt.line, tt.width, i, line, tt.want[i])
+				}
+			}
+		})
+	}
+}

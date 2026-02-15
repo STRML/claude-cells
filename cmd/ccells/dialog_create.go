@@ -360,7 +360,9 @@ func (m createDialog) viewUntracked(b *strings.Builder) {
 	b.WriteString(fmt.Sprintf("\n  %s[↑/↓] navigate  [Enter] select  [Esc] Cancel%s", cDim, cReset))
 }
 
-// wrapLine wraps a single line into multiple lines at the given width.
+// wrapLine wraps a single line into multiple lines at the given width,
+// breaking at word boundaries (spaces) when possible. Spaces at break
+// points are consumed so they don't appear at the start of the next line.
 func wrapLine(line string, width int) []string {
 	runes := []rune(line)
 	if len(runes) <= width {
@@ -368,10 +370,33 @@ func wrapLine(line string, width int) []string {
 	}
 	var wrapped []string
 	for len(runes) > width {
-		wrapped = append(wrapped, string(runes[:width]))
-		runes = runes[width:]
+		// Find last space at or before the width boundary for word break.
+		// Checking index width (the overflow position) allows breaking right
+		// after words that end exactly at the width limit.
+		breakAt := -1
+		for i := width; i >= 0; i-- {
+			if i < len(runes) && runes[i] == ' ' {
+				breakAt = i
+				break
+			}
+		}
+		if breakAt <= 0 {
+			// No space found — hard break at width
+			wrapped = append(wrapped, string(runes[:width]))
+			runes = runes[width:]
+		} else {
+			// Break at the space: keep text before the break point
+			wrapped = append(wrapped, string(runes[:breakAt]))
+			runes = runes[breakAt:]
+			// Skip spaces so next line starts with a word, not whitespace
+			for len(runes) > 0 && runes[0] == ' ' {
+				runes = runes[1:]
+			}
+		}
 	}
-	wrapped = append(wrapped, string(runes))
+	if len(runes) > 0 {
+		wrapped = append(wrapped, string(runes))
+	}
 	return wrapped
 }
 
