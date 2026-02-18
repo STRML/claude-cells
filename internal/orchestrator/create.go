@@ -21,10 +21,10 @@ const DefaultGitProxyBaseDir = "/tmp/ccells/gitproxy"
 // Can be overridden via Orchestrator.WorktreeBaseDir for testing.
 const DefaultWorktreeBaseDir = "/tmp/ccells/worktrees"
 
-// sanitizeBranchName converts a branch name to a safe filesystem path component.
+// SanitizeBranchName converts a branch name to a safe filesystem path component.
 // It replaces path separators and spaces with dashes to prevent nested directories.
 // Example: "feature/foo" -> "feature-foo", "my branch" -> "my-branch"
-func sanitizeBranchName(branchName string) string {
+func SanitizeBranchName(branchName string) string {
 	safe := branchName
 	safe = strings.ReplaceAll(safe, "/", "-")
 	safe = strings.ReplaceAll(safe, "\\", "-")
@@ -152,7 +152,7 @@ func (o *Orchestrator) createWorktree(ctx context.Context, branchName string, us
 	}
 
 	// Sanitize branch name for filesystem path (e.g., "feature/foo" -> "feature-foo")
-	safeName := sanitizeBranchName(branchName)
+	safeName := SanitizeBranchName(branchName)
 	worktreePath := filepath.Join(baseDir, safeName)
 
 	// Clean up orphaned worktree directory if it exists but git doesn't know about it
@@ -184,7 +184,7 @@ func (o *Orchestrator) createWorktree(ctx context.Context, branchName string, us
 
 // cleanupWorktree removes a worktree on error.
 func (o *Orchestrator) cleanupWorktree(ctx context.Context, branchName string) {
-	safeName := sanitizeBranchName(branchName)
+	safeName := SanitizeBranchName(branchName)
 	worktreePath := filepath.Join(o.getWorktreeBaseDir(), safeName)
 	gitClient := o.gitFactory(o.repoPath)
 	_ = gitClient.RemoveWorktree(ctx, worktreePath)
@@ -211,7 +211,7 @@ func (o *Orchestrator) resolveImage(ctx context.Context, opts CreateOptions) (st
 
 	if !imageExists {
 		if needsBuild {
-			// Need to build the image
+			// Need to build the image from devcontainer.json
 			devCfg, err := docker.LoadDevcontainerConfig(o.repoPath)
 			if err != nil {
 				return "", fmt.Errorf("load devcontainer config: %w", err)
@@ -234,8 +234,14 @@ func (o *Orchestrator) resolveImage(ctx context.Context, opts CreateOptions) (st
 					return "", fmt.Errorf("build project image: %w", err)
 				}
 			}
+		} else if imageName == docker.GetBaseImageName() {
+			// Base image hash changed (Dockerfile or config update) — rebuild
+			log.Printf("Base image %s not found, building...", imageName)
+			if err := docker.BuildImage(ctx, io.Discard); err != nil {
+				return "", fmt.Errorf("build base image: %w", err)
+			}
 		} else {
-			// Image doesn't exist and doesn't need building - user needs to pull
+			// Third-party image from devcontainer.json — user needs to pull
 			return "", fmt.Errorf("image '%s' not found. Run: docker pull %s", imageName, imageName)
 		}
 	}
@@ -284,9 +290,11 @@ func (o *Orchestrator) buildFullContainerConfig(ws *workstream.Workstream, workt
 	cfg.Credentials = configPaths.Credentials
 	cfg.Timezone = docker.GetHostTimezone()
 
-	// Create git proxy socket directory
-	// The socket itself is created later by the TUI's gitproxy server
-	gitProxySocketDir := filepath.Join(DefaultGitProxyBaseDir, cfg.Name)
+	// Create git proxy socket directory with a safe name that won't exceed
+	// macOS's 104-char Unix socket path limit. The same function is used by
+	// the gitproxy server's StartSocket to ensure consistent directory naming.
+	safeDirName := gitproxy.SafeSocketDirName(DefaultGitProxyBaseDir, cfg.Name)
+	gitProxySocketDir := filepath.Join(DefaultGitProxyBaseDir, safeDirName)
 	if err := os.MkdirAll(gitProxySocketDir, 0755); err != nil {
 		return nil, fmt.Errorf("create git proxy socket dir: %w", err)
 	}

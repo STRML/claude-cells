@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"log"
 	"os"
+	"os/exec"
 	"os/signal"
 	"path/filepath"
 	"strconv"
@@ -13,10 +15,10 @@ import (
 	"time"
 
 	tea "charm.land/bubbletea/v2"
+
 	"github.com/STRML/claude-cells/internal/docker"
 	"github.com/STRML/claude-cells/internal/git"
-	"github.com/STRML/claude-cells/internal/gitproxy"
-	"github.com/STRML/claude-cells/internal/tui"
+	"github.com/STRML/claude-cells/internal/tmux"
 	"github.com/STRML/claude-cells/internal/workstream"
 )
 
@@ -51,11 +53,9 @@ func (s *spinner) Start(ctx context.Context) {
 		for {
 			select {
 			case <-ctx.Done():
-				// Context cancelled - clear spinner and exit
 				fmt.Print("\r\033[K")
 				return
 			case <-s.done:
-				// Clear the spinner line
 				fmt.Print("\r\033[K")
 				return
 			case <-ticker.C:
@@ -68,7 +68,6 @@ func (s *spinner) Start(ctx context.Context) {
 
 func (s *spinner) Stop() {
 	close(s.done)
-	// Small delay to ensure spinner is cleared
 	time.Sleep(100 * time.Millisecond)
 }
 
@@ -86,23 +85,17 @@ func acquireLock(stateDir string) (*lockFile, error) {
 
 	// Check if lock file exists
 	if data, err := os.ReadFile(lockPath); err == nil {
-		// Lock file exists - check if the process is still running
 		pidStr := strings.TrimSpace(string(data))
 		if pid, err := strconv.Atoi(pidStr); err == nil {
-			// Check if process is still alive
 			if process, err := os.FindProcess(pid); err == nil {
-				// On Unix, FindProcess always succeeds, so we need to send signal 0
 				if err := process.Signal(syscall.Signal(0)); err == nil {
-					// Process is still running
 					return nil, fmt.Errorf("another ccells instance is already running (PID %d)", pid)
 				}
 			}
 		}
-		// Stale lock file - remove it
 		os.Remove(lockPath)
 	}
 
-	// Create lock file with our PID
 	pid := os.Getpid()
 	if err := os.WriteFile(lockPath, []byte(strconv.Itoa(pid)), 0644); err != nil {
 		return nil, fmt.Errorf("failed to create lock file: %w", err)
@@ -118,215 +111,705 @@ func (l *lockFile) Release() {
 	}
 }
 
-// getStateDir returns the state directory for the current repo.
-// Falls back to cwd if repo ID cannot be determined.
-func getStateDir() string {
-	cwd, err := os.Getwd()
+// getRepoInfo returns the repoID, project path, and state directory.
+// When not in a git repo or state dir can't be resolved, stateDir is empty
+// and an error is returned.
+func getRepoInfo() (repoID, repoPath, stateDir string, err error) {
+	repoPath, err = os.Getwd()
 	if err != nil {
-		return cwd
+		return "", "", "", fmt.Errorf("failed to get working directory: %w", err)
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
-	gitOps := git.New(cwd)
-	repoID, err := gitOps.RepoID(ctx)
-	if err != nil || repoID == "" {
-		return cwd
-	}
-
-	stateDir, err := workstream.GetStateDir(repoID)
+	gitOps := git.New(repoPath)
+	repoID, err = gitOps.RepoID(ctx)
 	if err != nil {
-		return cwd
+		return "", repoPath, "", fmt.Errorf("not in a git repository: %w", err)
+	}
+	if repoID == "" {
+		return "", repoPath, "", fmt.Errorf("could not determine repository ID")
 	}
 
-	return stateDir
+	stateDir, err = workstream.GetStateDir(repoID)
+	if err != nil {
+		return repoID, repoPath, "", fmt.Errorf("could not determine state directory: %w", err)
+	}
+
+	return repoID, repoPath, stateDir, nil
+}
+
+// getStateDir returns the state directory for the current repo.
+// Returns an error if the repo info cannot be determined.
+func getStateDir() (string, error) {
+	_, _, stateDir, err := getRepoInfo()
+	if err != nil {
+		return "", err
+	}
+	return stateDir, nil
+}
+
+func printKeybindings() {
+	// Detect prefix from tmux (works inside tmux session)
+	prefix := "^b" // default
+	if out, err := exec.Command("tmux", "show-option", "-gv", "prefix").Output(); err == nil {
+		raw := strings.TrimSpace(string(out))
+		if strings.HasPrefix(raw, "C-") {
+			prefix = "^" + strings.TrimPrefix(raw, "C-")
+		} else if raw != "" {
+			prefix = raw
+		}
+	}
+
+	const (
+		bold    = "\033[1m"
+		dim     = "\033[2m"
+		reset   = "\033[0m"
+		cyan    = "\033[36m"
+		cyanB   = "\033[1;36m"
+		magenta = "\033[1;35m"
+		green   = "\033[1;32m"
+		gray    = "\033[90m"
+		white   = "\033[97m"
+		under   = "\033[4m"
+	)
+
+	var b strings.Builder
+	b.WriteString("\n")
+	b.WriteString(fmt.Sprintf("  %s⚡ K E Y B I N D I N G S%s\n", cyanB, reset))
+	b.WriteString(fmt.Sprintf("  %s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n", dim, reset))
+
+	// Workstream keys
+	b.WriteString(fmt.Sprintf("\n  %sWorkstreams%s\n\n", white, reset))
+	keys := []struct{ key, label string }{
+		{"n / \" / %", "Create new workstream"},
+		{"x", "Destroy workstream"},
+		{"m", "Create/merge pull request"},
+		{"Q", "Quit ccells"},
+		{"?", "Show this help"},
+	}
+	for _, k := range keys {
+		b.WriteString(fmt.Sprintf("    %s%s+%s%s  %s%s%s\n",
+			magenta, prefix, k.key, reset, gray, k.label, reset))
+	}
+
+	// Tmux navigation
+	b.WriteString(fmt.Sprintf("\n  %sNavigation%s\n\n", white, reset))
+	nav := []struct{ key, label string }{
+		{"←→↑↓", "Navigate between panes"},
+		{"z", "Zoom current pane"},
+		{"d", "Detach from session"},
+	}
+	for _, k := range nav {
+		b.WriteString(fmt.Sprintf("    %s%s+%s%s  %s%s%s\n",
+			green, prefix, k.key, reset, gray, k.label, reset))
+	}
+
+	// Pane resizing
+	b.WriteString(fmt.Sprintf("\n  %sResize Panes%s\n\n", white, reset))
+	resize := []struct{ key, label string }{
+		{"Alt+←→↑↓", "Resize in direction"},
+	}
+	for _, k := range resize {
+		b.WriteString(fmt.Sprintf("    %s%s%s  %s%s%s\n",
+			green, k.key, reset, gray, k.label, reset))
+	}
+
+	// Tmux reference
+	b.WriteString(fmt.Sprintf("\n  %s━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━%s\n", dim, reset))
+	b.WriteString(fmt.Sprintf("  %sTmux Reference%s  %s%shttps://tmuxcheatsheet.com/%s\n",
+		dim, reset, under, cyan, reset))
+
+	b.WriteString(fmt.Sprintf("\n  %sPress any key to close.%s\n", dim, reset))
+	fmt.Print(b.String())
+
+	// Read any single keypress to close (not just Enter).
+	// Put terminal in raw mode to capture a single byte.
+	if f, err := os.Open("/dev/tty"); err == nil {
+		defer f.Close()
+		// Save terminal state and set raw mode
+		rawCmd := exec.Command("stty", "raw", "-echo")
+		rawCmd.Stdin = f
+		if rawCmd.Run() == nil {
+			buf := make([]byte, 1)
+			f.Read(buf)
+			// Restore terminal
+			restoreCmd := exec.Command("stty", "-raw", "echo")
+			restoreCmd.Stdin = f
+			restoreCmd.Run()
+		}
+	} else {
+		// Fallback: wait for Enter
+		fmt.Scanln()
+	}
 }
 
 func printHelp() {
 	fmt.Printf(`ccells - Claude Cells: Run parallel Claude Code instances in Docker containers
 
 Usage:
-  ccells [options]
+  ccells [command] [options]
+
+Commands:
+  up              Start session (create + attach) [default]
+  attach          Reattach to running session
+  down            Stop session (daemon + tmux)
+  down --rm       Stop session and destroy containers
+  create          Create a new workstream
+  rm <name>       Destroy a workstream
+  pause <name>    Pause a workstream
+  unpause <name>  Resume a workstream
+  ps              List workstreams with status
+  pair <name>     Start pairing mode (live sync with local)
+  unpair          Stop pairing mode
+  status          Show pairing status
 
 Options:
   -h, --help          Show this help message
   -v, --version       Show version information
   --runtime <name>    Runtime to use: "claude" (default) or "claudesp" (experimental)
-                      Overrides runtime setting from config files
-  --repair-state      Validate and repair the state file by extracting
-                      session IDs from running containers
+  --repair-state      Validate and repair the state file
 
-Keyboard Shortcuts (in TUI):
-  n             Create new workstream
-  d             Destroy workstream (with confirmation)
-  1-9           Jump to pane by number
-  Tab/Shift+Tab Navigate between panes
-  Space         Toggle between main pane and others
-  l             Toggle layout (vertical/horizontal/grid)
-  Enter         Enter input mode (type in focused pane)
-  Esc Esc       Exit input mode (double-tap)
-  ?             Show help dialog
-  q             Quit (saves state for resume)
-
-State Management:
-  ccells automatically saves state on exit and resumes on restart.
-  If session IDs are corrupted, use --repair-state to fix them.
+Keybindings (in tmux session, prefix + key):
+  n     Create new workstream
+  x     Destroy workstream (with confirmation)
+  p     Pause workstream
+  r     Resume workstream
+  m     Create/view PR
+  ?     Show help
 
 For more information: https://github.com/STRML/claude-cells
 `)
 }
 
-func main() {
-	// Initialize logging early to prevent any log.Printf from polluting TUI
-	tui.InitLogging()
+// logFilePath is set when the log file is initialized, used by the panic handler.
+var logFilePath string
 
-	// Parse runtime flag with validation
-	var runtimeFlag string
-	args := os.Args[1:]
-	for i := 0; i < len(args); i++ {
-		if args[i] == "--runtime" {
-			// Check if value is provided
-			if i+1 >= len(args) {
-				fmt.Fprintf(os.Stderr, "Error: --runtime requires a value (one of: %v)\n", AllowedRuntimes)
-				os.Exit(1)
-			}
-			runtimeFlag = strings.ToLower(strings.TrimSpace(args[i+1]))
-			// Validate immediately
-			if runtimeFlag == "" || !isValidRuntime(runtimeFlag) {
-				fmt.Fprintf(os.Stderr, "Error: invalid runtime %q (must be one of: %v)\n", args[i+1], AllowedRuntimes)
-				os.Exit(1)
-			}
-			// Remove runtime flag from args for other processing
-			args = append(args[:i], args[i+2:]...)
-			break
-		}
-	}
-
-	// Handle command-line flags
-	if len(args) > 0 {
-		switch args[0] {
-		case "--help", "-h":
-			printHelp()
-			os.Exit(0)
-		case "--version", "-v":
-			fmt.Printf("ccells %s (%s)\n", Version, CommitHash)
-			os.Exit(0)
-		case "--repair-state":
-			if err := runStateRepair(); err != nil {
-				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-				os.Exit(1)
-			}
-			os.Exit(0)
-		}
-	}
-
-	// Acquire lock to ensure only one instance runs per repo
-	stateDir := getStateDir()
-	lock, err := acquireLock(stateDir)
+// setupLogFile creates and opens a log file in the state directory.
+// Returns a cleanup function to close the file.
+func setupLogFile(stateDir string) func() {
+	logDir := filepath.Join(stateDir, "logs")
+	os.MkdirAll(logDir, 0755)
+	logPath := filepath.Join(logDir, "ccells.log")
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		fmt.Fprintf(os.Stderr, "If the other instance crashed, delete: %s/%s\n", stateDir, lockFileName)
+		// Fall back to stderr
+		return func() {}
+	}
+	logFilePath = logPath
+	log.SetOutput(f)
+	log.SetFlags(log.LstdFlags | log.Lshortfile)
+	log.Printf("=== ccells started (pid=%d, version=%s) ===", os.Getpid(), Version)
+	return func() {
+		log.Printf("=== ccells exiting ===")
+		f.Close()
+	}
+}
+
+// printAbnormalExit prints a message about abnormal termination with the log file path.
+func printAbnormalExit(err interface{}) {
+	fmt.Fprintf(os.Stderr, "\n\033[1;31mccells terminated abnormally\033[0m\n")
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "  Error: %v\n", err)
+	}
+	if logFilePath != "" {
+		fmt.Fprintf(os.Stderr, "  Log file: %s\n", logFilePath)
+	}
+	fmt.Fprintf(os.Stderr, "\n")
+}
+
+func main() {
+	// Suppress log output to stderr unless debugging
+	log.SetOutput(os.Stderr)
+
+	// Parse global flags
+	runtimeFlag, args := parseFlags(os.Args[1:])
+
+	// Validate runtime flag early
+	if runtimeFlag != "" {
+		runtimeFlag = strings.ToLower(strings.TrimSpace(runtimeFlag))
+		if !isValidRuntime(runtimeFlag) {
+			fmt.Fprintf(os.Stderr, "Error: invalid runtime %q (must be one of: %v)\n", runtimeFlag, AllowedRuntimes)
+			os.Exit(1)
+		}
+	}
+
+	// Prevent nesting: ccells cannot run inside a ccells-managed container
+	if os.Getenv("CCELLS_SESSION") == "1" {
+		fmt.Fprintf(os.Stderr, "Error: ccells cannot run inside a ccells-managed container.\n")
+		fmt.Fprintf(os.Stderr, "You are already in a Claude Code workstream.\n")
 		os.Exit(1)
 	}
-	defer lock.Release()
 
-	// Create a cancellable context for the entire application.
-	// This context is cancelled on SIGINT/SIGTERM and propagates
-	// cancellation to all running operations.
+	// Determine command
+	cmd := parseCommand(args)
+
+	// Handle commands that don't need repo context
+	switch cmd {
+	case "help":
+		// Check for --keybindings flag (used by tmux ? popup)
+		for _, a := range args {
+			if a == "--keybindings" {
+				printKeybindings()
+				os.Exit(0)
+			}
+		}
+		printHelp()
+		os.Exit(0)
+	case "version":
+		fmt.Printf("ccells %s (%s)\n", Version, CommitHash)
+		os.Exit(0)
+	}
+
+	// Handle --repair-state (special case, not a subcommand)
+	if len(args) > 0 && args[0] == "--repair-state" {
+		if err := runStateRepair(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		os.Exit(0)
+	}
+
+	// Resolve repo info
+	repoID, repoPath, stateDir, err := getRepoInfo()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Set up log file for diagnostics
+	closeLog := setupLogFile(stateDir)
+	defer closeLog()
+
+	// Catch panics and print helpful message
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("PANIC: %v", r)
+			printAbnormalExit(r)
+			os.Exit(2)
+		}
+	}()
+
+	// Resolve runtime from flag + config
+	runtime, err := ResolveRuntime(runtimeFlag, repoPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Create cancellable context for the application
 	appCtx, appCancel := context.WithCancel(context.Background())
 	defer appCancel()
 
-	// Validate Docker prerequisites before starting
-	if err := validatePrerequisites(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-
-	// Initialize container tracker for crash recovery
-	tracker, err := docker.NewContainerTracker()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Warning: failed to initialize container tracker: %v\n", err)
-		// Continue without tracking - not fatal
-	}
-
-	// Clean up orphaned containers from crashed sessions
-	cleanupOrphanedContainers(tracker)
-
-	// Clean up orphaned worktrees (conservative - only removes empty/clean ones)
-	cleanupOrphanedWorktrees(stateDir)
-
-	// Start heartbeat goroutine to detect crashes
-	if tracker != nil {
-		go runHeartbeat(appCtx, tracker)
-	}
-
-	// Start credential refresher to keep OAuth tokens updated in containers
-	credRefresher := docker.NewCredentialRefresher(15 * time.Minute)
-	credRefresher.Start()
-	defer credRefresher.Stop()
-	tui.SetCredentialRefresher(credRefresher)
-
-	// Start git proxy server for proxying git/gh commands from containers
-	gitProxyServer := gitproxy.NewServer(func(workstreamID string, prNumber int, prURL string) {
-		// Callback when a PR is created via the proxy.
-		// Currently only logs the event. State updates happen via the gitproxy
-		// server's internal workstream tracking (UpdateWorkstream method).
-		tui.LogDebug("PR #%d created for workstream %s: %s", prNumber, workstreamID, prURL)
-	})
-	// Set callback to refresh PR status after successful push
-	gitProxyServer.SetPushCompleteCallback(func(workstreamID string) {
-		tui.RequestPRStatusRefresh(workstreamID)
-	})
-	defer gitProxyServer.Shutdown()
-	tui.SetGitProxyServer(gitProxyServer)
-
-	// Set version info for display in help dialog
-	tui.SetVersionInfo(Version, CommitHash)
-
-	// Resolve runtime from flag and config (with validation)
-	projectPath, _ := os.Getwd()
-	runtime, err := ResolveRuntime(runtimeFlag, projectPath)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-		os.Exit(1)
-	}
-	tui.SetRuntime(runtime)
-
-	app := tui.NewAppModel(appCtx)
-
-	// Set the tracker on the app so it can track container lifecycle
-	if tracker != nil {
-		tui.SetContainerTracker(tracker)
-	}
-
-	// Note: AltScreen and MouseMode are now controlled via View() in bubbletea v2
-	p := tea.NewProgram(app)
-
-	// Set the program reference so PTY sessions can send messages
-	tui.SetProgram(p)
-
-	// Set up signal handling for graceful shutdown
+	// Set up signal handling
 	sigCh := make(chan os.Signal, 1)
 	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
 	go func() {
 		<-sigCh
-		// Cancel the app context to signal all operations to stop
 		appCancel()
-		// Also tell bubbletea to quit
-		p.Quit()
 	}()
 
-	if _, err := p.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "Error running program: %v\n", err)
-		os.Exit(1)
+	// Extract subcommand args (everything after the command name)
+	cmdArgs := args
+	if len(cmdArgs) > 0 {
+		cmdArgs = cmdArgs[1:]
 	}
 
-	// Clean shutdown - remove heartbeat and clear tracking
-	if tracker != nil {
-		tracker.RemoveHeartbeat()
-		tracker.Clear()
+	// Dispatch command
+	switch cmd {
+	case "up":
+		// Validate prerequisites before starting
+		if err := validatePrerequisites(); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+		// Acquire lock
+		lock, err := acquireLock(stateDir)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			fmt.Fprintf(os.Stderr, "If the other instance crashed, delete: %s/%s\n", stateDir, lockFileName)
+			os.Exit(1)
+		}
+		defer lock.Release()
+
+		// Initialize container tracker for crash recovery
+		tracker, err := docker.NewContainerTracker()
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to initialize container tracker: %v\n", err)
+		}
+
+		// Clean up orphaned containers and worktrees
+		cleanupOrphanedContainers(tracker)
+		cleanupOrphanedWorktrees(stateDir)
+
+		// Start heartbeat
+		if tracker != nil {
+			go runHeartbeat(appCtx, tracker)
+			defer func() {
+				tracker.RemoveHeartbeat()
+				tracker.Clear()
+			}()
+		}
+
+		if err := runUp(appCtx, repoID, repoPath, stateDir, runtime); err != nil {
+			log.Printf("runUp error: %v", err)
+			printAbnormalExit(err)
+			os.Exit(1)
+		}
+
+	case "attach":
+		// Attach is equivalent to up — if the session exists, up just
+		// starts the daemon and attaches. If not, it creates everything.
+		if err := runUp(appCtx, repoID, repoPath, stateDir, runtime); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+	case "down":
+		destroyContainers := false
+		interactive := false
+		for _, arg := range cmdArgs {
+			if arg == "--rm" {
+				destroyContainers = true
+			}
+			if arg == "--interactive" {
+				interactive = true
+			}
+		}
+		if interactive {
+			m := newQuitDialog()
+			p := tea.NewProgram(m)
+			final, err := p.Run()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+			qd := final.(quitDialog)
+			if !qd.quit {
+				os.Exit(0) // user cancelled
+			}
+		}
+		if err := runDown(appCtx, repoID, stateDir, destroyContainers); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+	case "create":
+		branch := ""
+		prompt := ""
+		interactive := false
+		for i := 0; i < len(cmdArgs); i++ {
+			switch cmdArgs[i] {
+			case "--branch", "-b":
+				if i+1 < len(cmdArgs) {
+					branch = cmdArgs[i+1]
+					i++
+				}
+			case "--prompt", "-p":
+				if i+1 < len(cmdArgs) {
+					prompt = cmdArgs[i+1]
+					i++
+				}
+			case "--interactive", "-i":
+				interactive = true
+			default:
+				// Positional: treat as branch if not set
+				if branch == "" {
+					branch = cmdArgs[i]
+				}
+			}
+		}
+
+		if interactive || (branch == "" && prompt == "") {
+			// Interactive mode — show dialog via tmux popup
+			if err := runCreateInteractive(stateDir, runtime); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			if branch != "" {
+				if err := validateBranchName(branch); err != nil {
+					fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+					os.Exit(1)
+				}
+			}
+			if _, err := runCreate(stateDir, branch, prompt, runtime, false); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+		}
+
+	case "rm":
+		name := ""
+		interactive := false
+		for _, arg := range cmdArgs {
+			switch arg {
+			case "--interactive", "-i":
+				interactive = true
+			default:
+				if name == "" {
+					name = arg
+				}
+			}
+		}
+		if interactive {
+			if err := runRmInteractive(appCtx, repoID, stateDir); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			if name == "" {
+				fmt.Fprintf(os.Stderr, "Usage: ccells rm <workstream-name>\n")
+				os.Exit(1)
+			}
+			if err := runRemove(stateDir, name); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+		}
+
+	case "pause":
+		name := ""
+		if len(cmdArgs) > 0 {
+			name = cmdArgs[0]
+		}
+		if name == "" {
+			fmt.Fprintf(os.Stderr, "Usage: ccells pause <workstream-name>\n")
+			os.Exit(1)
+		}
+		if err := runPause(stateDir, name); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+	case "unpause":
+		name := ""
+		if len(cmdArgs) > 0 {
+			name = cmdArgs[0]
+		}
+		if name == "" {
+			fmt.Fprintf(os.Stderr, "Usage: ccells unpause <workstream-name>\n")
+			os.Exit(1)
+		}
+		if err := runUnpause(stateDir, name); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+	case "ps":
+		if err := runPS(appCtx, repoID); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+	case "pair":
+		name := ""
+		if len(cmdArgs) > 0 {
+			name = cmdArgs[0]
+		}
+		if name == "" {
+			fmt.Fprintf(os.Stderr, "Usage: ccells pair <workstream-name>\n")
+			os.Exit(1)
+		}
+		if err := runPair(stateDir, name); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+	case "unpair":
+		if err := runUnpair(stateDir); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+	case "status":
+		formatTmux := false
+		for _, arg := range cmdArgs {
+			if arg == "--format=tmux" {
+				formatTmux = true
+			}
+		}
+		if formatTmux {
+			if err := runStatusTmux(appCtx, repoID); err != nil {
+				// Silently fail — tmux status line should not show errors
+				fmt.Print("[ccells]")
+			}
+		} else {
+			if err := runPairStatus(stateDir); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+		}
+
+	case "merge":
+		interactive := false
+		for _, arg := range cmdArgs {
+			if arg == "--interactive" || arg == "-i" {
+				interactive = true
+			}
+		}
+		if interactive {
+			if err := runMergeInteractive(appCtx, repoID, repoPath, stateDir); err != nil {
+				fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+				os.Exit(1)
+			}
+		} else {
+			fmt.Println("Usage: ccells merge --interactive (or use prefix+m keybinding)")
+		}
+
+	case "welcome":
+		if err := runWelcome(stateDir, runtime); err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+
+	case "logs":
+		// TODO: implement logs command
+		fmt.Println("logs command not yet implemented")
+
+	default:
+		printHelp()
+		os.Exit(1)
 	}
+}
+
+// runCreateInteractive launches the interactive create dialog as a Bubble Tea program.
+// On success, the process execs into the container — the dialog pane transforms
+// into the workstream pane seamlessly.
+func runCreateInteractive(stateDir, runtime string) error {
+	m := newCreateDialog(stateDir, runtime)
+	p := tea.NewProgram(m)
+	result, err := p.Run()
+	if err != nil {
+		return err
+	}
+
+	final, ok := result.(createDialog)
+	if !ok || final.containerName == "" {
+		return nil // user cancelled or no container created
+	}
+
+	// Set tmux pane metadata so reconciliation can identify this pane
+	exec.Command("tmux", "set-option", "-p", "@ccells-workstream", final.branch).Run()
+	exec.Command("tmux", "set-option", "-p", "@ccells-container", final.containerName).Run()
+	exec.Command("tmux", "set-option", "-p", "@ccells-border-text",
+		tmux.FormatPaneBorder(final.branch, "running", 0, "")).Run()
+
+	// Exec into the container — replaces this process with docker exec.
+	// The dialog pane seamlessly becomes the workstream.
+	rt := runtime
+	if rt == "" {
+		rt = "claude"
+	}
+	dockerPath, err := exec.LookPath("docker")
+	if err != nil {
+		return fmt.Errorf("docker not found: %w", err)
+	}
+
+	// The container's settings.json has skipDangerousModePermissionPrompt: true
+	// but it's unreliable. Spawn a background auto-accepter that watches the
+	// tmux pane and sends keystrokes if the "Bypass Permissions mode" prompt appears.
+	pane := os.Getenv("TMUX_PANE")
+	if pane != "" {
+		// Background watcher: try every 1s for 15s
+		autoAcceptCmd := exec.Command("sh", "-c",
+			fmt.Sprintf(`for i in $(seq 1 15); do if tmux capture-pane -t %q -p 2>/dev/null | grep -q "Bypass Permissions mode"; then sleep 0.2; tmux send-keys -t %q Enter; exit 0; fi; sleep 1; done`,
+				pane, pane))
+		autoAcceptCmd.Start() // fire and forget
+	}
+
+	args := []string{"docker", "exec", "-it", final.containerName, rt, "--dangerously-skip-permissions"}
+	if final.prompt != "" {
+		args = append(args, final.prompt) // positional arg, NOT -p (which is pipe/print mode)
+	}
+	return syscall.Exec(dockerPath, args, os.Environ())
+}
+
+// runRmInteractive launches the interactive rm dialog as a Bubble Tea program.
+func runRmInteractive(ctx context.Context, repoID, stateDir string) error {
+	names, err := listWorkstreamNames(ctx, repoID)
+	if err != nil {
+		return err
+	}
+	m := newRmDialog(stateDir, names)
+	p := tea.NewProgram(m)
+	_, err = p.Run()
+	return err
+}
+
+// runMergeInteractive launches the interactive merge dialog as a Bubble Tea program.
+func runMergeInteractive(ctx context.Context, repoID, repoPath, stateDir string) error {
+	workstreams, err := loadMergeWorkstreams(ctx, repoID, stateDir)
+	if err != nil {
+		return err
+	}
+	m := newMergeDialog(workstreams, repoPath)
+	p := tea.NewProgram(m)
+	_, err = p.Run()
+	return err
+}
+
+// listWorkstreamNames returns workstream names from tmux panes.
+func listWorkstreamNames(ctx context.Context, repoID string) ([]string, error) {
+	socketName := fmt.Sprintf("ccells-%s", repoID)
+	client := tmux.NewClient(socketName)
+
+	panes, err := client.ListPanes(ctx, "ccells")
+	if err != nil {
+		return nil, err
+	}
+
+	var names []string
+	for _, p := range panes {
+		ws, _ := client.GetPaneOption(ctx, p.ID, "@ccells-workstream")
+		if ws != "" {
+			names = append(names, ws)
+		}
+	}
+	return names, nil
+}
+
+// runStatusTmux prints the colored workstream status to stdout.
+// tmux's #() command substitution interprets the #[...] color sequences in the output.
+func runStatusTmux(ctx context.Context, repoID string) error {
+	socketName := fmt.Sprintf("ccells-%s", repoID)
+	client := tmux.NewClient(socketName)
+
+	prefix, _ := client.Prefix(ctx)
+
+	panes, err := client.ListPanes(ctx, "ccells")
+	if err != nil {
+		return err
+	}
+
+	var workstreams []tmux.StatusWorkstream
+	for _, p := range panes {
+		ws, _ := client.GetPaneOption(ctx, p.ID, "@ccells-workstream")
+		if ws == "" {
+			continue
+		}
+
+		// Determine status from pane metadata
+		status := "running"
+		if paneStatus, _ := client.GetPaneOption(ctx, p.ID, "@ccells-status"); paneStatus == "paused" {
+			status = "paused"
+		} else if p.Dead {
+			status = "exited"
+		}
+
+		sw := tmux.StatusWorkstream{
+			Name:   ws,
+			Status: status,
+		}
+		workstreams = append(workstreams, sw)
+	}
+
+	// Print colored status line to stdout — tmux #() interprets the #[...] sequences
+	colored := tmux.FormatStatusLine(workstreams, prefix, false)
+	fmt.Print(colored)
+	return nil
 }
 
 // runHeartbeat writes heartbeat every 5 seconds until context is cancelled
@@ -335,7 +818,6 @@ func runHeartbeat(ctx context.Context, tracker *docker.ContainerTracker) {
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 
-	// Write initial heartbeat
 	tracker.WriteHeartbeat(pid)
 
 	for {
@@ -349,13 +831,12 @@ func runHeartbeat(ctx context.Context, tracker *docker.ContainerTracker) {
 }
 
 func validatePrerequisites() error {
-	// Get project path (current working directory)
 	projectPath, err := os.Getwd()
 	if err != nil {
 		return fmt.Errorf("failed to get working directory: %w", err)
 	}
 
-	// Check for devcontainer CLI - warn if not present
+	// Check for devcontainer CLI
 	cliStatus := docker.CheckDevcontainerCLI()
 	if !cliStatus.Available {
 		if docker.HasDevcontainerConfig(projectPath) {
@@ -378,22 +859,19 @@ func validatePrerequisites() error {
 	// If Docker is available but image is missing, try to build/pull it
 	if result.DockerAvailable && !result.ImageExists {
 		if result.NeedsBuild {
-			// Build from devcontainer.json
 			var buildOutput bytes.Buffer
 			buildCtx, buildCancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer buildCancel()
 
-			// Use devcontainer CLI if available for proper feature support
 			if cliStatus.Available {
 				spin := newSpinner(fmt.Sprintf("Building image '%s' with devcontainer CLI...", result.ImageName))
 				spin.Start(buildCtx)
 				baseImage, err := docker.BuildWithDevcontainerCLI(buildCtx, projectPath, &buildOutput)
 				spin.Stop()
 				if err != nil {
-					fmt.Println(buildOutput.String()) // Show output on error
+					fmt.Println(buildOutput.String())
 					return fmt.Errorf("failed to build with devcontainer CLI: %w", err)
 				}
-				// Build enhanced image with Claude Code on top
 				spin = newSpinner("Adding Claude Code to image...")
 				spin.Start(buildCtx)
 				err = docker.BuildEnhancedImage(buildCtx, baseImage, result.ImageName, &buildOutput)
@@ -403,7 +881,6 @@ func validatePrerequisites() error {
 					return fmt.Errorf("failed to build enhanced image: %w", err)
 				}
 			} else {
-				// Fall back to simple docker build
 				devCfg, err := docker.LoadDevcontainerConfig(projectPath)
 				if err != nil {
 					return fmt.Errorf("failed to load devcontainer config: %w", err)
@@ -414,14 +891,13 @@ func validatePrerequisites() error {
 				err = docker.BuildProjectImage(buildCtx, projectPath, devCfg, &buildOutput)
 				spin.Stop()
 				if err != nil {
-					fmt.Println(buildOutput.String()) // Show output on error
+					fmt.Println(buildOutput.String())
 					return fmt.Errorf("failed to build project image: %w", err)
 				}
 			}
 
-			fmt.Printf("✓ Image '%s' built successfully\n", result.ImageName)
+			fmt.Printf("Image '%s' built successfully\n", result.ImageName)
 		} else if result.ImageName == docker.GetBaseImageName() {
-			// Build the default ccells image (hash-tagged for content-based rebuilds)
 			var buildOutput bytes.Buffer
 			buildCtx, buildCancel := context.WithTimeout(context.Background(), 10*time.Minute)
 			defer buildCancel()
@@ -431,17 +907,16 @@ func validatePrerequisites() error {
 			err := docker.BuildImage(buildCtx, &buildOutput)
 			spin.Stop()
 			if err != nil {
-				fmt.Println(buildOutput.String()) // Show output on error
+				fmt.Println(buildOutput.String())
 				return fmt.Errorf("failed to build image: %w", err)
 			}
 
-			fmt.Printf("✓ Image '%s' built successfully\n", result.ImageName)
+			fmt.Printf("Image '%s' built successfully\n", result.ImageName)
 		} else {
-			// External image from devcontainer.json - prompt to pull
 			return fmt.Errorf("image '%s' from devcontainer.json not found. Run: docker pull %s", result.ImageName, result.ImageName)
 		}
 
-		// Re-validate to confirm (use fresh context since build may have taken a while)
+		// Re-validate
 		revalidateCtx, revalidateCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer revalidateCancel()
 		result, err = docker.ValidatePrerequisites(revalidateCtx, projectPath)
@@ -462,24 +937,18 @@ func validatePrerequisites() error {
 }
 
 // cleanupOrphanedContainers removes ccells containers from previous crashed sessions.
-// It uses the container tracker (if available), state file, and worktree existence to find which containers should be kept.
-// IMPORTANT: Never removes containers that have corresponding worktrees (work in progress).
 func cleanupOrphanedContainers(tracker *docker.ContainerTracker) {
-	// Get current working directory for project name
 	cwd, err := os.Getwd()
 	if err != nil {
-		return // Silently skip if we can't get cwd
+		return
 	}
 
-	// Get project name from directory
 	projectName := filepath.Base(cwd)
+	stateDir, err := getStateDir()
+	if err != nil {
+		return
+	}
 
-	// Use the new state directory
-	stateDir := getStateDir()
-
-	// Collect known container IDs from multiple sources
-
-	// 1. From state file (for graceful shutdown resume)
 	var knownIDs []string
 	if workstream.StateExists(stateDir) {
 		state, err := workstream.LoadState(stateDir)
@@ -492,7 +961,6 @@ func cleanupOrphanedContainers(tracker *docker.ContainerTracker) {
 		}
 	}
 
-	// 2. From tracker - if heartbeat is stale, these are orphaned from crash
 	var orphanedFromCrash []docker.TrackedContainer
 	if tracker != nil {
 		orphanedFromCrash = tracker.GetOrphanedContainers()
@@ -501,26 +969,22 @@ func cleanupOrphanedContainers(tracker *docker.ContainerTracker) {
 		}
 	}
 
-	// 3. Get list of existing worktrees - these should NEVER be cleaned up
 	existingWorktrees := listExistingWorktrees()
 
-	// Create docker client and clean up orphaned containers
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
 	client, err := docker.NewClient()
 	if err != nil {
-		return // Silently skip if we can't connect to Docker
+		return
 	}
 	defer client.Close()
 
-	// Clean up containers that aren't in knownIDs (from state file) and don't have worktrees
 	removed, err := client.CleanupOrphanedContainers(ctx, projectName, knownIDs, existingWorktrees)
 	if err == nil && removed > 0 {
 		fmt.Printf("Cleaned up %d orphaned container(s) from previous session\n", removed)
 	}
 
-	// Clean up orphaned container configs (configs for containers that no longer exist)
 	containers, err := client.ListDockerTUIContainers(ctx)
 	if err == nil {
 		existingContainerNames := make(map[string]bool)
@@ -533,7 +997,6 @@ func cleanupOrphanedContainers(tracker *docker.ContainerTracker) {
 		}
 	}
 
-	// Clear the tracker since we've handled orphaned containers
 	if tracker != nil && len(orphanedFromCrash) > 0 {
 		tracker.Clear()
 	}
@@ -544,7 +1007,7 @@ func listExistingWorktrees() []string {
 	worktreeDir := "/tmp/ccells/worktrees"
 	entries, err := os.ReadDir(worktreeDir)
 	if err != nil {
-		return nil // No worktrees or can't read
+		return nil
 	}
 
 	var worktrees []string
@@ -557,25 +1020,18 @@ func listExistingWorktrees() []string {
 }
 
 // cleanupOrphanedWorktrees removes worktrees that are no longer associated with any workstream.
-// This is very conservative - only removes worktrees that:
-// 1. Are NOT in the state file (no workstream references them)
-// 2. Have no corresponding running container
-// 3. Have a clean working tree (no uncommitted changes)
-// 4. Branch has no commits beyond the base branch
 func cleanupOrphanedWorktrees(stateDir string) {
 	worktreeDir := "/tmp/ccells/worktrees"
 	entries, err := os.ReadDir(worktreeDir)
 	if err != nil {
-		return // No worktrees directory
+		return
 	}
 
-	// Load state to see which worktrees are known
 	knownWorktrees := make(map[string]bool)
 	if workstream.StateExists(stateDir) {
 		state, err := workstream.LoadState(stateDir)
 		if err == nil {
 			for _, ws := range state.Workstreams {
-				// Mark by sanitized branch name (worktree directory name)
 				if ws.BranchName != "" {
 					safeName := strings.ReplaceAll(ws.BranchName, "/", "-")
 					safeName = strings.ReplaceAll(safeName, " ", "-")
@@ -585,14 +1041,12 @@ func cleanupOrphanedWorktrees(stateDir string) {
 		}
 	}
 
-	// Get current working directory for git operations
 	cwd, err := os.Getwd()
 	if err != nil {
 		return
 	}
 	projectName := filepath.Base(cwd)
 
-	// Get list of running ccells containers for this project
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -602,7 +1056,6 @@ func cleanupOrphanedWorktrees(stateDir string) {
 		containers, err := client.ListDockerTUIContainersForProject(ctx, projectName)
 		if err == nil {
 			for _, cont := range containers {
-				// Container names are like "ccells-projectname-branchname"
 				branchName := extractBranchFromContainerName(cont.Name, projectName)
 				if branchName != "" {
 					runningContainerBranches[branchName] = true
@@ -623,55 +1076,45 @@ func cleanupOrphanedWorktrees(stateDir string) {
 		worktreeName := entry.Name()
 		worktreePath := filepath.Join(worktreeDir, worktreeName)
 
-		// Safety check 1: Skip if in state file
 		if knownWorktrees[worktreeName] {
 			continue
 		}
-
-		// Safety check 2: Skip if there's a running container for this branch
 		if runningContainerBranches[worktreeName] {
 			continue
 		}
 
-		// Safety check 3: Check if worktree has uncommitted changes
 		worktreeGit := git.New(worktreePath)
 		hasChanges, err := worktreeGit.HasUncommittedChanges(ctx)
 		if err != nil {
-			continue // Error checking - skip to be safe
+			continue
 		}
 		if hasChanges {
-			continue // Has uncommitted changes - skip
+			continue
 		}
 
-		// Safety check 4: Check if branch has commits beyond base
-		// First, get the branch name from the worktree
 		branchName, err := worktreeGit.CurrentBranch(ctx)
 		if err != nil {
-			continue // Can't determine branch - skip to be safe
+			continue
 		}
 
 		hasCommits, err := mainRepo.BranchHasCommits(ctx, branchName)
 		if err != nil {
-			continue // Error checking - skip to be safe
+			continue
 		}
 		if hasCommits {
-			continue // Has commits - skip (user may want to keep)
+			continue
 		}
 
-		// All safety checks passed - safe to remove
-		// First remove from git worktree list
 		if err := mainRepo.RemoveWorktree(ctx, worktreePath); err != nil {
-			// Log but continue - the directory removal might still work
+			// Log but continue
 		}
 
-		// Then remove the directory
 		if err := os.RemoveAll(worktreePath); err == nil {
 			cleaned++
 		}
 
-		// Also delete the empty branch
 		if err := mainRepo.DeleteBranch(ctx, branchName); err != nil {
-			// Ignore - branch might not exist or be the current branch
+			// Ignore
 		}
 	}
 
@@ -681,13 +1124,11 @@ func cleanupOrphanedWorktrees(stateDir string) {
 }
 
 // extractBranchFromContainerName extracts the branch name from a container name.
-// Container names follow the pattern: ccells-<projectname>-<branchname>
 func extractBranchFromContainerName(containerName, projectName string) string {
 	prefix := "ccells-" + projectName + "-"
 	if strings.HasPrefix(containerName, prefix) {
 		return strings.TrimPrefix(containerName, prefix)
 	}
-	// Also try with leading slash (Docker sometimes includes it)
 	prefix = "/ccells-" + projectName + "-"
 	if strings.HasPrefix(containerName, prefix) {
 		return strings.TrimPrefix(containerName, prefix)
@@ -697,16 +1138,16 @@ func extractBranchFromContainerName(containerName, projectName string) string {
 
 // runStateRepair validates and repairs the state file by extracting session IDs from running containers
 func runStateRepair() error {
-	// Use the same state directory logic as the main app
-	stateDir := getStateDir()
+	stateDir, err := getStateDir()
+	if err != nil {
+		return fmt.Errorf("failed to determine state directory: %w", err)
+	}
 
-	// Check if state file exists
 	if !workstream.StateExists(stateDir) {
 		fmt.Printf("No state file found at %s. Nothing to repair.\n", stateDir)
 		return nil
 	}
 
-	// Load current state
 	state, err := workstream.LoadState(stateDir)
 	if err != nil {
 		return fmt.Errorf("failed to load state: %w", err)
@@ -719,7 +1160,6 @@ func runStateRepair() error {
 
 	fmt.Printf("Found %d workstream(s) in state file\n", len(state.Workstreams))
 
-	// Convert saved workstreams to full workstreams for repair
 	var workstreams []*workstream.Workstream
 	for _, saved := range state.Workstreams {
 		ws := workstream.NewWithID(saved.ID, saved.BranchName, saved.Prompt)
@@ -731,18 +1171,20 @@ func runStateRepair() error {
 		workstreams = append(workstreams, ws)
 	}
 
-	// Show current state
 	fmt.Println("\nCurrent state:")
 	for i, ws := range workstreams {
 		sessionID := ws.GetClaudeSessionID()
 		if sessionID == "" {
 			sessionID = "(missing)"
 		}
+		containerShort := ws.ContainerID
+		if len(containerShort) > 12 {
+			containerShort = containerShort[:12]
+		}
 		fmt.Printf("  %d. %s\n     Container: %s\n     Session ID: %s\n",
-			i+1, ws.Title, ws.ContainerID[:12], sessionID)
+			i+1, ws.Title, containerShort, sessionID)
 	}
 
-	// Run validation and repair
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -755,21 +1197,23 @@ func runStateRepair() error {
 	fmt.Printf("\nResult: %s\n", result.Summary())
 
 	if result.WasRepaired() {
-		// Save the repaired state
 		if err := workstream.SaveState(stateDir, workstreams, state.FocusedIndex, state.Layout); err != nil {
 			return fmt.Errorf("failed to save repaired state: %w", err)
 		}
 		fmt.Println("State file updated successfully.")
 
-		// Show updated state
 		fmt.Println("\nUpdated state:")
 		for i, ws := range workstreams {
 			sessionID := ws.GetClaudeSessionID()
 			if sessionID == "" {
 				sessionID = "(missing)"
 			}
+			containerShort := ws.ContainerID
+			if len(containerShort) > 12 {
+				containerShort = containerShort[:12]
+			}
 			fmt.Printf("  %d. %s\n     Container: %s\n     Session ID: %s\n",
-				i+1, ws.Title, ws.ContainerID[:12], sessionID)
+				i+1, ws.Title, containerShort, sessionID)
 		}
 	} else if result.IsCorrupted() {
 		fmt.Println("\nWarning: Some session IDs could not be recovered.")

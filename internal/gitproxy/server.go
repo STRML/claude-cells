@@ -3,6 +3,8 @@ package gitproxy
 import (
 	"bufio"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -86,6 +88,28 @@ func shortContainerID(id string) string {
 	return id
 }
 
+// maxSocketPath is the maximum Unix socket path length on macOS (sun_path = 104).
+const maxSocketPath = 104
+
+// SafeSocketDirName returns a directory name for the container that keeps
+// the full socket path under the macOS 104-char Unix socket limit.
+// Long names are truncated with a short hash suffix for uniqueness.
+func SafeSocketDirName(baseDir, containerID string) string {
+	// Full path: baseDir/containerID/git.sock
+	overhead := len(baseDir) + 1 + len("/git.sock") // +1 for separator
+	maxName := maxSocketPath - overhead
+	if maxName < 16 {
+		maxName = 16 // minimum reasonable length
+	}
+	if len(containerID) <= maxName {
+		return containerID
+	}
+	// Truncate and append short hash for uniqueness
+	hash := sha256.Sum256([]byte(containerID))
+	suffix := hex.EncodeToString(hash[:4]) // 8 hex chars
+	return containerID[:maxName-9] + "-" + suffix
+}
+
 // StartSocket creates and starts a socket for a container.
 func (s *Server) StartSocket(ctx context.Context, containerID string, ws WorkstreamInfo) (string, error) {
 	s.mu.Lock()
@@ -96,8 +120,9 @@ func (s *Server) StartSocket(ctx context.Context, containerID string, ws Workstr
 		return handler.socketPath, nil
 	}
 
-	// Create socket directory
-	socketDir := filepath.Join(s.baseDir, containerID)
+	// Create socket directory with a safe name (macOS has 104-char socket path limit)
+	dirName := SafeSocketDirName(s.baseDir, containerID)
+	socketDir := filepath.Join(s.baseDir, dirName)
 	if err := os.MkdirAll(socketDir, 0755); err != nil {
 		return "", fmt.Errorf("failed to create socket directory: %w", err)
 	}

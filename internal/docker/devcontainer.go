@@ -502,6 +502,9 @@ RUN curl -fsSL https://claude.ai/install.sh | bash
 	// Add injections from config
 	dfCfg := LoadDockerfileConfig("")
 	if len(dfCfg.Inject) > 0 {
+		// Ensure npm is available for injected commands that may need it
+		dockerfile += "\n# Ensure npm is available for injected commands\n"
+		dockerfile += "RUN command -v npm || (apt-get update && apt-get install -y nodejs npm && rm -rf /var/lib/apt/lists/*) || (apk add --no-cache nodejs npm) || true\n"
 		dockerfile += "\n# Injected from ~/.claude-cells/config.yaml\n"
 		for _, cmd := range dfCfg.Inject {
 			dockerfile += fmt.Sprintf("RUN %s\n", cmd)
